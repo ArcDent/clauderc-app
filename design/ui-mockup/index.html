@@ -1,0 +1,1453 @@
+<title>clauderc 界面稿</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0&icon_names=account_tree,add,alt_route,arrow_back,arrow_upward,battery_full,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,delete,description,dns,download,edit,error,expand_more,folder,image,lock,more_vert,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,signal_cellular_alt,stop,terminal,upload,warning,wifi&display=block">
+<style>
+:root {
+  /* 布局：大留白、大号细体标题、不套卡片的平铺列表。全稿只有一种颜色：钴蓝，只留给「等你拍板」的地方。 */
+  /* APP 主题：--c- --fs- --sp- --r- --font- 开头的变量与 Compose 主题一一对应，Android 实现照抄取值。 */
+  --c-bg: #FFFFFF;
+  --c-sheet: #FFFFFF;
+  --c-surface: #F3F3F3;
+  --c-surface-2: #E7E7E7;
+  --c-line: #ECECEC;
+  --c-fg: #111111;
+  --c-fg-2: #5E5E5E;
+  --c-fg-3: #9F9F9F;
+  --c-accent: #2A45E0;
+  --c-on-accent: #FFFFFF;
+  --c-danger: #C5362B;
+  --c-add-bg: #EAF6EC;
+  --c-add-fg: #1E7A34;
+  --c-del-bg: #FCECEA;
+  --c-del-fg: #B3261E;
+  --c-inverse: #2A2A2A;
+  --c-on-inverse: #F2F2F2;
+  --c-scrim: rgba(0, 0, 0, 0.32);
+  --c-camera: #000000;
+  --c-on-camera: #FFFFFF;
+  --c-lane-1: #111111;
+  --c-lane-2: #2A45E0;
+  --c-lane-3: #A8A8A8;
+
+  --font-ui: "Roboto", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+  --font-mono: "Roboto Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --fs-display: 32px;
+  --fs-headline: 24px;
+  --fs-title: 20px;
+  --fs-body: 16px;
+  --fs-label: 14px;
+  --fs-caption: 12px;
+  --fs-mono: 13px;
+  --fs-mono-sm: 12px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-page: 24px;
+  --r-sm: 8px;
+  --r-md: 16px;
+  --r-lg: 28px;
+  --r-pill: 999px;
+
+  /* 审阅页本身，不属于 APP 主题 */
+  --desk-bg: #F4F4F4;
+  --desk-fg: #111111;
+  --desk-fg-2: #6B6B6B;
+  --desk-fg-3: #A6A6A6;
+  --desk-line: #E2E2E2;
+  --bezel: #111111;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --c-bg: #000000;
+    --c-sheet: #161616;
+    --c-surface: #171717;
+    --c-surface-2: #262626;
+    --c-line: #1F1F1F;
+    --c-fg: #F1F1F1;
+    --c-fg-2: #9C9C9C;
+    --c-fg-3: #626262;
+    --c-accent: #8395FF;
+    --c-on-accent: #060B30;
+    --c-danger: #FF7B6F;
+    --c-add-bg: #0B1C10;
+    --c-add-fg: #87D697;
+    --c-del-bg: #24100E;
+    --c-del-fg: #FF8B81;
+    --c-inverse: #E6E6E6;
+    --c-on-inverse: #111111;
+    --c-scrim: rgba(0, 0, 0, 0.6);
+    --c-lane-1: #F1F1F1;
+    --c-lane-2: #8395FF;
+    --c-lane-3: #6C6C6C;
+    --desk-bg: #0B0B0B;
+    --desk-fg: #EDEDED;
+    --desk-fg-2: #8E8E8E;
+    --desk-fg-3: #575757;
+    --desk-line: #222222;
+    --bezel: #2A2A2A;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --c-bg: #000000;
+  --c-sheet: #161616;
+  --c-surface: #171717;
+  --c-surface-2: #262626;
+  --c-line: #1F1F1F;
+  --c-fg: #F1F1F1;
+  --c-fg-2: #9C9C9C;
+  --c-fg-3: #626262;
+  --c-accent: #8395FF;
+  --c-on-accent: #060B30;
+  --c-danger: #FF7B6F;
+  --c-add-bg: #0B1C10;
+  --c-add-fg: #87D697;
+  --c-del-bg: #24100E;
+  --c-del-fg: #FF8B81;
+  --c-inverse: #E6E6E6;
+  --c-on-inverse: #111111;
+  --c-scrim: rgba(0, 0, 0, 0.6);
+  --c-lane-1: #F1F1F1;
+  --c-lane-2: #8395FF;
+  --c-lane-3: #6C6C6C;
+  --desk-bg: #0B0B0B;
+  --desk-fg: #EDEDED;
+  --desk-fg-2: #8E8E8E;
+  --desk-fg-3: #575757;
+  --desk-line: #222222;
+  --bezel: #2A2A2A;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--desk-bg); color: var(--desk-fg); font-family: var(--font-ui); font-size: 14px; -webkit-font-smoothing: antialiased; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+.mono { font-family: var(--font-mono); }
+.ms {
+  font-family: "Material Symbols Outlined"; font-weight: normal; font-style: normal; font-size: 24px; line-height: 1;
+  letter-spacing: normal; text-transform: none; display: inline-block; white-space: nowrap; direction: ltr;
+  font-feature-settings: "liga"; -webkit-font-smoothing: antialiased; flex: none; user-select: none;
+}
+
+/* ---------- 审阅页 ---------- */
+.review {
+  display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 56px;
+  max-width: 1080px; margin: 0 auto; padding-block: 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.desk { position: sticky; top: 40px; align-self: start; max-height: calc(100vh - 80px); display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.desk h1 { margin: 0; font-size: 22px; font-weight: 400; letter-spacing: -0.01em; }
+.themes { display: flex; gap: 16px; font-size: 13px; }
+.themes button { border: 0; background: none; padding: 0 0 3px; color: var(--desk-fg-3); border-bottom: 1px solid transparent; }
+.themes button[aria-pressed="true"] { color: var(--desk-fg); border-bottom-color: var(--desk-fg); }
+.dir-list { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 20px; padding-right: 4px; }
+.dir-group h2 { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: var(--desk-fg-3); }
+.dir-group ol { list-style: none; margin: 0; padding: 0; }
+.dir-group button { width: 100%; text-align: left; border: 0; background: none; padding: 4px 0; font-size: 13px; color: var(--desk-fg-2); display: flex; gap: 10px; align-items: baseline; }
+.dir-group button:hover { color: var(--desk-fg); }
+.dir-group button[aria-current="true"] { color: var(--desk-fg); font-weight: 500; }
+.dir-group .n { font-family: var(--font-mono); font-size: 11px; color: var(--desk-fg-3); width: 18px; flex: none; font-variant-numeric: tabular-nums; }
+.dir-select { display: none; width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--desk-line); background: var(--desk-bg); }
+.stage { display: flex; flex-direction: column; align-items: center; gap: 24px; min-width: 0; }
+.caption { width: 408px; max-width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.cap-top { display: flex; align-items: center; gap: 12px; }
+.cap-top h2 { margin: 0; font-size: 18px; font-weight: 500; flex: 1; min-width: 0; }
+.step { border: 0; background: none; width: 28px; height: 28px; display: grid; place-items: center; color: var(--desk-fg-2); border-radius: 50%; }
+.step:hover { background: var(--desk-line); }
+.step .ms { font-size: 20px; }
+
+/* ---------- 手机外框 ---------- */
+.phone { width: 408px; max-width: 100%; padding: 9px; border-radius: 52px; background: var(--bezel); }
+.device {
+  width: 390px; max-width: 100%; height: 844px; border-radius: 43px; overflow: hidden;
+  background: var(--c-bg); color: var(--c-fg); font-family: var(--font-ui); font-size: var(--fs-body);
+  display: flex; flex-direction: column; position: relative;
+}
+.statusbar { flex: none; height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 6px 26px 0 30px; font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums; position: relative; z-index: 2; }
+.statusbar .ms { font-size: 16px; }
+.sb-icons { display: flex; gap: 4px; align-items: center; }
+.device.cam-mode .statusbar { color: var(--c-on-camera); background: var(--c-camera); }
+.app { flex: 1; min-height: 0; position: relative; }
+.gesture { flex: none; height: 22px; display: grid; place-items: center; }
+.gesture::before { content: ""; width: 108px; height: 4px; border-radius: 2px; background: var(--c-fg); opacity: 0.3; }
+.device.cam-mode .gesture { background: var(--c-camera); }
+.device.cam-mode .gesture::before { background: var(--c-on-camera); opacity: 0.5; }
+#device.cam-mode:has(.cam-sheet:not([hidden])) .gesture { background: var(--c-sheet); }
+#device.cam-mode:has(.cam-sheet:not([hidden])) .gesture::before { background: var(--c-fg); opacity: 0.3; }
+.device:has(#scrim:not([hidden])) .statusbar, .device:has(#scrim:not([hidden])) .gesture { box-shadow: inset 0 0 0 100px var(--c-scrim); }
+#device:has(.sheet:not([hidden])) .gesture { background: var(--c-sheet); box-shadow: none; }
+
+/* ---------- APP 通用 ---------- */
+.screen { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--c-bg); }
+.content { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.appbar { flex: none; height: 56px; display: flex; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-1); }
+.appbar .grow { flex: 1; }
+.bar-title { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: var(--sp-1); }
+.bar-title h1 { margin: 0; font-size: 18px; font-weight: 400; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar-sub { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-caption); color: var(--c-fg-2); white-space: nowrap; overflow: hidden; min-width: 0; }
+.bar-sub button { border: 0; background: none; padding: 0; color: inherit; display: inline-flex; align-items: center; gap: 0; font-size: inherit; min-width: 0; max-width: 100%; }
+.bar-sub button > span:not(.ms) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-sub .ms { font-size: 16px; color: var(--c-fg-3); }
+.icon-btn { flex: none; width: 48px; height: 48px; border-radius: 50%; border: 0; background: none; display: grid; place-items: center; color: var(--c-fg); }
+.icon-btn:hover { background: var(--c-surface); }
+.icon-btn:disabled { color: var(--c-fg-3); cursor: not-allowed; background: none; }
+.icon-btn.sm { width: 40px; height: 40px; }
+.icon-btn.sm .ms { font-size: 20px; }
+.hero { padding: var(--sp-2) var(--sp-page) var(--sp-6); }
+.hero h1 { margin: 0; font-size: var(--fs-display); font-weight: 300; letter-spacing: -0.02em; line-height: 1.2; text-wrap: balance; }
+.hero p { margin: var(--sp-2) 0 0; font-size: var(--fs-label); color: var(--c-fg-2); display: flex; align-items: center; gap: var(--sp-2); }
+.btn { border: 0; border-radius: var(--r-pill); height: 48px; padding: 0 var(--sp-6); font-size: var(--fs-label); font-weight: 500; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); letter-spacing: 0.01em; }
+.btn.accent { background: var(--c-accent); color: var(--c-on-accent); }
+.btn.ink { background: var(--c-fg); color: var(--c-bg); }
+.btn.tonal { background: var(--c-surface); color: var(--c-fg); }
+.btn.outline { background: none; color: var(--c-fg); box-shadow: inset 0 0 0 1px var(--c-surface-2); }
+.btn.block { width: 100%; }
+.btn:disabled { background: var(--c-surface); color: var(--c-fg-3); cursor: not-allowed; box-shadow: none; }
+.btn .ms { font-size: 20px; }
+.tbtn { border: 0; background: none; height: 40px; padding: 0 var(--sp-3); border-radius: var(--r-pill); font-size: var(--fs-label); font-weight: 500; color: var(--c-accent); }
+.tbtn.quiet { color: var(--c-fg-2); }
+.tbtn.danger { color: var(--c-danger); }
+.tbtn:hover { background: var(--c-surface); }
+.snackbar { position: absolute; left: var(--sp-3); right: var(--sp-3); bottom: var(--sp-3); z-index: 30; display: flex; align-items: center; gap: var(--sp-3); min-height: 48px; padding: var(--sp-3) var(--sp-4); border-radius: 4px; background: var(--c-inverse); color: var(--c-on-inverse); font-size: var(--fs-label); line-height: 1.45; }
+.snackbar.lift { bottom: 84px; }
+
+/* 状态符号：圆点、圆环、短横 */
+.glyph { flex: none; width: 10px; height: 10px; display: inline-block; position: relative; }
+.glyph::before { content: ""; position: absolute; inset: 0; margin: auto; border-radius: 50%; }
+.g-need::before { width: 8px; height: 8px; background: var(--c-accent); }
+.g-work::before { width: 10px; height: 10px; border: 1.5px solid var(--c-fg-2); border-right-color: transparent; animation: spin 0.9s linear infinite; }
+.g-idle::before { width: 8px; height: 8px; box-shadow: inset 0 0 0 1.5px var(--c-fg-3); }
+.g-stop::before { width: 9px; height: 1.5px; border-radius: 1px; background: var(--c-fg-3); }
+.g-on::before { width: 6px; height: 6px; background: var(--c-fg); }
+.need { color: var(--c-accent); }
+.spin { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent; animation: spin 0.9s linear infinite; flex: none; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes scan { 0% { transform: translateY(0); } 100% { transform: translateY(220px); } }
+@media (prefers-reduced-motion: reduce) { .spin, .g-work::before, .scanline { animation: none !important; } }
+
+/* ---------- 配对 ---------- */
+.cam { flex: 1; background: var(--c-camera); color: var(--c-on-camera); display: flex; flex-direction: column; align-items: center; padding: var(--sp-8) var(--sp-page) var(--sp-6); gap: var(--sp-6); overflow: hidden; }
+.cam-title { margin: var(--sp-4) 0 0; font-size: var(--fs-headline); font-weight: 300; letter-spacing: -0.01em; }
+.vf { position: relative; width: 240px; height: 240px; max-width: 100%; border: 0; background: none; padding: 0; color: var(--c-on-camera); margin-top: var(--sp-6); }
+.vf i { position: absolute; width: 28px; height: 28px; border-color: currentColor; border-style: solid; border-width: 0; }
+.vf .tl { top: 0; left: 0; border-top-width: 2px; border-left-width: 2px; border-top-left-radius: 14px; }
+.vf .tr { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; border-top-right-radius: 14px; }
+.vf .bl { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; border-bottom-left-radius: 14px; }
+.vf .br { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; border-bottom-right-radius: 14px; }
+.scanline { position: absolute; left: 16px; right: 16px; top: 10px; height: 1px; background: var(--c-on-camera); opacity: 0.55; animation: scan 2.6s ease-in-out infinite alternate; }
+.cam-hint { margin: var(--sp-6) 0 0; font-size: var(--fs-label); opacity: 0.85; text-align: center; line-height: 1.7; }
+.cam-hint .mono { font-size: var(--fs-mono); padding: 2px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.12); }
+.cam-fine { margin: 0; font-size: var(--fs-caption); opacity: 0.5; }
+.cam-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; background: var(--c-sheet); color: var(--c-fg); border-radius: var(--r-lg) var(--r-lg) 0 0; padding: var(--sp-6) var(--sp-page) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-3); }
+.cam-sheet h2 { margin: 0; font-size: var(--fs-headline); font-weight: 400; }
+.cam-sheet p { margin: 0; font-size: var(--fs-label); line-height: 1.65; color: var(--c-fg-2); }
+.cam-sheet .mono { font-size: var(--fs-mono-sm); color: var(--c-fg); }
+.cam-sheet .btn { margin-top: var(--sp-3); }
+
+/* ---------- 列表 ---------- */
+.list { display: flex; flex-direction: column; }
+.row { flex: 1; min-width: 0; border: 0; background: none; text-align: left; display: flex; align-items: flex-start; gap: var(--sp-4); padding: 14px 0 14px var(--sp-page); }
+.row:hover { background: var(--c-surface); }
+.row > .glyph, .row > .ms { margin-top: 6px; }
+.row > .ms { margin-top: 0; color: var(--c-fg-2); }
+.row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.row-l1 { display: flex; align-items: baseline; gap: var(--sp-3); }
+.row-title { flex: 1; min-width: 0; font-size: var(--fs-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-l1 time { font-size: var(--fs-caption); color: var(--c-fg-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.row-l2 { font-size: var(--fs-label); color: var(--c-fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-l2 .mono { font-size: var(--fs-mono-sm); }
+.row-l3 { font-family: var(--font-mono); font-size: var(--fs-mono-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srow { display: flex; align-items: center; padding-right: var(--sp-2); }
+.srow.dim .row-title { color: var(--c-fg-2); }
+.row.off .row-title, .row.off > .ms { color: var(--c-fg-3); }
+.row .chev { color: var(--c-fg-3); margin: 0 var(--sp-3) 0 0; align-self: center; }
+.gh { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-6) var(--sp-2) var(--sp-1) var(--sp-page); }
+.gh-name { border: 0; background: none; padding: 0; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-label); font-weight: 500; color: var(--c-fg); min-width: 0; }
+.gh-name .ms { font-size: 16px; color: var(--c-fg-3); }
+.gh-name.mono { font-size: var(--fs-mono); }
+.gh-dom { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-mono-sm); color: var(--c-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gh-dom.plain { font-family: var(--font-ui); font-size: var(--fs-caption); }
+.g-empty { margin: 0; padding: var(--sp-2) var(--sp-page) var(--sp-3); font-size: var(--fs-label); color: var(--c-fg-3); }
+.foot { margin: 0; padding: var(--sp-8) var(--sp-page); font-size: var(--fs-caption); color: var(--c-fg-3); line-height: 1.6; }
+.status-line { flex: none; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-page); font-size: var(--fs-label); color: var(--c-fg-2); border-bottom: 1px solid var(--c-line); }
+.pull { flex: none; display: flex; justify-content: center; padding: var(--sp-2) 0; }
+.pull span { width: 36px; height: 36px; border-radius: 50%; background: var(--c-sheet); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); display: grid; place-items: center; color: var(--c-fg); }
+
+/* ---------- 新建会话 ---------- */
+.form { padding: 0 var(--sp-page) var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-6); }
+.tier-line { font-size: var(--fs-label); color: var(--c-fg-2); line-height: 1.6; }
+.tier-line .mono { font-size: var(--fs-mono-sm); color: var(--c-fg-3); }
+.field { display: flex; flex-direction: column; gap: var(--sp-2); }
+.field label { font-size: var(--fs-caption); color: var(--c-fg-2); }
+.input { width: 100%; border: 0; border-bottom: 1px solid var(--c-surface-2); border-radius: 0; background: none; padding: 10px 0; font-size: var(--fs-body); color: var(--c-fg); }
+.input::placeholder { color: var(--c-fg-3); }
+.input.mono { font-size: 15px; }
+.input:focus { outline: none; border-bottom: 2px solid var(--c-accent); padding-bottom: 9px; }
+.input.error, .input.error:focus { border-bottom: 2px solid var(--c-danger); padding-bottom: 9px; }
+textarea.input { resize: none; line-height: 1.5; }
+.ferr { font-size: var(--fs-caption); color: var(--c-danger); }
+.recent { list-style: none; margin: var(--sp-2) 0 0; padding: 0; }
+.recent button { width: 100%; border: 0; background: none; text-align: left; display: flex; align-items: center; gap: var(--sp-4); padding: 10px 0; }
+.recent .ms { color: var(--c-fg-3); }
+.recent button[aria-checked="true"] .ms { color: var(--c-accent); }
+.r-path { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.r-path b { font-size: 15px; font-weight: 400; }
+.r-path span { font-family: var(--font-mono); font-size: 11px; color: var(--c-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent time { font-size: var(--fs-caption); color: var(--c-fg-3); white-space: nowrap; }
+.more-link { display: block; padding: var(--sp-2) 0 0 40px; font-size: var(--fs-label); color: var(--c-fg-2); }
+
+/* ---------- 聊天 ---------- */
+.msgs { padding: var(--sp-4) var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-2); }
+.hist-top { align-self: center; color: var(--c-fg-3); padding: var(--sp-1) 0 var(--sp-2); }
+.day { align-self: center; font-size: var(--fs-caption); color: var(--c-fg-3); padding: var(--sp-2) 0; }
+.bubble { max-width: 82%; padding: 10px 16px; border-radius: 22px; line-height: 1.55; font-size: 15px; white-space: pre-line; overflow-wrap: anywhere; }
+.bubble.me { align-self: flex-end; background: var(--c-fg); color: var(--c-bg); margin-top: var(--sp-2); }
+.bubble.ai { align-self: flex-start; background: var(--c-surface); color: var(--c-fg); }
+.bubble code { font-family: var(--font-mono); font-size: 0.86em; }
+.bubble.queued { background: none; color: var(--c-fg-2); box-shadow: inset 0 0 0 1px var(--c-surface-2); }
+.cap-r { align-self: flex-end; font-size: var(--fs-caption); color: var(--c-fg-3); padding-right: var(--sp-2); }
+.cap-c { align-self: center; font-size: var(--fs-caption); color: var(--c-fg-3); padding: var(--sp-2) 0; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.tool { align-self: stretch; }
+.tool-row { width: 100%; border: 0; background: none; display: flex; align-items: center; gap: var(--sp-2); padding: 6px var(--sp-2); border-radius: var(--r-sm); text-align: left; font-size: 13px; }
+.tool-row:hover { background: var(--c-surface); }
+.t-verb { color: var(--c-fg-3); flex: none; }
+.t-arg { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-mono-sm); color: var(--c-fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tool-row .ms { font-size: 18px; color: var(--c-fg-3); transition: transform 0.15s; }
+.tool.open .tool-row .ms { transform: rotate(90deg); }
+.t-flag { font-size: var(--fs-caption); color: var(--c-danger); flex: none; }
+.tool-detail { display: none; margin: 2px var(--sp-2) var(--sp-2); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-sm); background: var(--c-surface); font-family: var(--font-mono); font-size: var(--fs-mono-sm); line-height: 1.6; color: var(--c-fg-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool.open .tool-detail { display: block; }
+.tool-detail .k { color: var(--c-fg-3); display: block; margin-top: var(--sp-2); }
+.tool-detail .k:first-child { margin-top: 0; }
+.tool-detail .v { color: var(--c-fg); }
+.composer-wrap { flex: none; display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3) var(--sp-3); background: var(--c-bg); position: relative; }
+.composer { display: flex; align-items: flex-end; gap: var(--sp-1); padding: 4px; border-radius: 28px; background: var(--c-surface); }
+.composer textarea { flex: 1; min-width: 0; border: 0; background: none; resize: none; padding: 12px 4px; font-size: var(--fs-body); line-height: 1.4; max-height: 120px; color: var(--c-fg); }
+.composer textarea:focus { outline: none; }
+.composer textarea::placeholder { color: var(--c-fg-3); }
+.composer .icon-btn { width: 44px; height: 44px; color: var(--c-fg-2); }
+.send { width: 44px; height: 44px; flex: none; border: 0; border-radius: 50%; background: var(--c-fg); color: var(--c-bg); display: grid; place-items: center; }
+.send .ms { font-size: 22px; }
+.send:disabled { background: var(--c-surface-2); color: var(--c-fg-3); cursor: not-allowed; }
+.working { display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-2) 0 var(--sp-3); font-size: var(--fs-label); color: var(--c-fg-2); }
+.working .grow { flex: 1; }
+.working .tbtn { color: var(--c-fg); }
+.attach { display: flex; gap: var(--sp-2); align-items: center; overflow-x: auto; padding: 0 var(--sp-1); }
+.thumb { position: relative; flex: none; width: 60px; height: 60px; border-radius: 12px; overflow: hidden; }
+.thumb .x { position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%; border: 0; background: rgba(0, 0, 0, 0.55); color: #fff; display: grid; place-items: center; padding: 0; }
+.thumb .x .ms { font-size: 14px; }
+.thumb-add { flex: none; width: 60px; height: 60px; border-radius: 12px; border: 0; background: var(--c-surface); color: var(--c-fg-2); display: grid; place-items: center; }
+.attach-count { font-size: var(--fs-caption); color: var(--c-fg-3); margin-left: auto; padding-left: var(--sp-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.inline-err { font-size: var(--fs-caption); line-height: 1.5; color: var(--c-danger); padding: 0 var(--sp-2); }
+.shot { display: block; height: 100%; background: #1A1A1A; padding: 5px; font-family: var(--font-mono); font-size: 4px; line-height: 1.6; color: #B5B5B5; overflow: hidden; }
+.shot .r { color: #FF8B81; }
+.shot.light { background: #F2F2F2; color: #555; }
+.slash { position: absolute; left: var(--sp-3); right: var(--sp-3); bottom: calc(100% - 2px); z-index: 5; border-radius: var(--r-md); background: var(--c-sheet); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16), 0 0 0 1px var(--c-line); overflow: hidden; padding: var(--sp-2) 0; }
+.slash ul { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.slash li button { width: 100%; border: 0; background: none; text-align: left; display: flex; gap: var(--sp-3); align-items: baseline; padding: 10px var(--sp-4); }
+.slash li button:hover { background: var(--c-surface); }
+.slash .cmd { font-family: var(--font-mono); font-size: var(--fs-mono); color: var(--c-fg); flex: none; }
+.slash .cmd mark { background: none; color: var(--c-accent); }
+.slash .desc { flex: 1; min-width: 0; font-size: var(--fs-caption); color: var(--c-fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slash .kind { font-size: 11px; color: var(--c-fg-3); flex: none; }
+.slash .none { padding: 10px var(--sp-4); font-size: var(--fs-label); color: var(--c-fg-3); }
+.panel { flex: none; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-6) var(--sp-page) var(--sp-5); background: var(--c-sheet); border-radius: var(--r-lg) var(--r-lg) 0 0; box-shadow: 0 -1px 0 var(--c-line), 0 -10px 30px rgba(0, 0, 0, 0.06); max-height: 74%; overflow-y: auto; }
+.need-label { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-caption); font-weight: 500; color: var(--c-accent); }
+.panel h2 { margin: 0; font-size: var(--fs-title); font-weight: 400; line-height: 1.4; }
+.panel .code { margin: 0; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-sm); background: var(--c-surface); font-family: var(--font-mono); font-size: var(--fs-mono); line-height: 1.6; color: var(--c-fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.panel .meta { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--c-fg-3); }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); margin-top: var(--sp-2); }
+.choices { display: flex; flex-direction: column; margin: 0 calc(var(--sp-page) * -1); }
+.choice { border: 0; background: none; text-align: left; display: flex; gap: var(--sp-4); align-items: flex-start; padding: 10px var(--sp-page); }
+.choice:hover { background: var(--c-surface); }
+.choice .ms { color: var(--c-fg-3); }
+.choice.on .ms { color: var(--c-accent); }
+.choice b { display: block; font-size: 15px; font-weight: 400; line-height: 1.5; }
+.choice small { display: block; font-size: var(--fs-caption); color: var(--c-fg-2); line-height: 1.5; }
+.q-n { font-size: var(--fs-caption); color: var(--c-fg-3); font-weight: 400; }
+.custom { display: flex; gap: var(--sp-2); align-items: center; }
+.custom .input { font-size: 15px; }
+.offline-line { flex: none; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-page); font-size: var(--fs-label); color: var(--c-fg-2); background: var(--c-surface); }
+.offline-line .ms { font-size: 20px; color: var(--c-fg-3); }
+.app[data-flags~="offline"] .bar-sub button, .app[data-flags~="offline"] .chat-git { opacity: 0.4; pointer-events: none; }
+
+/* ---------- git ---------- */
+.tabs { flex: none; display: flex; padding: 0 var(--sp-page); gap: var(--sp-8); border-bottom: 1px solid var(--c-line); }
+.tab { border: 0; background: none; padding: 12px 0 14px; font-size: var(--fs-label); font-weight: 500; color: var(--c-fg-3); position: relative; display: inline-flex; gap: 6px; }
+.tab .count { font-variant-numeric: tabular-nums; }
+.app[data-flags~="tlog"] .tab[data-tab="tlog"], .app[data-flags~="tstatus"] .tab[data-tab="tstatus"] { color: var(--c-fg); }
+.app[data-flags~="tlog"] .tab[data-tab="tlog"]::after, .app[data-flags~="tstatus"] .tab[data-tab="tstatus"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--c-fg); }
+.branchbar { flex: none; display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4) var(--sp-page) var(--sp-3); font-family: var(--font-mono); font-size: var(--fs-mono-sm); color: var(--c-fg-3); }
+.branch-btn { border: 0; background: none; padding: 0; display: inline-flex; align-items: center; font-family: var(--font-mono); font-size: 15px; color: var(--c-fg); }
+.branch-btn .ms { font-size: 18px; color: var(--c-fg-3); }
+.graph-list { position: relative; }
+.graph-list svg.graph { position: absolute; left: 0; top: 0; pointer-events: none; }
+.crow { width: 100%; height: 64px; border: 0; background: none; text-align: left; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 0 var(--sp-page) 0 68px; }
+.crow:hover { background: var(--c-surface); }
+.c-l1 { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.c-refs { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--c-fg-3); white-space: nowrap; }
+.c-refs b { color: var(--c-fg); font-weight: 500; }
+.c-subj { min-width: 0; flex: 1; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-meta { font-family: var(--font-mono); font-size: 11px; color: var(--c-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.load-more { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-4) 0 var(--sp-6); font-size: var(--fs-caption); color: var(--c-fg-3); }
+.load-more .spin { width: 14px; height: 14px; }
+.busy-line { flex: none; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-page) var(--sp-3); font-size: var(--fs-caption); color: var(--c-fg-2); }
+.actions { flex: none; display: flex; gap: var(--sp-2); padding: 0 var(--sp-page) var(--sp-4); }
+.actions .btn { height: 40px; padding: 0 var(--sp-4); flex: 1; }
+.sec-h { margin: 0; padding: var(--sp-5) var(--sp-page) var(--sp-1); font-size: var(--fs-caption); font-weight: 500; color: var(--c-fg-3); display: flex; justify-content: space-between; }
+.frow { display: flex; align-items: center; padding-right: var(--sp-2); }
+.frow-main { flex: 1; min-width: 0; border: 0; background: none; text-align: left; display: flex; align-items: center; gap: var(--sp-4); padding: 10px 0 10px var(--sp-page); }
+button.frow-main:hover { background: var(--c-surface); }
+.fx { flex: none; width: 14px; font-family: var(--font-mono); font-size: var(--fs-mono-sm); color: var(--c-fg-3); text-align: center; }
+.fpath { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fpath b { font-size: 15px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fpath span { font-family: var(--font-mono); font-size: 11px; color: var(--c-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.num { font-family: var(--font-mono); font-size: var(--fs-mono-sm); white-space: nowrap; font-variant-numeric: tabular-nums; display: flex; gap: 6px; padding-right: var(--sp-4); }
+.num .p { color: var(--c-add-fg); }
+.num .d { color: var(--c-del-fg); }
+.num .muted { color: var(--c-fg-3); font-family: var(--font-ui); font-size: var(--fs-caption); }
+.commit-box { flex: none; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3) var(--sp-page) var(--sp-4); border-top: 1px solid var(--c-line); background: var(--c-bg); }
+.commit-box .input { padding-top: 6px; }
+.empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-3); padding: var(--sp-8); text-align: center; }
+.empty .ms { font-size: 40px; color: var(--c-fg-3); }
+.empty h2 { margin: 0; font-size: var(--fs-title); font-weight: 400; }
+.empty p { margin: 0 0 var(--sp-3); font-family: var(--font-mono); font-size: var(--fs-mono-sm); color: var(--c-fg-3); }
+.cmsg { padding: var(--sp-2) var(--sp-page) var(--sp-5); }
+.cmsg h2 { margin: 0 0 var(--sp-3); font-size: var(--fs-headline); font-weight: 300; line-height: 1.35; letter-spacing: -0.01em; text-wrap: balance; }
+.cmsg p { margin: 0; font-size: var(--fs-label); line-height: 1.75; color: var(--c-fg-2); white-space: pre-line; }
+.cmeta { margin: 0; padding: 0 var(--sp-page) var(--sp-2); display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 6px var(--sp-4); font-size: var(--fs-label); }
+.cmeta dt { color: var(--c-fg-3); }
+.cmeta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.cmeta .mono { font-size: var(--fs-mono-sm); }
+.diff-wrap { overflow-x: auto; }
+.diff { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.75; min-width: max-content; padding-bottom: var(--sp-6); tab-size: 4; }
+.dl { display: grid; grid-template-columns: 34px 34px 14px auto; padding-right: var(--sp-6); white-space: pre; }
+.dl .ln { color: var(--c-fg-3); text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums; user-select: none; }
+.dl .sg { color: var(--c-fg-3); text-align: center; }
+.dl.add { background: var(--c-add-bg); }
+.dl.add .sg, .dl.add .tx { color: var(--c-add-fg); }
+.dl.del { background: var(--c-del-bg); }
+.dl.del .sg, .dl.del .tx { color: var(--c-del-fg); }
+.dl.hunk { color: var(--c-fg-3); grid-template-columns: auto; padding: var(--sp-3) var(--sp-4) var(--sp-1); }
+.diff-head { display: flex; align-items: baseline; gap: var(--sp-3); padding: var(--sp-2) var(--sp-page) var(--sp-3); }
+.diff-head .fpath b { font-family: var(--font-mono); font-size: var(--fs-mono); }
+.folded { margin: var(--sp-6) var(--sp-page); display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); font-size: var(--fs-label); color: var(--c-fg-2); line-height: 1.6; }
+.folded b { color: var(--c-fg); font-size: var(--fs-title); font-weight: 300; }
+.folded .btn { margin-top: var(--sp-3); }
+
+/* ---------- 弹层 ---------- */
+.scrim { position: absolute; inset: 0; z-index: 40; background: var(--c-scrim); border: 0; padding: 0; width: 100%; cursor: default; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 41; max-height: 82%; overflow-y: auto; background: var(--c-sheet); border-radius: var(--r-lg) var(--r-lg) 0 0; padding: var(--sp-3) 0 var(--sp-5); }
+.sheet::before { content: ""; display: block; width: 32px; height: 4px; border-radius: 2px; background: var(--c-surface-2); margin: 0 auto var(--sp-5); }
+.sheet-head { padding: 0 var(--sp-page) var(--sp-3); display: flex; flex-direction: column; gap: 6px; }
+.sheet-head h2 { margin: 0; font-size: var(--fs-headline); font-weight: 400; line-height: 1.3; }
+.sheet-head p { margin: 0; font-size: var(--fs-label); color: var(--c-fg-2); line-height: 1.6; }
+.sheet-sec { padding: var(--sp-4) var(--sp-page) var(--sp-1); font-size: var(--fs-caption); font-weight: 500; color: var(--c-fg-3); }
+.mi { width: 100%; border: 0; background: none; text-align: left; display: flex; align-items: center; gap: var(--sp-4); min-height: 56px; padding: 8px var(--sp-page); font-size: var(--fs-body); }
+.mi:hover { background: var(--c-surface); }
+.mi > .ms { color: var(--c-fg-2); }
+.mi-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mi-body small { font-size: var(--fs-caption); color: var(--c-fg-3); line-height: 1.45; }
+.mi-body .mono { font-size: 11px; color: var(--c-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mi .mono-name { font-family: var(--font-mono); font-size: 15px; }
+.mi.danger, .mi.danger > .ms { color: var(--c-danger); }
+.mi .tick { color: var(--c-fg); }
+.mi .sub-tag { font-size: var(--fs-caption); color: var(--c-fg-3); }
+.sheet .code { margin: var(--sp-2) var(--sp-page) 0; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-sm); background: var(--c-surface); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.65; color: var(--c-fg-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.sheet .code .e { color: var(--c-danger); }
+.sheet-foot { margin: var(--sp-3) var(--sp-page) 0; font-size: var(--fs-caption); color: var(--c-fg-3); }
+.sheet .btns { display: flex; justify-content: flex-end; padding: var(--sp-3) var(--sp-3) 0; }
+.dialog { position: absolute; left: var(--sp-6); right: var(--sp-6); top: 50%; transform: translateY(-50%); z-index: 41; background: var(--c-sheet); border-radius: var(--r-lg); padding: var(--sp-6) var(--sp-6) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
+.dialog h2 { margin: 0; font-size: var(--fs-headline); font-weight: 400; line-height: 1.3; text-wrap: balance; }
+.dialog p { margin: 0; font-size: var(--fs-label); line-height: 1.65; color: var(--c-fg-2); }
+.dialog p .mono { font-size: var(--fs-mono-sm); color: var(--c-fg); overflow-wrap: anywhere; }
+.dialog .btns { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--sp-1); margin: var(--sp-2) calc(var(--sp-3) * -1) 0 0; }
+
+/* ---------- 窄屏：屏幕直接铺满 ---------- */
+@media (max-width: 860px) {
+  .review { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-block: 20px; }
+  .desk { position: static; max-height: none; gap: 16px; }
+  .dir-list { display: none; }
+  .dir-select { display: block; }
+  .phone { width: 100%; padding: 0; border-radius: 28px; background: none; }
+  .device { width: 100%; height: 780px; border-radius: 28px; box-shadow: 0 0 0 1px var(--desk-line); }
+  .caption { width: 100%; }
+}
+</style>
+
+<div class="review">
+  <aside class="desk">
+    <h1>clauderc 界面稿</h1>
+    <div class="themes" role="group" aria-label="主题">
+      <button type="button" data-theme-set="system" aria-pressed="true">跟随系统</button>
+      <button type="button" data-theme-set="light" aria-pressed="false">浅色</button>
+      <button type="button" data-theme-set="dark" aria-pressed="false">深色</button>
+    </div>
+    <select class="dir-select" id="dirSelect" aria-label="跳转到状态"></select>
+    <nav class="dir-list" id="dirList" aria-label="状态目录"></nav>
+  </aside>
+
+  <main class="stage">
+    <div class="caption">
+      <div class="cap-top">
+        <button type="button" class="step" id="prevBtn" aria-label="上一个状态"><span class="ms">arrow_back</span></button>
+        <h2 id="capTitle">扫码配对</h2>
+        <button type="button" class="step" id="nextBtn" aria-label="下一个状态"><span class="ms">chevron_right</span></button>
+      </div>
+    </div>
+
+    <div class="phone">
+      <div class="device" id="device">
+        <div class="statusbar"><span>14:38</span><span class="sb-icons"><span class="ms">signal_cellular_alt</span><span class="ms">wifi</span><span class="ms">battery_full</span></span></div>
+        <div class="app" id="app" data-flags="">
+
+<!-- ==================== 配对 ==================== -->
+<section class="screen" data-screen="pair">
+  <div class="cam">
+    <p class="cam-title">扫描配对二维码</p>
+    <button type="button" class="vf" data-go="machines" aria-label="扫描二维码">
+      <i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i>
+      <span class="scanline" data-not="expired used insecure revoked"></span>
+    </button>
+    <p class="cam-hint">在任意一台目标机的终端里运行<br><span class="mono">agent pair</span></p>
+    <p class="cam-fine" data-not="expired used insecure revoked">二维码 5 分钟内有效，只能用一次</p>
+  </div>
+  <div class="cam-sheet" data-only="expired" hidden>
+    <h2>二维码已过期</h2>
+    <p>生成已超过 5 分钟。<br>在目标机上重新运行 <span class="mono">agent pair</span>。</p>
+    <button type="button" class="btn ink block" data-go="pair">重新扫描</button>
+  </div>
+  <div class="cam-sheet" data-only="used" hidden>
+    <h2>二维码已被使用</h2>
+    <p>每个二维码只能配对一台手机。<br>在目标机上重新运行 <span class="mono">agent pair</span>。</p>
+    <button type="button" class="btn ink block" data-go="pair">重新扫描</button>
+  </div>
+  <div class="cam-sheet" data-only="insecure" hidden>
+    <h2>地址没有加密</h2>
+    <p>二维码里的地址是 <span class="mono">ws://relay.example.com</span>。<br>只能连接 <span class="mono">https://</span> 或 <span class="mono">wss://</span> 地址。</p>
+    <button type="button" class="btn ink block" data-go="pair">重新扫描</button>
+  </div>
+  <div class="cam-sheet" data-only="revoked" hidden>
+    <h2>这台手机的访问已被吊销</h2>
+    <p>有人在目标机上运行了 <span class="mono">agent revoke</span>。<br>重新扫码配对后才能继续使用。</p>
+    <button type="button" class="btn ink block" data-go="pair">扫码重新配对</button>
+  </div>
+</section>
+
+<!-- ==================== 目标机 ==================== -->
+<section class="screen" data-screen="machines" hidden>
+  <header class="appbar"><span class="grow"></span><button type="button" class="icon-btn" aria-label="更多"><span class="ms">more_vert</span></button></header>
+  <div class="content">
+    <div class="hero">
+      <h1>目标机</h1>
+      <p data-not="reconnecting"><span class="glyph g-on"></span>relay.example.com</p>
+      <p data-only="reconnecting" hidden><span class="spin" style="width:12px;height:12px"></span>正在重连，8 秒后重试</p>
+    </div>
+    <div class="list">
+      <button type="button" class="row" data-go="sessions">
+        <span class="ms">computer</span>
+        <span class="row-body">
+          <span class="row-l1"><span class="row-title">工作室 Mac mini</span></span>
+          <span class="row-l2">macOS · 6 个会话 · <span class="need">2 个等你</span></span>
+        </span>
+        <span class="ms chev">chevron_right</span>
+      </button>
+      <button type="button" class="row" data-go="sessions">
+        <span class="ms">computer</span>
+        <span class="row-body">
+          <span class="row-l1"><span class="row-title">MacBook Pro</span></span>
+          <span class="row-l2">macOS · 2 个会话</span>
+        </span>
+        <span class="ms chev">chevron_right</span>
+      </button>
+      <button type="button" class="row off" data-go="machines-offline">
+        <span class="ms">dns</span>
+        <span class="row-body">
+          <span class="row-l1"><span class="row-title">dev-linux</span></span>
+          <span class="row-l2">离线 · 最后在线 昨天 23:41</span>
+        </span>
+      </button>
+    </div>
+    <p class="foot">新目标机接入后会自动出现在这里。</p>
+  </div>
+  <div class="snackbar" data-only="offtap" hidden>dev-linux 已离线，联网后才能查看会话</div>
+</section>
+
+<!-- ==================== 会话列表 ==================== -->
+<section class="screen" data-screen="sessions" hidden>
+  <header class="appbar">
+    <button type="button" class="icon-btn" data-go="machines" aria-label="返回"><span class="ms">arrow_back</span></button>
+    <span class="grow"></span>
+    <button type="button" class="icon-btn" aria-label="更多"><span class="ms">more_vert</span></button>
+  </header>
+  <div class="pull" data-only="refreshing" hidden><span><span class="spin"></span></span></div>
+  <div class="content">
+    <div class="hero" style="padding-bottom:var(--sp-2)">
+      <h1>工作室 Mac mini</h1>
+      <p>claude 2.1.330</p>
+    </div>
+
+    <div class="gh">
+      <button type="button" class="gh-name" data-go="sessions-rename">默认<span class="ms">edit</span></button>
+      <span class="gh-dom"></span>
+      <button type="button" class="icon-btn sm" data-go="create" aria-label="在默认档位新建会话"><span class="ms">add</span></button>
+    </div>
+    <div class="list">
+      <div class="srow">
+        <button type="button" class="row" data-go="chat-permission">
+          <span class="glyph g-need"></span>
+          <span class="row-body">
+            <span class="row-l1"><span class="row-title">clauderc 协议</span><time>2 分钟前</time></span>
+            <span class="row-l2"><span class="mono">clauderc-app</span> · <span class="need">等你允许</span></span>
+            <span class="row-l3 need">go vet ./... &amp;&amp; go test ./internal/protocol/...</span>
+          </span>
+        </button>
+        <button type="button" class="icon-btn sm" data-go="sessions-menu-running" aria-label="会话操作"><span class="ms">more_vert</span></button>
+      </div>
+      <div class="srow">
+        <button type="button" class="row" data-go="chat-working">
+          <span class="glyph g-work"></span>
+          <span class="row-body">
+            <span class="row-l1"><span class="row-title">修复重连</span><time>刚刚</time></span>
+            <span class="row-l2"><span class="mono">relay-svc</span> · 工作中</span>
+          </span>
+        </button>
+        <button type="button" class="icon-btn sm" data-go="sessions-menu-running" aria-label="会话操作"><span class="ms">more_vert</span></button>
+      </div>
+      <div class="srow">
+        <button type="button" class="row" data-go="chat">
+          <span class="glyph g-idle"></span>
+          <span class="row-body">
+            <span class="row-l1"><span class="row-title">周报整理</span><time>18 分钟前</time></span>
+            <span class="row-l2"><span class="mono">notes</span> · 空闲</span>
+          </span>
+        </button>
+        <button type="button" class="icon-btn sm" data-go="sessions-menu-running" aria-label="会话操作"><span class="ms">more_vert</span></button>
+      </div>
+    </div>
+
+    <div class="gh">
+      <button type="button" class="gh-name" data-go="sessions-rename">官方<span class="ms">edit</span></button>
+      <span class="gh-dom">api.anthropic.com</span>
+      <button type="button" class="icon-btn sm" data-go="create" aria-label="在官方档位新建会话"><span class="ms">add</span></button>
+    </div>
+    <div class="list">
+      <div class="srow">
+        <button type="button" class="row" data-go="chat-question">
+          <span class="glyph g-need"></span>
+          <span class="row-body">
+            <span class="row-l1"><span class="row-title">迁移脚本审查</span><time>5 分钟前</time></span>
+            <span class="row-l2"><span class="mono">infra</span> · <span class="need">等你回答</span></span>
+            <span class="row-l3 need" style="font-family:var(--font-ui);font-size:13px">错误码用哪种命名风格？</span>
+          </span>
+        </button>
+        <button type="button" class="icon-btn sm" data-go="sessions-menu-running" aria-label="会话操作"><span class="ms">more_vert</span></button>
+      </div>
+      <div class="srow dim">
+        <button type="button" class="row" data-go="chat-stopped">
+          <span class="glyph g-stop"></span>
+          <span class="row-body">
+            <span class="row-l1"><span class="row-title">landing 页</span><time>昨天</time></span>
+            <span class="row-l2"><span class="mono">site</span> · 已停止</span>
+          </span>
+        </button>
+        <button type="button" class="icon-btn sm" data-go="sessions-menu-stopped" aria-label="会话操作"><span class="ms">more_vert</span></button>
+      </div>
+    </div>
+
+    <div class="gh">
+      <button type="button" class="gh-name mono" data-go="sessions-rename">anyrouter.top<span class="ms">edit</span></button>
+      <span class="gh-dom"></span>
+      <button type="button" class="icon-btn sm" data-go="create" aria-label="在 anyrouter.top 档位新建会话"><span class="ms">add</span></button>
+    </div>
+    <p class="g-empty">没有会话</p>
+
+    <div class="gh">
+      <span class="gh-name">其他</span>
+      <span class="gh-dom plain">读不到启动参数</span>
+    </div>
+    <div class="list">
+      <div class="srow">
+        <button type="button" class="row" data-go="chat">
+          <span class="glyph g-idle"></span>
+          <span class="row-body">
+            <span class="row-l1"><span class="row-title">scratch</span><time>3 天前</time></span>
+            <span class="row-l2"><span class="mono">scratch</span> · 空闲</span>
+          </span>
+        </button>
+        <button type="button" class="icon-btn sm" data-go="sessions-menu-running" aria-label="会话操作"><span class="ms">more_vert</span></button>
+      </div>
+    </div>
+    <p class="foot"></p>
+  </div>
+</section>
+
+<!-- ==================== 新建会话 ==================== -->
+<section class="screen" data-screen="create" hidden>
+  <header class="appbar">
+    <button type="button" class="icon-btn" data-go="sessions" aria-label="关闭"><span class="ms">close</span></button>
+    <div class="bar-title"><h1>新建会话</h1></div>
+    <button type="button" class="tbtn" data-go="sessions">启动</button>
+  </header>
+  <div class="content">
+    <form class="form" id="createForm">
+      <div class="tier-line">官方档位 <span class="mono">api.anthropic.com</span><br>沿用「迁移脚本审查」的启动参数</div>
+      <div class="field">
+        <label for="dirInput">工作目录</label>
+        <input class="input mono" id="dirInput" value="~/github/infra" autocomplete="off" spellcheck="false">
+        <span class="ferr" data-only="direrr" hidden>目标机上没有这个目录</span>
+        <ul class="recent" id="recentDirs">
+          <li><button type="button" role="radio" aria-checked="false" data-dir="~/github/SmallProjects/android/clauderc-app"><span class="ms">radio_button_unchecked</span><span class="r-path"><b>clauderc-app</b><span>~/github/SmallProjects/android/clauderc-app</span></span><time>2 分钟前</time></button></li>
+          <li><button type="button" role="radio" aria-checked="true" data-dir="~/github/infra"><span class="ms">radio_button_checked</span><span class="r-path"><b>infra</b><span>~/github/infra</span></span><time>5 分钟前</time></button></li>
+          <li><button type="button" role="radio" aria-checked="false" data-dir="~/github/relay-svc"><span class="ms">radio_button_unchecked</span><span class="r-path"><b>relay-svc</b><span>~/github/relay-svc</span></span><time>刚刚</time></button></li>
+          <li><button type="button" role="radio" aria-checked="false" data-dir="~/notes"><span class="ms">radio_button_unchecked</span><span class="r-path"><b>notes</b><span>~/notes</span></span><time>18 分钟前</time></button></li>
+          <li><button type="button" role="radio" aria-checked="false" data-dir="~/github/site"><span class="ms">radio_button_unchecked</span><span class="r-path"><b>site</b><span>~/github/site</span></span><time>昨天</time></button></li>
+        </ul>
+        <span class="more-link">全部 14 个</span>
+      </div>
+      <div class="field">
+        <label for="nameInput">会话名，可不填</label>
+        <input class="input" id="nameInput" placeholder="迁移脚本审查" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="firstInput">第一句话，可不填</label>
+        <textarea class="input" id="firstInput" rows="2" placeholder="不填就只启动会话"></textarea>
+      </div>
+    </form>
+  </div>
+</section>
+
+<!-- ==================== 聊天 ==================== -->
+<section class="screen" data-screen="chat" hidden>
+  <header class="appbar">
+    <button type="button" class="icon-btn" data-go="sessions" aria-label="返回"><span class="ms">arrow_back</span></button>
+    <div class="bar-title">
+      <h1>clauderc 协议</h1>
+      <span class="bar-sub">
+        <button type="button" data-go="chat-model">Opus 5.5<span class="ms">expand_more</span></button>
+        <button type="button" data-go="chat-mode">默认询问<span class="ms">expand_more</span></button>
+      </span>
+    </div>
+    <button type="button" class="icon-btn chat-git" data-go="git-log" aria-label="打开 git"><span class="ms">account_tree</span></button>
+  </header>
+  <div class="offline-line" data-only="offline" hidden><span class="ms">cloud_off</span>已离线 · 最后在线 14:36</div>
+  <div class="content" id="chatScroll">
+    <div class="msgs">
+      <span class="hist-top"><span class="spin" style="width:14px;height:14px"></span></span>
+      <span class="day">今天 14:21</span>
+      <div class="bubble me">给 internal/protocol 加上消息信封的编解码，版本号不是 1 时返回错误。</div>
+      <div class="bubble ai">好的。我先看一下模块路径和现有目录。</div>
+      <div class="tool"><button type="button" class="tool-row"><span class="t-verb">读取</span><span class="t-arg">go.mod</span><span class="ms">chevron_right</span></button>
+        <div class="tool-detail"><span class="k">输出</span><span class="v">module clauderc
+
+go 1.27</span></div></div>
+      <div class="tool"><button type="button" class="tool-row"><span class="t-verb">运行</span><span class="t-arg">ls internal/protocol</span><span class="ms">chevron_right</span></button>
+        <div class="tool-detail"><span class="k">输出</span>没有输出</div></div>
+      <div class="bubble ai">目录还是空的。我新建 <code>envelope.go</code>，定义 <code>Envelope</code> 和 <code>Encode</code>、<code>Decode</code>，<code>v</code> 不等于 1 时返回 <code>ErrVersion</code>。</div>
+      <div class="tool"><button type="button" class="tool-row"><span class="t-arg">Write</span><span class="ms">chevron_right</span></button>
+        <div class="tool-detail"><span class="k">file_path</span><span class="v">internal/protocol/envelope.go</span><span class="k">content</span><span class="v">package protocol …</span></div></div>
+      <div class="tool" data-key="test"><button type="button" class="tool-row"><span class="t-verb">运行</span><span class="t-arg">go test ./internal/protocol/...</span><span class="ms">chevron_right</span></button>
+        <div class="tool-detail"><span class="k">命令</span><span class="v">go test ./internal/protocol/...</span><span class="k">输出</span><span class="v">--- PASS: TestEnvelopeRoundTrip (0.00s)
+--- PASS: TestDecodeRejectsVersion (0.00s)
+ok  	clauderc/internal/protocol	0.412s</span></div></div>
+      <div class="bubble ai">测试通过，覆盖了 req、res、evt 三种消息的往返编解码。要现在提交吗？</div>
+      <div class="bubble me">先别提交
+把错误码也一起定义了
+然后跑一遍 go vet</div>
+      <div class="bubble ai">明白。错误码先列一版：<code>bad_request</code>、<code>not_found</code>、<code>changed</code>、<code>unauthorized</code>、<code>internal</code>。</div>
+
+      <div class="bubble ai" data-only="permission allowed denied handled" hidden>改完了，我跑一下检查。</div>
+      <div class="tool open" data-only="allowed" hidden><button type="button" class="tool-row"><span class="t-verb">运行</span><span class="t-arg">go vet ./... &amp;&amp; go test ./internal/protocol/...</span><span class="ms">chevron_right</span></button>
+        <div class="tool-detail"><span class="k">输出</span><span class="v">ok  	clauderc/internal/protocol	0.398s</span></div></div>
+      <div class="bubble ai" data-only="allowed" hidden>vet 没有报告问题，测试全部通过。</div>
+      <div class="tool" data-only="denied" hidden><button type="button" class="tool-row"><span class="t-verb">运行</span><span class="t-arg">go vet ./... &amp;&amp; go test ./internal/protocol/...</span><span class="t-flag">已拒绝</span></button></div>
+      <span class="cap-c" data-only="denied" hidden>会话回到空闲</span>
+      <div class="tool" data-only="handled" hidden><button type="button" class="tool-row"><span class="t-verb">运行</span><span class="t-arg">go vet ./... &amp;&amp; go test ./internal/protocol/...</span><span class="spin" style="width:12px;height:12px;color:var(--c-fg-3)"></span></button></div>
+
+      <div class="bubble ai" data-only="question qmulti answered" hidden>错误码的命名风格需要你定一下。</div>
+      <div class="tool" data-only="answered" hidden><button type="button" class="tool-row"><span class="t-arg">AskUserQuestion · 驼峰</span><span class="ms">chevron_right</span></button></div>
+      <div class="bubble ai" data-only="answered" hidden>好，错误码统一用驼峰，比如 <code>NotFound</code>。</div>
+
+      <div class="tool" data-only="working interrupted" hidden><button type="button" class="tool-row"><span class="t-verb">运行</span><span class="t-arg">go vet ./...</span><span class="spin" data-only="working" style="width:12px;height:12px;color:var(--c-fg-3)"></span></button></div>
+      <div class="bubble me queued" data-only="working" hidden>顺便把 README 里的命令也更新一下</div>
+      <span class="cap-r" data-only="working" hidden>待发送 · 这一轮结束后送达</span>
+      <span class="cap-c" data-only="interrupted" hidden>已中断</span>
+      <div class="bubble me" data-only="interrupted" hidden>先停一下，只检查 protocol 这个包</div>
+
+      <div class="bubble me" data-only="stopped" hidden>继续刚才的工作</div>
+      <span class="cap-c" data-only="stopped" hidden><span class="spin" style="width:12px;height:12px"></span>正在唤醒会话</span>
+    </div>
+  </div>
+
+  <!-- 权限请求 -->
+  <div class="panel" data-only="permission" hidden>
+    <span class="need-label"><span class="glyph g-need"></span>等你允许</span>
+    <h2>运行这条命令？</h2>
+    <pre class="code">go vet ./... &amp;&amp; go test ./internal/protocol/...</pre>
+    <span class="meta">Bash</span>
+    <div class="split">
+      <button type="button" class="btn outline" data-go="chat-denied">拒绝</button>
+      <button type="button" class="btn accent" data-go="chat-allowed">允许</button>
+    </div>
+  </div>
+
+  <!-- 提问：单选 -->
+  <div class="panel" data-only="question" hidden>
+    <span class="need-label"><span class="glyph g-need"></span>等你回答</span>
+    <h2>错误码用哪种命名风格？</h2>
+    <div class="choices">
+      <button type="button" class="choice" data-go="chat-answered"><span class="ms">radio_button_unchecked</span><span><b>全小写加下划线</b><small>not_found，和 JSON 字段一致</small></span></button>
+      <button type="button" class="choice" data-go="chat-answered"><span class="ms">radio_button_unchecked</span><span><b>驼峰</b><small>NotFound，和 Go 常量一致</small></span></button>
+      <button type="button" class="choice" data-go="chat-answered"><span class="ms">radio_button_unchecked</span><span><b>大写加前缀</b><small>ERR_NOT_FOUND</small></span></button>
+    </div>
+    <div class="custom"><input class="input" id="customAnswer" placeholder="其他回答" autocomplete="off"><button type="button" class="icon-btn sm" data-go="chat-answered" aria-label="发送回答"><span class="ms">arrow_upward</span></button></div>
+  </div>
+
+  <!-- 提问：多选和多题 -->
+  <div class="panel" data-only="qmulti" hidden>
+    <span class="need-label"><span class="glyph g-need"></span>等你回答 · 2 题</span>
+    <h2>为哪些消息补样例？<span class="q-n"> 可多选</span></h2>
+    <div class="choices" data-multi>
+      <button type="button" class="choice on"><span class="ms">check_box</span><span><b>请求 req</b></span></button>
+      <button type="button" class="choice on"><span class="ms">check_box</span><span><b>响应 res</b></span></button>
+      <button type="button" class="choice"><span class="ms">check_box_outline_blank</span><span><b>事件 evt</b></span></button>
+      <button type="button" class="choice"><span class="ms">check_box_outline_blank</span><span><b>错误响应</b></span></button>
+    </div>
+    <h2>样例放在哪？</h2>
+    <div class="choices" data-single>
+      <button type="button" class="choice on"><span class="ms">radio_button_checked</span><span><b class="mono" style="font-size:14px">internal/protocol/testdata</b><small>Android 测试直接引用</small></span></button>
+      <button type="button" class="choice"><span class="ms">radio_button_unchecked</span><span><b>单独的 samples 目录</b></span></button>
+    </div>
+    <div class="custom"><input class="input" id="customAnswer2" placeholder="其他回答" autocomplete="off"></div>
+    <button type="button" class="btn accent block" data-go="chat-answered">提交</button>
+  </div>
+
+  <!-- 输入区 -->
+  <div class="composer-wrap" data-not="permission question qmulti">
+    <div class="slash" id="slashPop" hidden><ul id="slashList"></ul></div>
+    <div class="working" data-only="working" hidden><span class="glyph g-work"></span>工作中 · 42 秒<span class="grow"></span><button type="button" class="tbtn" data-go="chat-interrupted">中断</button></div>
+    <div class="attach" data-only="images" hidden>
+      <div class="thumb"><div class="shot"><span class="r">panic: runtime error</span><br>goroutine 1 [running]:<br>main.main()<br>/cmd/relay/main.go:42<br>exit status 2</div><button type="button" class="x" aria-label="移除"><span class="ms">close</span></button></div>
+      <div class="thumb"><div class="shot light">relay.toml<br>listen = "127.0.0.1:8787"<br>public = "wss://…"<br>key_file = …</div><button type="button" class="x" aria-label="移除"><span class="ms">close</span></button></div>
+      <button type="button" class="thumb-add" data-go="chat-attach" aria-label="再添加图片"><span class="ms">add</span></button>
+      <span class="attach-count">2 / 5</span>
+    </div>
+    <div class="inline-err" data-only="imgerr" hidden>IMG_2041.jpg 有 15.2 MB，超过 10 MB，没有添加</div>
+    <div class="composer">
+      <button type="button" class="icon-btn" id="attachBtn" data-go="chat-attach" aria-label="添加图片"><span class="ms">image</span></button>
+      <textarea id="composer" rows="1" placeholder="发消息"></textarea>
+      <button type="button" class="send" id="sendBtn" aria-label="发送"><span class="ms">arrow_upward</span></button>
+    </div>
+  </div>
+  <div class="snackbar lift" data-only="handled" hidden>已在电脑上处理</div>
+</section>
+
+<!-- ==================== git ==================== -->
+<section class="screen" data-screen="git" hidden>
+  <header class="appbar">
+    <button type="button" class="icon-btn" data-go="chat" aria-label="返回"><span class="ms">arrow_back</span></button>
+    <div class="bar-title">
+      <h1 data-not="notrepo">clauderc-app</h1>
+      <h1 data-only="notrepo" hidden>notes</h1>
+      <span class="bar-sub"><button type="button" data-go="git-repo"><span class="mono" style="font-size:11px" data-not="notrepo">~/github/SmallProjects/android/clauderc-app</span><span class="mono" style="font-size:11px" data-only="notrepo" hidden>~/notes</span><span class="ms">expand_more</span></button></span>
+    </div>
+    <button type="button" class="icon-btn" aria-label="刷新"><span class="ms">refresh</span></button>
+  </header>
+  <div class="empty" data-only="notrepo" hidden>
+    <span class="ms">folder</span>
+    <h2>不是 git 仓库</h2>
+    <p>~/notes</p>
+    <button type="button" class="btn tonal" data-go="git-repo">换一个目录</button>
+  </div>
+  <div class="tabs" data-not="notrepo">
+    <button type="button" class="tab" data-tab="tlog" data-go="git-log">时间线</button>
+    <button type="button" class="tab" data-tab="tstatus" data-go="git-status">改动<span class="count">3</span></button>
+  </div>
+  <div class="branchbar" data-not="notrepo">
+    <button type="button" class="branch-btn" data-go="git-branches">dev<span class="ms">expand_more</span></button>
+    <span>↑2 ↓0 origin/dev</span>
+  </div>
+
+  <div class="content" data-only="tlog" hidden>
+    <div class="graph-list" id="graphList"></div>
+    <div class="load-more"><span class="spin"></span>继续加载更早的提交</div>
+  </div>
+
+  <div class="busy-line" data-only="tstatus" hidden><span class="glyph g-work"></span>「clauderc 协议」正在这个目录工作</div>
+  <div class="actions" data-only="tstatus" hidden>
+    <button type="button" class="btn tonal" data-go="git-error-pull"><span class="ms">download</span>拉取</button>
+    <button type="button" class="btn tonal" data-go="git-error-push"><span class="ms">upload</span>推送</button>
+    <button type="button" class="btn tonal" data-go="git-branches"><span class="ms">alt_route</span>切换</button>
+  </div>
+  <div class="content" data-only="tstatus" hidden>
+    <h3 class="sec-h">已暂存</h3>
+    <div class="frow">
+      <button type="button" class="frow-main" data-go="git-diff"><span class="fx">A</span><span class="fpath"><b>errors.go</b><span>internal/protocol</span></span><span class="num"><span class="p">+34</span></span></button>
+      <button type="button" class="tbtn quiet">取消暂存</button>
+    </div>
+    <h3 class="sec-h">未暂存</h3>
+    <div class="frow">
+      <button type="button" class="frow-main" data-go="git-diff"><span class="fx">M</span><span class="fpath"><b>AGENTS.md</b><span>./</span></span><span class="num"><span class="p">+6</span><span class="d">−2</span></span></button>
+      <button type="button" class="tbtn quiet">暂存</button>
+    </div>
+    <div class="frow">
+      <button type="button" class="frow-main" data-go="git-diff"><span class="fx">?</span><span class="fpath"><b>run.py</b><span>scripts/e2e-claude</span></span><span class="num"><span class="muted">未跟踪</span></span></button>
+      <button type="button" class="tbtn quiet">暂存</button>
+    </div>
+  </div>
+  <div class="commit-box" data-only="tstatus" hidden>
+    <textarea class="input" id="commitMsg" rows="1" placeholder="提交说明"></textarea>
+    <button type="button" class="btn accent block" id="commitBtn" disabled>提交</button>
+  </div>
+  <div class="snackbar" data-only="switched" hidden>已切换到 feat-x，跟踪 origin/feat-x</div>
+</section>
+
+<!-- ==================== 提交详情 ==================== -->
+<section class="screen" data-screen="commit" hidden>
+  <header class="appbar">
+    <button type="button" class="icon-btn" data-go="git-log" aria-label="返回"><span class="ms">arrow_back</span></button>
+    <div class="bar-title"><h1 class="mono" style="font-size:15px">7c2e0d4</h1></div>
+  </header>
+  <div class="content">
+    <div class="cmsg">
+      <h2>定义协议信封</h2>
+      <p>- Envelope 包含 v、kind、id、method、machine、client、body、error
+- Decode 遇到 v 不等于 1 时返回 ErrVersion
+- testdata 里为每个方法放一份样例</p>
+    </div>
+    <dl class="cmeta">
+      <dt>作者</dt><dd>林舟</dd>
+      <dt>时间</dt><dd>11 月 12 日 17:31</dd>
+      <dt>父提交</dt><dd class="mono">5b81aa0</dd>
+    </dl>
+    <h3 class="sec-h"><span>5 个文件</span><span class="num" style="padding:0"><span class="p">+1,500</span><span class="d">−3</span></span></h3>
+    <div class="frow"><button type="button" class="frow-main" data-go="git-diff"><span class="fx">A</span><span class="fpath"><b>envelope.go</b><span>internal/protocol</span></span><span class="num"><span class="p">+86</span></span></button></div>
+    <div class="frow"><button type="button" class="frow-main" data-go="git-diff"><span class="fx">M</span><span class="fpath"><b>envelope_test.go</b><span>internal/protocol</span></span><span class="num"><span class="p">+112</span><span class="d">−3</span></span></button></div>
+    <div class="frow"><button type="button" class="frow-main" data-go="git-diff-folded"><span class="fx">A</span><span class="fpath"><b>chat_items.json</b><span>internal/protocol/testdata</span></span><span class="num"><span class="p">+1,284</span></span></button></div>
+    <div class="frow"><button type="button" class="frow-main" data-go="git-diff"><span class="fx">A</span><span class="fpath"><b>chat_send.json</b><span>internal/protocol/testdata</span></span><span class="num"><span class="p">+18</span></span></button></div>
+    <div class="frow"><div class="frow-main"><span class="fx">B</span><span class="fpath"><b>preview.png</b><span>design/ui-mockup</span></span><span class="num"><span class="muted">二进制文件已更改</span></span></div></div>
+    <p class="foot"></p>
+  </div>
+</section>
+
+<!-- ==================== 差异 ==================== -->
+<section class="screen" data-screen="diff" hidden>
+  <header class="appbar">
+    <button type="button" class="icon-btn" data-go="git-commit" aria-label="返回"><span class="ms">arrow_back</span></button>
+    <div class="bar-title">
+      <h1 class="mono" style="font-size:15px" data-not="folded">envelope_test.go</h1>
+      <h1 class="mono" style="font-size:15px" data-only="folded" hidden>chat_items.json</h1>
+      <span class="bar-sub mono" style="font-size:11px">7c2e0d4</span>
+    </div>
+    <span class="num" data-not="folded"><span class="p">+112</span><span class="d">−3</span></span>
+    <span class="num" data-only="folded" hidden><span class="p">+1,284</span></span>
+  </header>
+  <div class="content">
+    <div class="diff-wrap" data-not="folded">
+      <div class="diff">
+        <div class="dl hunk">@@ -1,14 +1,32 @@</div>
+        <div class="dl"><span class="ln">1</span><span class="ln">1</span><span class="sg"></span><span class="tx">package protocol</span></div>
+        <div class="dl"><span class="ln">2</span><span class="ln">2</span><span class="sg"></span><span class="tx"></span></div>
+        <div class="dl"><span class="ln">3</span><span class="ln">3</span><span class="sg"></span><span class="tx">import (</span></div>
+        <div class="dl del"><span class="ln">4</span><span class="ln"></span><span class="sg">-</span><span class="tx">	"testing"</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">4</span><span class="sg">+</span><span class="tx">	"errors"</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">5</span><span class="sg">+</span><span class="tx">	"testing"</span></div>
+        <div class="dl"><span class="ln">5</span><span class="ln">6</span><span class="sg"></span><span class="tx">)</span></div>
+        <div class="dl"><span class="ln">6</span><span class="ln">7</span><span class="sg"></span><span class="tx"></span></div>
+        <div class="dl del"><span class="ln">7</span><span class="ln"></span><span class="sg">-</span><span class="tx">func TestEnvelope(t *testing.T) {</span></div>
+        <div class="dl del"><span class="ln">8</span><span class="ln"></span><span class="sg">-</span><span class="tx">	t.Skip("todo")</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">8</span><span class="sg">+</span><span class="tx">func TestEnvelopeRoundTrip(t *testing.T) {</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">9</span><span class="sg">+</span><span class="tx">	for _, kind := range []string{"req", "res", "evt"} {</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">10</span><span class="sg">+</span><span class="tx">		in := Envelope{V: 1, Kind: kind, ID: "42"}</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">11</span><span class="sg">+</span><span class="tx">		out, err := Decode(Encode(in))</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">12</span><span class="sg">+</span><span class="tx">		if err != nil || out != in {</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">13</span><span class="sg">+</span><span class="tx">			t.Fatalf("%s: got %+v, %v", kind, out, err)</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">14</span><span class="sg">+</span><span class="tx">		}</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">15</span><span class="sg">+</span><span class="tx">	}</span></div>
+        <div class="dl"><span class="ln">9</span><span class="ln">16</span><span class="sg"></span><span class="tx">}</span></div>
+        <div class="dl hunk">@@ -40,6 +58,14 @@ func TestDecode</div>
+        <div class="dl"><span class="ln">40</span><span class="ln">58</span><span class="sg"></span><span class="tx">func TestDecodeRejectsVersion(t *testing.T) {</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">59</span><span class="sg">+</span><span class="tx">	_, err := Decode([]byte(`{"v":2,"kind":"req"}`))</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">60</span><span class="sg">+</span><span class="tx">	if !errors.Is(err, ErrVersion) {</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">61</span><span class="sg">+</span><span class="tx">		t.Fatalf("want ErrVersion, got %v", err)</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">62</span><span class="sg">+</span><span class="tx">	}</span></div>
+        <div class="dl"><span class="ln">41</span><span class="ln">63</span><span class="sg"></span><span class="tx">}</span></div>
+      </div>
+    </div>
+    <div class="folded" data-only="folded" hidden id="foldBox">
+      <b>1,284 行差异，已折叠</b>
+      <span>超过 1000 行的差异默认不展开。</span>
+      <button type="button" class="btn tonal" id="unfoldBtn">展开</button>
+    </div>
+    <div class="diff-wrap" id="unfolded" hidden>
+      <div class="diff">
+        <div class="dl hunk">@@ -0,0 +1,1284 @@</div>
+        <div class="dl add"><span class="ln"></span><span class="ln">1</span><span class="sg">+</span><span class="tx">{</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">2</span><span class="sg">+</span><span class="tx">  "v": 1,</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">3</span><span class="sg">+</span><span class="tx">  "kind": "evt",</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">4</span><span class="sg">+</span><span class="tx">  "method": "chat.items",</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">5</span><span class="sg">+</span><span class="tx">  "body": { "items": [</span></div>
+        <div class="dl hunk">… 其余 1,279 行</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== 弹层 ==================== -->
+<button type="button" class="scrim" id="scrim" aria-label="关闭" data-only="rename menurun menustop stopconfirm removeconfirm attach model mode repo branches busy upstream epull epush eauth eswitch" hidden></button>
+
+<div class="dialog" data-only="rename" role="dialog" aria-label="档位名" hidden>
+  <h2>档位名</h2>
+  <div class="field">
+    <label for="tierName"><span class="mono">api.anthropic.com</span></label>
+    <input class="input" id="tierName" value="官方" autocomplete="off">
+  </div>
+  <p>只保存在这台手机上，只对工作室 Mac mini 生效。</p>
+  <div class="btns"><button type="button" class="tbtn quiet" data-go="sessions">恢复默认</button><span style="flex:1"></span><button type="button" class="tbtn" data-go="sessions">取消</button><button type="button" class="tbtn" data-go="sessions">保存</button></div>
+</div>
+
+<div class="sheet" data-only="menurun" role="dialog" aria-label="会话操作" hidden>
+  <div class="sheet-head"><h2>修复重连</h2><p><span class="mono">relay-svc</span> · 工作中</p></div>
+  <button type="button" class="mi" data-go="chat-working"><span class="ms">description</span><span class="mi-body">打开</span></button>
+  <button type="button" class="mi" data-go="git-log"><span class="ms">account_tree</span><span class="mi-body">git</span></button>
+  <button type="button" class="mi danger" data-go="sessions-stop"><span class="ms">power_settings_new</span><span class="mi-body">停止</span></button>
+</div>
+
+<div class="sheet" data-only="menustop" role="dialog" aria-label="会话操作" hidden>
+  <div class="sheet-head"><h2>landing 页</h2><p><span class="mono">site</span> · 已停止</p></div>
+  <button type="button" class="mi" data-go="chat-stopped"><span class="ms">description</span><span class="mi-body"><span>打开</span><small>发消息时自动唤醒</small></span></button>
+  <button type="button" class="mi" data-go="git-log"><span class="ms">account_tree</span><span class="mi-body">git</span></button>
+  <button type="button" class="mi danger" data-go="sessions-remove"><span class="ms">delete</span><span class="mi-body">移出列表</span></button>
+</div>
+
+<div class="dialog" data-only="stopconfirm" role="dialog" aria-label="停止会话" hidden>
+  <h2>停止「修复重连」？</h2>
+  <p>它正在工作，停止会打断当前任务。<br>对话记录会保留，之后发消息可以唤醒。</p>
+  <div class="btns"><button type="button" class="tbtn" data-go="sessions">取消</button><button type="button" class="tbtn danger" data-go="sessions">停止</button></div>
+</div>
+
+<div class="dialog" data-only="removeconfirm" role="dialog" aria-label="移出列表" hidden>
+  <h2>移出「landing 页」？</h2>
+  <p>不再显示在列表里，对话记录仍留在目标机上。</p>
+  <div class="btns"><button type="button" class="tbtn" data-go="sessions">取消</button><button type="button" class="tbtn danger" data-go="sessions">移出</button></div>
+</div>
+
+<div class="sheet" data-only="attach" role="dialog" aria-label="添加图片" hidden>
+  <div class="sheet-head"><h2>添加图片</h2><p>最多 5 张，每张不超过 10 MB</p></div>
+  <button type="button" class="mi" data-go="chat-images"><span class="ms">photo_camera</span><span class="mi-body">拍照</span></button>
+  <button type="button" class="mi" data-go="chat-images"><span class="ms">image</span><span class="mi-body">从相册选择</span></button>
+</div>
+
+<div class="sheet" data-only="model" role="dialog" aria-label="模型" hidden>
+  <div class="sheet-head"><h2>模型</h2></div>
+  <button type="button" class="mi" role="radio" aria-checked="true" data-go="chat"><span class="mi-body"><span>Opus 5.5</span><span class="mono">claude-opus-5-5</span></span><span class="ms tick">check</span></button>
+  <button type="button" class="mi" role="radio" aria-checked="false" data-go="chat"><span class="mi-body"><span>Sonnet 5.5</span><span class="mono">claude-sonnet-5-5</span></span></button>
+  <button type="button" class="mi" role="radio" aria-checked="false" data-go="chat"><span class="mi-body"><span>Haiku 5.5</span><span class="mono">claude-haiku-5-5</span></span></button>
+  <p class="sheet-foot">从下一条回复开始生效</p>
+</div>
+
+<div class="sheet" data-only="mode" role="dialog" aria-label="权限模式" hidden>
+  <div class="sheet-head"><h2>权限模式</h2></div>
+  <button type="button" class="mi" role="radio" aria-checked="true" data-go="chat"><span class="mi-body"><span>默认询问</span><small>编辑和运行命令前都先问</small></span><span class="ms tick">check</span></button>
+  <button type="button" class="mi" role="radio" aria-checked="false" data-go="chat"><span class="mi-body"><span>自动接受编辑</span><small>编辑直接执行，运行命令仍会问</small></span></button>
+  <button type="button" class="mi" role="radio" aria-checked="false" data-go="chat"><span class="mi-body"><span>计划模式</span><small>只读分析，先给计划</small></span></button>
+  <button type="button" class="mi danger" role="radio" aria-checked="false" data-go="chat"><span class="mi-body"><span>跳过权限检查</span><small>什么都不再问</small></span></button>
+</div>
+
+<div class="sheet" data-only="repo" role="dialog" aria-label="目录" hidden>
+  <div class="sheet-head"><h2>最近的目录</h2></div>
+  <button type="button" class="mi" role="radio" aria-checked="true" data-go="git-log"><span class="ms">folder</span><span class="mi-body"><span>clauderc-app</span><span class="mono">~/github/SmallProjects/android/clauderc-app</span></span><span class="ms tick">check</span></button>
+  <button type="button" class="mi" role="radio" aria-checked="false" data-go="git-log"><span class="ms">folder</span><span class="mi-body"><span>relay-svc</span><span class="mono">~/github/relay-svc</span></span></button>
+  <button type="button" class="mi" role="radio" aria-checked="false" data-go="git-log"><span class="ms">folder</span><span class="mi-body"><span>infra</span><span class="mono">~/github/infra</span></span></button>
+  <button type="button" class="mi" role="radio" aria-checked="false" data-go="git-not-repo"><span class="ms">folder</span><span class="mi-body"><span>notes</span><span class="mono">~/notes</span></span></button>
+</div>
+
+<div class="sheet" data-only="branches" role="dialog" aria-label="切换分支" hidden>
+  <div class="sheet-head"><h2>切换分支</h2></div>
+  <div class="sheet-sec">本地</div>
+  <button type="button" class="mi" role="radio" aria-checked="true" data-go="git-log"><span class="mi-body"><span class="mono-name">dev</span></span><span class="ms tick">check</span></button>
+  <button type="button" class="mi" role="radio" aria-checked="false" data-go="git-error-switch"><span class="mi-body"><span class="mono-name">main</span></span></button>
+  <button type="button" class="mi" role="radio" aria-checked="false" data-go="git-log"><span class="mi-body"><span class="mono-name">feat-relay</span></span></button>
+  <div class="sheet-sec">只在远端</div>
+  <button type="button" class="mi" role="radio" aria-checked="false" data-go="git-switched"><span class="mi-body"><span class="mono-name">origin/feat-x</span><small>在本地创建 feat-x 并跟踪</small></span></button>
+</div>
+
+<div class="dialog" data-only="busy" role="dialog" aria-label="确认提交" hidden>
+  <h2>claude 正在这个目录工作</h2>
+  <p>「clauderc 协议」正在改 clauderc-app 里的代码，现在提交可能带上它写到一半的改动。</p>
+  <div class="btns"><button type="button" class="tbtn" data-go="git-status">取消</button><button type="button" class="tbtn" data-go="git-status">仍然提交</button></div>
+</div>
+
+<div class="dialog" data-only="upstream" role="dialog" aria-label="设置上游" hidden>
+  <h2>feat-x 还没有上游</h2>
+  <p>推送到 <span class="mono">origin/feat-x</span> 并设为上游。</p>
+  <div class="btns"><button type="button" class="tbtn" data-go="git-status">取消</button><button type="button" class="tbtn" data-go="git-status">推送</button></div>
+</div>
+
+<div class="sheet" data-only="epull epush eauth eswitch" role="dialog" aria-label="操作失败" hidden>
+  <div class="sheet-head" data-only="epull"><h2>无法快进</h2><p>本地和远端各有对方没有的提交。<br>不会自动合并或变基，本地分支没有变化。</p></div>
+  <div class="sheet-head" data-only="epush"><h2>推送被拒绝</h2><p>远端有本地没有的提交，先拉取再推送。</p></div>
+  <div class="sheet-head" data-only="eauth"><h2>目标机缺少 git 凭证</h2><p>请在电脑上配好 SSH 密钥或凭证助手。<br>手机上不会索要密码。</p></div>
+  <div class="sheet-head" data-only="eswitch"><h2>切换到 main 失败</h2><p>会覆盖下面这个文件的未提交改动，工作目录没有变化。</p></div>
+<pre class="code" data-only="epull">$ git pull --ff-only
+hint: Diverging branches can't be fast-forwarded, you need to either:
+hint:
+hint: 	git merge --no-ff
+hint:
+hint: or:
+hint:
+hint: 	git rebase
+<span class="e">fatal: Not possible to fast-forward, aborting.</span></pre>
+<pre class="code" data-only="epush">$ git push
+To github.com:example/clauderc-app.git
+<span class="e"> ! [rejected]        dev -&gt; dev (fetch first)
+error: failed to push some refs to 'github.com:example/clauderc-app.git'</span>
+hint: Updates were rejected because the remote contains work that you do not
+hint: have locally.</pre>
+<pre class="code" data-only="eauth">$ git push
+<span class="e">fatal: could not read Username for 'https://github.com': terminal prompts disabled</span></pre>
+<pre class="code" data-only="eswitch">$ git switch main
+<span class="e">error: Your local changes to the following files would be overwritten by checkout:</span>
+	AGENTS.md
+Please commit your changes or stash them before you switch branches.
+Aborting</pre>
+  <p class="sheet-foot">时间线和改动已刷新</p>
+  <div class="btns"><button type="button" class="tbtn" id="errOk">好</button></div>
+</div>
+
+        </div>
+        <div class="gesture"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // 每个状态：[id, 屏幕, 标题, 标记]
+  var GROUPS = [
+    { name: "接入", items: [
+      ["pair", "pair", "扫码配对", []],
+      ["pair-expired", "pair", "二维码已过期", ["expired"]],
+      ["pair-used", "pair", "二维码已被使用", ["used"]],
+      ["pair-insecure", "pair", "地址没有加密", ["insecure"]],
+      ["pair-revoked", "pair", "访问已被吊销", ["revoked"]],
+      ["machines", "machines", "目标机列表", []],
+      ["machines-offline", "machines", "点离线目标机", ["offtap"]],
+      ["machines-reconnecting", "machines", "与中转服务器断线", ["reconnecting"]]
+    ] },
+    { name: "会话列表", items: [
+      ["sessions", "sessions", "按档位分组的会话", []],
+      ["sessions-refresh", "sessions", "下拉刷新", ["refreshing"]],
+      ["sessions-rename", "sessions", "改档位名", ["rename"]],
+      ["sessions-menu-running", "sessions", "运行中会话的菜单", ["menurun"]],
+      ["sessions-stop", "sessions", "停止工作中的会话", ["stopconfirm"]],
+      ["sessions-menu-stopped", "sessions", "已停止会话的菜单", ["menustop"]],
+      ["sessions-remove", "sessions", "移出列表", ["removeconfirm"]],
+      ["create", "create", "新建会话", []],
+      ["create-error", "create", "目录不存在", ["direrr"]]
+    ] },
+    { name: "聊天", items: [
+      ["chat", "chat", "对话历史", []],
+      ["chat-tool", "chat", "展开工具行", ["toolopen"]],
+      ["chat-working", "chat", "工作中", ["working"]],
+      ["chat-interrupted", "chat", "已中断", ["interrupted"]],
+      ["chat-permission", "chat", "权限请求", ["permission"]],
+      ["chat-handled", "chat", "已在电脑上处理", ["handled"]],
+      ["chat-question", "chat", "提问 · 单选", ["question"]],
+      ["chat-question-multi", "chat", "提问 · 多选和多题", ["qmulti"]],
+      ["chat-attach", "chat", "添加图片", ["attach"]],
+      ["chat-images", "chat", "图片附件", ["images"]],
+      ["chat-image-error", "chat", "图片过大", ["images", "imgerr"]],
+      ["chat-slash", "chat", "斜杠补全", ["slash"]],
+      ["chat-model", "chat", "切换模型", ["model"]],
+      ["chat-mode", "chat", "切换权限模式", ["mode"]],
+      ["chat-stopped", "chat", "给已停止的会话发消息", ["stopped"]],
+      ["chat-offline", "chat", "目标机离线", ["offline"]]
+    ] },
+    { name: "git", items: [
+      ["git-log", "git", "提交时间线", ["tlog"]],
+      ["git-repo", "git", "切换目录", ["tlog", "repo"]],
+      ["git-branches", "git", "切换分支", ["tlog", "branches"]],
+      ["git-commit", "commit", "提交详情", []],
+      ["git-diff", "diff", "差异", []],
+      ["git-diff-folded", "diff", "超长差异折叠", ["folded"]],
+      ["git-status", "git", "当前改动", ["tstatus"]],
+      ["git-busy", "git", "写操作前确认", ["tstatus", "filled", "busy"]],
+      ["git-upstream", "git", "推送前设置上游", ["tstatus", "upstream"]],
+      ["git-error-pull", "git", "拉取失败", ["tstatus", "epull"]],
+      ["git-error-push", "git", "推送被拒绝", ["tstatus", "epush"]],
+      ["git-error-auth", "git", "缺少 git 凭证", ["tstatus", "eauth"]],
+      ["git-error-switch", "git", "切换分支失败", ["tlog", "eswitch"]],
+      ["git-not-repo", "git", "不是 git 仓库", ["notrepo"]]
+    ] }
+  ];
+  // 只能从界面里点到的状态，不出现在目录里
+  var HIDDEN = [
+    ["chat-allowed", "chat", "允许之后", ["allowed"]],
+    ["chat-denied", "chat", "拒绝之后", ["denied"]],
+    ["chat-answered", "chat", "回答之后", ["answered"]],
+    ["git-switched", "git", "切换到远端分支", ["tlog", "switched"]]
+  ];
+  var BACK = {
+    rename: "sessions", menurun: "sessions", menustop: "sessions", stopconfirm: "sessions", removeconfirm: "sessions",
+    attach: "chat", model: "chat", mode: "chat", repo: "git-log", branches: "git-log", eswitch: "git-log",
+    busy: "git-status", upstream: "git-status", epull: "git-status", epush: "git-status", eauth: "git-status"
+  };
+
+  var MAP = {}, ORDER = [];
+  GROUPS.forEach(function (g) {
+    g.items.forEach(function (it) { MAP[it[0]] = { id: it[0], screen: it[1], label: it[2], flags: it[3] }; ORDER.push(it[0]); });
+  });
+  HIDDEN.forEach(function (it) { MAP[it[0]] = { id: it[0], screen: it[1], label: it[2], flags: it[3] }; });
+
+  var app = document.getElementById("app");
+  var device = document.getElementById("device");
+  var current = "pair";
+
+  // ---------- 目录 ----------
+  var dirList = document.getElementById("dirList");
+  var dirSelect = document.getElementById("dirSelect");
+  var n = 0;
+  GROUPS.forEach(function (g) {
+    var sec = document.createElement("div"); sec.className = "dir-group";
+    var h = document.createElement("h2"); h.textContent = g.name; sec.appendChild(h);
+    var ol = document.createElement("ol");
+    var og = document.createElement("optgroup"); og.label = g.name;
+    g.items.forEach(function (it) {
+      n += 1;
+      var li = document.createElement("li");
+      var b = document.createElement("button"); b.type = "button"; b.dataset.go = it[0];
+      var num = document.createElement("span"); num.className = "n"; num.textContent = String(n).padStart(2, "0");
+      var t = document.createElement("span"); t.textContent = it[2];
+      b.appendChild(num); b.appendChild(t); li.appendChild(b); ol.appendChild(li);
+      var o = document.createElement("option"); o.value = it[0]; o.textContent = String(n).padStart(2, "0") + "  " + it[2]; og.appendChild(o);
+    });
+    sec.appendChild(ol); dirList.appendChild(sec); dirSelect.appendChild(og);
+  });
+  dirSelect.addEventListener("change", function () { go(dirSelect.value); });
+
+  // ---------- 时间线 ----------
+  var COMMITS = [
+    { h: "a1f3c92", lane: 0, p: ["7c2e0d4"], s: "定义协议错误码", a: "林舟", t: "12 分钟前", refs: [["head", "dev"]] },
+    { h: "7c2e0d4", lane: 0, p: ["5b81aa0"], s: "定义协议信封", a: "林舟", t: "1 小时前", refs: [] },
+    { h: "5b81aa0", lane: 0, p: ["e09d3f1", "c4a7b22"], s: "合并 feat-relay", a: "林舟", t: "2 小时前", refs: [["ref", "origin/dev"]] },
+    { h: "c4a7b22", lane: 1, p: ["9f10e6c"], s: "中转服务器心跳和离线判定", a: "周遥", t: "3 小时前", refs: [["ref", "feat-relay"]] },
+    { h: "e09d3f1", lane: 0, p: ["31bd7a8"], s: "补充 AGENTS.md 和 .gitignore", a: "林舟", t: "3 小时前", refs: [] },
+    { h: "9f10e6c", lane: 1, p: ["31bd7a8"], s: "注册密钥认证", a: "周遥", t: "4 小时前", refs: [] },
+    { h: "31bd7a8", lane: 0, p: ["50ac5ad"], s: "初始化 Go 模块", a: "林舟", t: "5 小时前", refs: [["ref", "tag: v0.0.1"]] },
+    { h: "d2e8f41", lane: 2, p: ["50ac5ad"], s: "试验 SSE 通道", a: "周遥", t: "昨天", refs: [["ref", "spike-sse"]] },
+    { h: "50ac5ad", lane: 0, p: [], s: "初始化仓库", a: "林舟", t: "昨天", refs: [["ref", "main"], ["ref", "origin/main"]] }
+  ];
+  var ROW = 64, X0 = 24, LX = 14;
+  function laneColor(l) { return "var(--c-lane-" + (l + 1) + ")"; }
+  function buildGraph() {
+    var list = document.getElementById("graphList");
+    var idx = {}; COMMITS.forEach(function (c, i) { idx[c.h] = i; });
+    var NS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("class", "graph");
+    svg.setAttribute("width", "64"); svg.setAttribute("height", String(COMMITS.length * ROW));
+    svg.setAttribute("viewBox", "0 0 64 " + COMMITS.length * ROW);
+    var edges = document.createElementNS(NS, "g"); edges.setAttribute("fill", "none"); edges.setAttribute("stroke-width", "1.5"); edges.setAttribute("stroke-linecap", "round");
+    var nodes = document.createElementNS(NS, "g");
+    COMMITS.forEach(function (c, i) {
+      var x1 = X0 + c.lane * LX, y1 = i * ROW + ROW / 2;
+      c.p.forEach(function (ph) {
+        var j = idx[ph]; if (j === undefined) return;
+        var p = COMMITS[j], x2 = X0 + p.lane * LX, y2 = j * ROW + ROW / 2, d;
+        if (p.lane === c.lane) d = "M" + x1 + " " + y1 + "V" + y2;
+        else if (p.lane > c.lane) d = "M" + x1 + " " + y1 + "C" + x1 + " " + (y1 + ROW * 0.55) + " " + x2 + " " + (y1 + ROW * 0.45) + " " + x2 + " " + (y1 + ROW) + "V" + y2;
+        else d = "M" + x1 + " " + y1 + "V" + (y2 - ROW) + "C" + x1 + " " + (y2 - ROW * 0.45) + " " + x2 + " " + (y2 - ROW * 0.55) + " " + x2 + " " + y2;
+        var path = document.createElementNS(NS, "path");
+        path.setAttribute("d", d); path.setAttribute("stroke", laneColor(Math.max(c.lane, p.lane)));
+        edges.appendChild(path);
+      });
+      var isHead = c.refs.some(function (r) { return r[0] === "head"; });
+      var hollow = c.p.length > 1 || isHead;
+      var dot = document.createElementNS(NS, "circle");
+      dot.setAttribute("cx", x1); dot.setAttribute("cy", y1);
+      dot.setAttribute("r", hollow ? "4.5" : "3.5");
+      dot.setAttribute("fill", hollow ? "var(--c-bg)" : laneColor(c.lane));
+      dot.setAttribute("stroke", laneColor(c.lane)); dot.setAttribute("stroke-width", hollow ? "1.5" : "0");
+      nodes.appendChild(dot);
+    });
+    svg.appendChild(edges); svg.appendChild(nodes); list.appendChild(svg);
+    COMMITS.forEach(function (c) {
+      var b = document.createElement("button"); b.type = "button"; b.className = "crow"; b.dataset.go = "git-commit";
+      var l1 = document.createElement("span"); l1.className = "c-l1";
+      if (c.refs.length) {
+        var refs = document.createElement("span"); refs.className = "c-refs";
+        c.refs.forEach(function (r, k) {
+          if (k) refs.appendChild(document.createTextNode(", "));
+          if (r[0] === "head") { refs.appendChild(document.createTextNode("HEAD → ")); var bb = document.createElement("b"); bb.textContent = r[1]; refs.appendChild(bb); }
+          else refs.appendChild(document.createTextNode(r[1]));
+        });
+        l1.appendChild(refs);
+      }
+      var subj = document.createElement("span"); subj.className = "c-subj"; subj.textContent = c.s; l1.appendChild(subj);
+      var meta = document.createElement("span"); meta.className = "c-meta";
+      meta.textContent = c.h + " · " + c.a + " · " + c.t;
+      b.appendChild(l1); b.appendChild(meta); list.appendChild(b);
+    });
+  }
+  buildGraph();
+
+  // ---------- 斜杠补全 ----------
+  var COMMANDS = [
+    ["/model", "切换模型", ""], ["/memory", "编辑记忆文件", ""], ["/compact", "压缩对话上下文", ""],
+    ["/clear", "清空对话", ""], ["/context", "查看上下文用量", ""], ["/init", "生成 CLAUDE.md", ""],
+    ["/openspec-apply-change", "按任务清单实施变更", "skill"], ["/openspec-propose", "提出一个新变更", "skill"]
+  ];
+  var composer = document.getElementById("composer");
+  var slashPop = document.getElementById("slashPop");
+  var slashList = document.getElementById("slashList");
+  function esc(s) { return s.replace(/[&<>"]/g, function (ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]; }); }
+  function renderSlash() {
+    var v = composer.value;
+    if (v.charAt(0) !== "/" || /\s/.test(v)) { slashPop.hidden = true; return; }
+    var q = v.slice(1).toLowerCase();
+    var hits = COMMANDS.filter(function (c) { return c[0].slice(1).indexOf(q) !== -1; });
+    slashList.innerHTML = "";
+    if (!hits.length) slashList.innerHTML = '<li class="none">没有匹配的命令</li>';
+    hits.forEach(function (c) {
+      var name = esc(c[0]);
+      if (q) { var k = c[0].indexOf(q, 1); name = esc(c[0].slice(0, k)) + "<mark>" + esc(c[0].slice(k, k + q.length)) + "</mark>" + esc(c[0].slice(k + q.length)); }
+      var li = document.createElement("li");
+      li.innerHTML = '<button type="button"><span class="cmd">' + name + '</span><span class="desc">' + esc(c[1]) + '</span><span class="kind">' + c[2] + "</span></button>";
+      li.firstChild.addEventListener("click", function () { composer.value = c[0] + " "; slashPop.hidden = true; composer.focus(); });
+      slashList.appendChild(li);
+    });
+    slashPop.hidden = false;
+  }
+  composer.addEventListener("input", renderSlash);
+
+  // ---------- 提交说明 ----------
+  var commitMsg = document.getElementById("commitMsg");
+  var commitBtn = document.getElementById("commitBtn");
+  function syncCommit() { commitBtn.disabled = commitMsg.value.trim().length === 0; }
+  commitMsg.addEventListener("input", syncCommit);
+  commitBtn.addEventListener("click", function () { if (!commitBtn.disabled) go("git-busy"); });
+
+  function setRadio(btn, on) {
+    btn.setAttribute("aria-checked", String(on));
+    var ic = btn.querySelector(".ms"); if (ic) ic.textContent = on ? "radio_button_checked" : "radio_button_unchecked";
+  }
+
+  // ---------- 状态切换 ----------
+  function apply(id) {
+    var st = MAP[id] || MAP.pair;
+    current = st.id;
+    var flags = st.flags;
+    var has = function (f) { return flags.indexOf(f) !== -1; };
+    app.dataset.flags = flags.join(" ");
+    device.classList.toggle("cam-mode", st.screen === "pair");
+    app.querySelectorAll(".screen").forEach(function (s) { s.hidden = s.dataset.screen !== st.screen; });
+    app.querySelectorAll("[data-only],[data-not]").forEach(function (el) {
+      var show = true;
+      if (el.dataset.only) show = el.dataset.only.split(" ").some(has);
+      if (show && el.dataset.not) show = !el.dataset.not.split(" ").some(has);
+      el.hidden = !show;
+    });
+    // 聊天输入框
+    var offline = has("offline");
+    composer.disabled = offline;
+    document.getElementById("sendBtn").disabled = offline;
+    document.getElementById("attachBtn").disabled = offline;
+    composer.placeholder = offline ? "离线，不能发送" : has("stopped") ? "发消息会先唤醒会话" : "发消息";
+    composer.value = has("slash") ? "/mo" : has("images") ? "这是什么错误" : "";
+    renderSlash();
+    app.querySelectorAll(".tool[data-key]").forEach(function (t) { t.classList.toggle("open", has("toolopen")); });
+    // 新建表单
+    var dirInput = document.getElementById("dirInput");
+    dirInput.value = has("direrr") ? "~/github/clauderc-ap" : "~/github/infra";
+    dirInput.classList.toggle("error", has("direrr"));
+    app.querySelectorAll("#recentDirs [role=radio]").forEach(function (r) { setRadio(r, !has("direrr") && r.dataset.dir === "~/github/infra"); });
+    // 提交说明
+    commitMsg.value = has("filled") ? "定义协议错误码" : "";
+    syncCommit();
+    document.getElementById("unfolded").hidden = true;
+    // 滚动位置
+    app.querySelectorAll(".content").forEach(function (c) { c.scrollTop = 0; });
+    if (st.screen === "chat") { var cs = document.getElementById("chatScroll"); cs.scrollTop = cs.scrollHeight; }
+    // 说明区和目录
+    document.getElementById("capTitle").textContent = st.label;
+    dirList.querySelectorAll("button").forEach(function (b) { b.setAttribute("aria-current", String(b.dataset.go === st.id)); });
+    if (ORDER.indexOf(st.id) !== -1) dirSelect.value = st.id;
+  }
+  function go(id) {
+    if (!MAP[id]) return;
+    if (location.hash.slice(1) === id) apply(id); else location.hash = id;
+  }
+  window.addEventListener("hashchange", function () { apply(location.hash.slice(1) || "pair"); });
+
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-go]");
+    if (t && !t.disabled) { e.preventDefault(); go(t.dataset.go); return; }
+    var tool = e.target.closest(".tool-row");
+    if (tool && tool.querySelector(".ms")) { tool.parentElement.classList.toggle("open"); return; }
+    var ch = e.target.closest(".choices .choice");
+    if (ch) {
+      var box = ch.parentElement;
+      if (box.hasAttribute("data-multi")) { ch.classList.toggle("on"); ch.querySelector(".ms").textContent = ch.classList.contains("on") ? "check_box" : "check_box_outline_blank"; }
+      else if (box.hasAttribute("data-single")) box.querySelectorAll(".choice").forEach(function (o) { o.classList.toggle("on", o === ch); o.querySelector(".ms").textContent = o === ch ? "radio_button_checked" : "radio_button_unchecked"; });
+      return;
+    }
+    var rd = e.target.closest("#recentDirs [role=radio]");
+    if (rd) {
+      app.querySelectorAll("#recentDirs [role=radio]").forEach(function (r) { setRadio(r, r === rd); });
+      var di = document.getElementById("dirInput"); di.value = rd.dataset.dir; di.classList.remove("error");
+      app.querySelectorAll('[data-only="direrr"]').forEach(function (el) { el.hidden = true; });
+    }
+  });
+  document.getElementById("scrim").addEventListener("click", function () {
+    var back = null;
+    MAP[current].flags.forEach(function (x) { if (BACK[x]) back = BACK[x]; });
+    go(back || "pair");
+  });
+  document.getElementById("errOk").addEventListener("click", function () { go(MAP[current].flags.indexOf("eswitch") !== -1 ? "git-log" : "git-status"); });
+  document.getElementById("unfoldBtn").addEventListener("click", function () { document.getElementById("foldBox").hidden = true; document.getElementById("unfolded").hidden = false; });
+  document.getElementById("createForm").addEventListener("submit", function (e) { e.preventDefault(); });
+
+  function step(d) {
+    var i = ORDER.indexOf(current); if (i === -1) i = 0;
+    go(ORDER[(i + d + ORDER.length) % ORDER.length]);
+  }
+  document.getElementById("prevBtn").addEventListener("click", function () { step(-1); });
+  document.getElementById("nextBtn").addEventListener("click", function () { step(1); });
+  document.addEventListener("keydown", function (e) {
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if (e.key === "ArrowRight") step(1);
+    if (e.key === "ArrowLeft") step(-1);
+  });
+
+  // ---------- 主题 ----------
+  var root = document.documentElement;
+  function setTheme(v) {
+    if (v === "light" || v === "dark") root.setAttribute("data-theme", v); else root.removeAttribute("data-theme");
+    document.querySelectorAll("[data-theme-set]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.themeSet === (v || "system"))); });
+    try { localStorage.setItem("clauderc-mock-theme", v || "system"); } catch (err) { /* 存不了就不记 */ }
+  }
+  document.querySelectorAll("[data-theme-set]").forEach(function (b) { b.addEventListener("click", function () { setTheme(b.dataset.themeSet); }); });
+  var saved = null;
+  try { saved = localStorage.getItem("clauderc-mock-theme"); } catch (err) { saved = null; }
+  if (saved) setTheme(saved);
+
+  apply(location.hash.slice(1) || "pair");
+})();
+</script>
