@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.dp
  * 1. Things appear in durM on easeEmph and leave in durS on easeEmphIn; scrims only fade, in durS.
  * 2. Going deeper slides the new page in from the right over the old one, which gives way by a
  *    quarter; going back is the reverse. The three top-level pages swap with a 24dp shift and a fade.
- * 3. Only the nav bar overshoots.
+ * 3. Only the nav bar overshoots, when it springs back onto the top-level pages.
  * Loops (spinners, the pending beacon, the scan line) keep their own fixed periods, listed here too.
  */
 object Motion {
@@ -58,6 +58,11 @@ object Motion {
     val popIn: EnterTransition = slideInHorizontally(enter()) { -it / 4 }
     val popOut: ExitTransition = slideOutHorizontally(enter()) { it }
 
+    // The back gesture scrubs the pop by finger progress, so it stays linear and the page keeps pace with the finger.
+    private fun <T> track(): FiniteAnimationSpec<T> = tween(t.durM, easing = LinearEasing)
+    val gestureIn: EnterTransition = slideInHorizontally(track()) { -it / 4 }
+    val gestureOut: ExitTransition = slideOutHorizontally(track()) { it }
+
     /** Top-level tabs: [dir] is +1 toward the right-hand tab. */
     fun tabIn(px: Int, dir: Int): EnterTransition = slideInHorizontally(enter()) { px * dir } + fadeIn(enter())
     fun tabOut(px: Int, dir: Int): ExitTransition = slideOutHorizontally(exit()) { -px * dir / 2 } + fadeOut(exit())
@@ -65,11 +70,21 @@ object Motion {
     /** The tool row chevron and the group fold arrow turn like the mockup's transform transition. */
     fun <T> turn(): FiniteAnimationSpec<T> = tween(t.durS, easing = t.easeEmph)
 
-    // Loops and the nav bar, the one place that bounces.
+    /**
+     * The nav bar's indicator keeps pace with the tab swap: the edge on the side of travel leads,
+     * the other follows 70ms later, so it stretches a little and settles without bouncing.
+     */
+    fun <T> navLead(): FiniteAnimationSpec<T> = enter()
+    fun <T> navTrail(): FiniteAnimationSpec<T> = tween(t.durM, delayMillis = 70, easing = t.easeEmph)
+
+    /** The nav bar drops 140% of its height away on deeper pages and springs back onto the top-level ones. */
+    val navBarIn: EnterTransition = slideInVertically(tween(t.durL, easing = t.easeSpring)) { it * 7 / 5 }
+    val navBarOut: ExitTransition = slideOutVertically(exit()) { it * 7 / 5 }
+
+    // Loops.
     val spin: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart)
     val beacon: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(2400, easing = LinearEasing))
     val scanLine: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(2600, easing = FastOutSlowInEasing), RepeatMode.Reverse)
-    val navIndicator: FiniteAnimationSpec<Float> = tween(600, easing = LinearEasing)
 }
 
 /**
