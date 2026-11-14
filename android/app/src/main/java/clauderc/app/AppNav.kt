@@ -13,6 +13,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -34,10 +35,12 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import clauderc.app.chat.ChatActions
@@ -68,6 +71,7 @@ import clauderc.app.ui.components.SnackState
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.Symbols
+import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import java.io.File
@@ -84,6 +88,16 @@ import kotlinx.serialization.Serializable
 @Composable
 fun ClaudercNav(container: AppContainer) {
     val nav = rememberNavController()
+    // The home tabs are the glass bar's blur source; the bar itself floats over every page.
+    val haze = rememberHazeState()
+    Box(Modifier.fillMaxSize()) {
+        ClaudercPages(container, nav, haze)
+        HomeNavBar(container, nav, haze, Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+@Composable
+private fun ClaudercPages(container: AppContainer, nav: NavHostController, haze: HazeState) {
     val scope = rememberCoroutineScope()
 
     // The machine page is always the first page; scanning starts from its 「添加」.
@@ -115,6 +129,7 @@ fun ClaudercNav(container: AppContainer) {
             HomeScreen(
                 container,
                 nav,
+                haze,
                 onAdd = { nav.navigate(PairRoute) { launchSingleTop = true } },
                 onClearAll = { scope.launch { container.credentials.clear() } },
             )
@@ -149,8 +164,8 @@ fun ClaudercNav(container: AppContainer) {
 
 /**
  * The app's NavHost: a deeper page slides in from the right over the current one, and back
- * slides it off to the right again (Motion rule 2). The system back gesture scrubs the same
- * transition, so the page follows the finger.
+ * slides it off to the right again (Motion rule 2). The system back gesture scrubs a linear
+ * copy of that slide, so the page follows the finger.
  */
 @Composable
 fun ClaudercNavHost(nav: NavHostController, startDestination: Any, builder: NavGraphBuilder.() -> Unit) {
@@ -162,6 +177,9 @@ fun ClaudercNavHost(nav: NavHostController, startDestination: Any, builder: NavG
         exitTransition = { Motion.pushOut },
         popEnterTransition = { Motion.popIn },
         popExitTransition = { Motion.popOut },
+        // Without these NavHost scales the leaving page down to 0.7 during the back gesture.
+        predictivePopEnterTransition = { Motion.gestureIn },
+        predictivePopExitTransition = { Motion.gestureOut },
         builder = builder,
     )
 }
@@ -177,50 +195,62 @@ private fun LightSystemBars() {
 }
 
 @Composable
-private fun HomeScreen(container: AppContainer, nav: NavHostController, onAdd: () -> Unit, onClearAll: () -> Unit) {
+private fun HomeScreen(container: AppContainer, nav: NavHostController, haze: HazeState, onAdd: () -> Unit, onClearAll: () -> Unit) {
     val c = Clauderc.colors
     val selection = container.selection
     val tab by selection.tab.collectAsStateWithLifecycle()
     val machines by container.fleet.machines.collectAsStateWithLifecycle()
-    val sessions by container.fleet.sessions.collectAsStateWithLifecycle()
     val chosen by selection.machineId.collectAsStateWithLifecycle()
     // Default to the first online machine until the user picks one.
     val machineId = chosen ?: machines?.firstOrNull { it.online }?.id
-    val pendingSomewhere = sessions.values.any { list -> list.sessions.any { it.state == SessionState.Pending } }
-    val haze = rememberHazeState()
     val snack = remember { SnackState() }
     LaunchedEffect(Unit) { container.notices.collect { snack.show(it) } }
     val shift = with(LocalDensity.current) { 24.dp.roundToPx() }
 
-    Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().background(c.bg).hazeSource(haze)) {
-            AnimatedContent(
-                targetState = tab,
-                transitionSpec = {
-                    val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                    Motion.tabIn(shift, dir).togetherWith(Motion.tabOut(shift, dir))
-                },
-                label = "tabs",
-            ) { t ->
-                when (t) {
-                    MainTab.Machines -> {
-                        val vm = viewModel { MachinesViewModel(container.fleet, container.connection.links) }
-                        val state by vm.state.collectAsStateWithLifecycle()
-                        MachinesScreen(state, onOpen = selection::openSessions, onAdd = onAdd, onClearAll = onClearAll, snack = snack)
-                    }
-                    MainTab.Sessions -> if (machineId == null) {
-                        SessionsScreen(SessionsUiState(), {}, {}, {}, {}, { _, _ -> }, {}, {})
-                    } else {
-                        SessionsTab(container, machineId, nav)
-                    }
-                    MainTab.Git -> if (machineId == null) {
-                        GitScreen(clauderc.app.git.GitUiState(), GitActions())
-                    } else {
-                        GitTab(container, machineId, nav)
-                    }
+    Box(Modifier.fillMaxSize().background(c.bg).hazeSource(haze)) {
+        AnimatedContent(
+            targetState = tab,
+            transitionSpec = {
+                val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                Motion.tabIn(shift, dir).togetherWith(Motion.tabOut(shift, dir))
+            },
+            label = "tabs",
+        ) { t ->
+            when (t) {
+                MainTab.Machines -> {
+                    val vm = viewModel { MachinesViewModel(container.fleet, container.connection.links) }
+                    val state by vm.state.collectAsStateWithLifecycle()
+                    MachinesScreen(state, onOpen = selection::openSessions, onAdd = onAdd, onClearAll = onClearAll, snack = snack)
+                }
+                MainTab.Sessions -> if (machineId == null) {
+                    SessionsScreen(SessionsUiState(), {}, {}, {}, {}, { _, _ -> }, {}, {})
+                } else {
+                    SessionsTab(container, machineId, nav)
+                }
+                MainTab.Git -> if (machineId == null) {
+                    GitScreen(clauderc.app.git.GitUiState(), GitActions())
+                } else {
+                    GitTab(container, machineId, nav)
                 }
             }
         }
+    }
+}
+
+/**
+ * The glass bar is its own layer over the pages, as in the mockup: it drops away when a deeper page
+ * opens and springs back once home is current again. During the back gesture home is not current
+ * until the finger lifts, so the bar waits for the release.
+ */
+@Composable
+private fun HomeNavBar(container: AppContainer, nav: NavHostController, haze: HazeState, modifier: Modifier) {
+    val entry by nav.currentBackStackEntryAsState()
+    // Home is the start page, so the bar is already there before the first entry lands.
+    val onHome = entry?.destination?.hasRoute<HomeRoute>() ?: true
+    val tab by container.selection.tab.collectAsStateWithLifecycle()
+    val sessions by container.fleet.sessions.collectAsStateWithLifecycle()
+    val pendingSomewhere = sessions.values.any { list -> list.sessions.any { it.state == SessionState.Pending } }
+    AnimatedVisibility(onHome, modifier, enter = Motion.navBarIn, exit = Motion.navBarOut) {
         GlassNavBar(
             tabs = listOf(
                 NavTab("目标机", Symbols.Computer, Symbols.ComputerFilled),
@@ -228,9 +258,8 @@ private fun HomeScreen(container: AppContainer, nav: NavHostController, onAdd: (
                 NavTab("git", Symbols.AccountTree, Symbols.AccountTreeFilled),
             ),
             selected = tab.ordinal,
-            onSelect = { selection.tab.value = MainTab.entries[it] },
+            onSelect = { container.selection.tab.value = MainTab.entries[it] },
             hazeState = haze,
-            modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
 }

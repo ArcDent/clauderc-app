@@ -1,10 +1,7 @@
 package clauderc.app.ui.components
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.keyframes
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -29,26 +26,23 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Motion
@@ -57,15 +51,14 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.HazeBlurStyle
 import dev.chrisbanes.haze.blur.HazeColorEffect
 import dev.chrisbanes.haze.blur.hazeBlur
+import kotlinx.coroutines.launch
 
 data class NavTab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector, val dot: Boolean = false)
 
-private val IndicatorStretch = CubicBezierEasing(0.3f, 0f, 0.2f, 1f)
-
 /**
  * The liquid-glass bottom navigation from the mockup: a blurred, tinted pill
- * floating 12dp above the bottom edge. Switching tabs stretches the indicator
- * over both cells, then springs it into the new cell.
+ * floating 12dp above the bottom edge. Switching tabs moves the indicator's
+ * leading edge first and lets the trailing edge catch up, in step with the page swap.
  */
 @Composable
 fun GlassNavBar(
@@ -76,7 +69,6 @@ fun GlassNavBar(
     modifier: Modifier = Modifier,
 ) {
     val c = Clauderc.colors
-    val m = Clauderc.motion
     val shape = RoundedCornerShape(32.dp)
     val glass = if (hazeState != null) {
         Modifier.hazeBlur(
@@ -98,16 +90,13 @@ fun GlassNavBar(
         Modifier.background(c.glass.copy(alpha = 0.92f))
     }
 
-    var from by remember { mutableIntStateOf(selected) }
-    var to by remember { mutableIntStateOf(selected) }
-    val progress = remember { Animatable(1f) }
+    // Indicator edges, in cells. A new tap retargets both from wherever they are.
+    val left = remember { Animatable(selected.toFloat()) }
+    val right = remember { Animatable(selected + 1f) }
     LaunchedEffect(selected) {
-        if (selected != to) {
-            from = to
-            to = selected
-            progress.snapTo(0f)
-            progress.animateTo(1f, Motion.navIndicator)
-        }
+        val toRight = selected > left.value
+        launch { left.animateTo(selected.toFloat(), if (toRight) Motion.navTrail() else Motion.navLead()) }
+        launch { right.animateTo(selected + 1f, if (toRight) Motion.navLead() else Motion.navTrail()) }
     }
 
     Box(
@@ -138,24 +127,11 @@ fun GlassNavBar(
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val cell = maxWidth / tabs.size
-            val t = progress.value
-            val fromL = cell * from
-            val toL = cell * to
-            val unionL = minOf(fromL, toL)
-            val unionR = maxOf(fromL, toL) + cell
-            val (left, right, sy) = if (t < 0.38f) {
-                val u = IndicatorStretch.transform(t / 0.38f)
-                Triple(lerp(fromL, unionL, u), lerp(fromL + cell, unionR, u), 1f + (0.86f - 1f) * u)
-            } else {
-                val u = m.easeSpring.transform((t - 0.38f) / 0.62f)
-                Triple(lerp(unionL, toL, u), lerp(unionR, toL + cell, u), 0.86f + (1f - 0.86f) * u)
-            }
             Box(
                 Modifier
-                    .offset(x = left)
-                    .width(right - left)
+                    .offset(x = cell * left.value)
+                    .width(cell * (right.value - left.value))
                     .fillMaxHeight()
-                    .graphicsLayer { scaleY = sy }
                     .shadow(4.dp, RoundedCornerShape(26.dp), ambientColor = c.glassShadow, spotColor = c.glassShadow)
                     .clip(RoundedCornerShape(26.dp))
                     .background(c.glassInd)
@@ -171,18 +147,9 @@ fun GlassNavBar(
 @Composable
 private fun NavCell(tab: NavTab, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val c = Clauderc.colors
-    val m = Clauderc.motion
-    val scale = remember { Animatable(1f) }
-    LaunchedEffect(selected) {
-        if (selected) {
-            scale.animateTo(1f, keyframes {
-                durationMillis = 560
-                0.8f at 140 using m.easeEmph
-                1.14f at 140 + 252 using m.easeEmph
-                1f at 560
-            })
-        }
-    }
+    // The selected look fades in as the indicator arrives, like the mockup's FILL transition.
+    val on by animateFloatAsState(if (selected) 1f else 0f, Motion.enter(), label = "navCell")
+    val tint = lerp(c.fg2, c.fg, on)
     Box(
         modifier
             .fillMaxHeight()
@@ -191,13 +158,11 @@ private fun NavCell(tab: NavTab, selected: Boolean, modifier: Modifier, onClick:
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Icon(
-                if (selected) tab.selectedIcon else tab.icon,
-                contentDescription = null,
-                tint = if (selected) c.fg else c.fg2,
-                modifier = Modifier.size(24.dp).scale(scale.value),
-            )
-            Text(tab.label, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = if (selected) c.fg else c.fg2)
+            Box(Modifier.size(24.dp)) {
+                Icon(tab.icon, contentDescription = null, tint = tint, modifier = Modifier.fillMaxSize().alpha(1f - on))
+                Icon(tab.selectedIcon, contentDescription = null, tint = tint, modifier = Modifier.fillMaxSize().alpha(on))
+            }
+            Text(tab.label, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = tint)
         }
         if (tab.dot) {
             Box(

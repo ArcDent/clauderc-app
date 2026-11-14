@@ -516,8 +516,8 @@ textarea.input { resize: none; line-height: 1.5; }
   content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 0;
   background: radial-gradient(140% 120% at 20% -30%, var(--c-glass-sheen) 0%, transparent 46%), linear-gradient(180deg, var(--c-glass-sheen) 0%, transparent 38%);
 }
-.nav-ind { position: absolute; top: 6px; left: 0; height: 52px; width: 0; border-radius: 26px; z-index: 1; background: var(--c-glass-ind); box-shadow: inset 0 1px 0.5px var(--c-glass-hi), inset 0 0 0 0.5px var(--c-glass-edge), 0 4px 12px -4px var(--c-glass-shadow); }
-.nav-item { z-index: 2; border: 0; background: none; border-radius: 26px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; color: var(--c-fg-2); font-size: 11px; font-weight: 500; }
+.nav-ind { position: absolute; top: 6px; left: 0; right: 100%; height: 52px; border-radius: 26px; z-index: 1; background: var(--c-glass-ind); box-shadow: inset 0 1px 0.5px var(--c-glass-hi), inset 0 0 0 0.5px var(--c-glass-edge), 0 4px 12px -4px var(--c-glass-shadow); }
+.nav-item { z-index: 2; border: 0; background: none; border-radius: 26px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; color: var(--c-fg-2); font-size: 11px; font-weight: 500; transition: color var(--dur-m) var(--ease-emph); }
 .nav-item .ms { font-size: 24px; transition: font-variation-settings var(--dur-m) var(--ease-emph); }
 .nav-item[aria-current="true"] { color: var(--c-fg); }
 .nav-item[aria-current="true"] .ms { font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24; }
@@ -1544,24 +1544,23 @@ Aborting</pre>
     }
   }
 
-  // 液态玻璃导航栏：指示块先拉长盖住新旧两格，再回弹缩到新位置
+  // 液态玻璃导航栏：指示块朝目标那一侧的边先走，另一侧晚 70ms 跟上，略微拉长再收拢，和页面切换同步，不回弹；
+  // 图标和文字的选中色随它渐变
   var navbar = document.getElementById("navbar");
   var navInd = document.getElementById("navInd");
   var navPos = null;
   function moveInd(btn, animate) {
-    var x = btn.offsetLeft, w = btn.offsetWidth;
+    var x = btn.offsetLeft, r = navbar.clientWidth - x - btn.offsetWidth;
     if (animate && animOK() && navPos && navPos.x !== x) {
-      var l = Math.min(navPos.x, x), r = Math.max(navPos.x + navPos.w, x + w);
-      navInd.animate([
-        { transform: "translateX(" + navPos.x + "px) scaleY(1)", width: navPos.w + "px", easing: "cubic-bezier(0.3, 0, 0.2, 1)" },
-        { transform: "translateX(" + l + "px) scaleY(0.86)", width: (r - l) + "px", offset: 0.38, easing: EASE.spring },
-        { transform: "translateX(" + x + "px) scaleY(1)", width: w + "px" }
-      ], { duration: 600, easing: "linear" });
-      btn.querySelector(".ms").animate([{ transform: "scale(0.8)" }, { transform: "scale(1.14)", offset: 0.6 }, { transform: "scale(1)" }], { duration: 420, delay: 140, easing: EASE.emph });
+      var toRight = x > navPos.x;
+      var lead = { duration: D.m, easing: EASE.emph };
+      var trail = { duration: D.m, delay: 70, easing: EASE.emph, fill: "backwards" };
+      navInd.animate([{ left: navPos.x + "px" }, { left: x + "px" }], toRight ? trail : lead);
+      navInd.animate([{ right: navPos.r + "px" }, { right: r + "px" }], toRight ? lead : trail);
     }
-    navInd.style.transform = "translateX(" + x + "px)";
-    navInd.style.width = w + "px";
-    navPos = { x: x, w: w };
+    navInd.style.left = x + "px";
+    navInd.style.right = r + "px";
+    navPos = { x: x, r: r };
   }
   function syncNav(name) {
     var wasShown = !navbar.hidden && !navbar._leaving;
