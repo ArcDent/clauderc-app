@@ -32,6 +32,8 @@ Android 工程只有一个 `app` 模块，包名 `clauderc.app`，按页面分�
 
 ## 构建和运行
 
+需要 Go 1.27.3 或更新：
+
 ```sh
 go build ./...
 go run ./cmd/agent --version
@@ -50,6 +52,13 @@ export JAVA_HOME="$(brew --prefix openjdk@21)/libexec/openjdk.jdk/Contents/Home"
 ```
 
 `gradle.properties` 关掉了 AGP 自动下载 SDK 组件，缺什么会直接报错，不会自己装。
+
+在本机构建全部产物，放在 `dist/`：
+
+```sh
+scripts/build.sh                     # 8 个二进制和 debug APK，版本号默认取 git describe
+APK=release scripts/build.sh 1.0.0   # 签名的正式版 APK，签名配置放在 .local/android-signing.properties
+```
 
 ## 发版
 
