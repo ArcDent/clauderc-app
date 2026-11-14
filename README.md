@@ -4,8 +4,7 @@
 
 <p align="center">
   <a href="#快速开始">快速开始</a> ·
-  <a href="#配置">配置</a> ·
-  <a href="#开发">开发</a>
+  <a href="#配置">配置</a>
 </p>
 
 <p align="center">
@@ -223,47 +222,7 @@ APP 没有配置文件。中转服务器地址和凭证都从配对二维码里�
 
 ## 开发
 
-需要 Go 1.27.3 或更新，以及 JDK 21、Android SDK 平台 `android-37.0` 和构建工具 `37.0.0`，`android/local.properties` 里写好 `sdk.dir`。
-
-```sh
-gofmt -l .                         # 必须没有输出
-go vet ./...
-go test ./...                      # 含端到端测试，用假的 claude
-(cd android && ./gradlew testDebugUnitTest assembleDebug)
-```
-
-升级 Claude Code 后，用真实会话跑一遍回归。测试会在 `.local/e2e-ws/` 下起后台会话，跑完自己停止并移出，不碰已有会话：
-
-```sh
-CLAUDERC_E2E_CLAUDE=<claude 命令> go test -tags e2e -v -timeout 40m ./test/e2e/claude/...
-```
-
-在本机构建全部产物，放在 `dist/`：
-
-```sh
-scripts/build.sh                     # 8 个二进制和 debug APK，版本号默认取 git describe
-APK=release scripts/build.sh 1.0.0   # 签名的正式版 APK，签名配置放在 .local/android-signing.properties
-```
-
-### 发版
-
-推一个 `v` 开头的版本标签，GitHub Actions 先跑上面的检查，再发布镜像、npm 包和带全部文件的 Release：
-
-```sh
-git tag v1.2.3 && git push origin v1.2.3
-```
-
-`v1.2.3-beta.1` 这样带后缀的是预发布：镜像不更新 `latest`，npm 用 `next` 标签。仓库要先配好这些 secrets，缺了对应的部分会跳过：
-
-| secret | 用途 |
-|---|---|
-| `ANDROID_KEYSTORE_BASE64` | 签名密钥库文件的 base64，用 `base64 -i <密钥库>` 得到；缺了就发 debug 版 APK |
-| `ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` | 密钥库密码、密钥别名和密钥密码 |
-| `NPM_TOKEN` | 有 `@arcdent` 发布权限的 npm token；缺了就不发 npm |
-
-镜像第一次推到 ghcr.io 时默认是私有的，要在 GitHub 的 Packages 设置里把 `clauderc-relay` 改成公开，别人才能直接拉取。
-
-开发规则见 [AGENTS.md](AGENTS.md)。
+构建、测试和开发规则见 [AGENTS.md](AGENTS.md)。
 
 ## 许可证
 
