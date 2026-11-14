@@ -6,12 +6,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
@@ -21,20 +29,35 @@ import clauderc.app.ClaudercNavHost
 import clauderc.app.chat.ChatActions
 import clauderc.app.chat.ChatScreen
 import clauderc.app.chat.ChatUiState
+import clauderc.app.git.DiffScreen
+import clauderc.app.git.GitActions
+import clauderc.app.git.GitScreen
+import clauderc.app.git.GitUiState
+import clauderc.app.git.Loadable
 import clauderc.app.protocol.Command
+import clauderc.app.protocol.Commit
+import clauderc.app.protocol.Edge
+import clauderc.app.protocol.GitDiffResponse
+import clauderc.app.protocol.GitStatusResponse
 import clauderc.app.protocol.Pending
 import clauderc.app.protocol.PendingKind
 import clauderc.app.protocol.SessionState
+import clauderc.app.sessions.CreateSessionScreen
+import clauderc.app.sessions.CreateUiState
+import clauderc.app.testing.T0
 import clauderc.app.ui.theme.ClaudercMotion
 import clauderc.app.ui.theme.ClaudercTheme
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 @Serializable internal data object ListPage
 @Serializable internal data object ChatPage
@@ -132,5 +155,71 @@ class MotionTest {
         compose.mainClock.advanceTimeBy(enter)
         val panelEnd = compose.onAllNodesWithTag("pendingPanel", useUnmergedTree = true).onFirst().fetchSemanticsNode().positionInRoot.y
         assertTrue("panel a quarter in at y=$panelMid, settled at y=$panelEnd", panelMid > panelEnd)
+    }
+
+    @Test fun allDirsGrowIn() {
+        val dirs = (1..14).map { "/Users/me/github/p$it" }
+        var state by mutableStateOf(CreateUiState(profileTitle = "官方", dir = dirs[0], recent = dirs))
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                CreateSessionScreen(
+                    state, onClose = {}, onSubmit = {}, onDir = {}, onPickDir = {},
+                    onShowAllDirs = { state = state.copy(showAllDirs = true) }, onName = {}, onPrompt = {},
+                )
+            }
+        }
+        compose.waitForIdle()
+        // The list runs past the screen bottom, so measure its laid-out height rather than its clipped bounds.
+        fun height() = compose.onNodeWithTag("dirs", useUnmergedTree = true).fetchSemanticsNode().size.height
+        val before = height()
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithText("全部 14 个").performClick()
+        partWay(0.5)
+        val mid = height()
+        compose.mainClock.advanceTimeBy(enter)
+        val end = height()
+        assertTrue("before $before, halfway $mid, settled $end", before < mid && mid < end)
+        compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)).assertCountEquals(14)
+    }
+
+    @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun expandedDiffFadesIn() {
+        val patch = "@@ -0,0 +1,1200 @@\n" + (1..1200).joinToString("\n") { "+line $it" }
+        val diff = Loadable(GitDiffResponse("big.txt", patch = patch, collapsed = true))
+        compose.setContent { ClaudercTheme(darkTheme = false) { DiffScreen("big.txt", "未暂存", diff, onBack = {}) } }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        fun shot() = compose.onRoot().captureToImage().asAndroidBitmap()
+        val folded = shot()
+        compose.onNodeWithText("展开").performClick()
+        partWay(0.5)
+        val mid = shot()
+        compose.mainClock.advanceTimeBy(enter)
+        val end = shot()
+        assertFalse("halfway looks like the folded page", mid.sameAs(folded))
+        assertFalse("halfway looks like the settled diff", mid.sameAs(end))
+    }
+
+    @Test fun gitTabsSlideTheUnderlineAndSwapTheContent() {
+        val commit = Commit(hash = "c000001", author = "林舟", time = T0, subject = "提交", edges = listOf(Edge(0, 0)))
+        var state by mutableStateOf(GitUiState(dir = "/Users/me/github/app", status = GitStatusResponse(branch = "dev"), commits = listOf(commit)))
+        compose.setContent { ClaudercTheme(darkTheme = false) { GitScreen(state, GitActions(onTab = { state = state.copy(tab = it) })) } }
+        compose.waitForIdle()
+        fun x(tag: String) = compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().positionInRoot.x
+        val logX = compose.onNodeWithText("时间线").fetchSemanticsNode().positionInRoot.x
+        val statusX = compose.onNodeWithText("改动").fetchSemanticsNode().positionInRoot.x
+
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithText("改动").performClick()
+        partWay(0.5)
+        compose.onNodeWithTag("timeline").assertExists()
+        compose.onNodeWithTag("changes").assertExists()
+        val mid = x("tabUnderline")
+        assertTrue("halfway the underline is at $mid, between $logX and $statusX", mid > logX && mid < statusX)
+
+        compose.mainClock.advanceTimeBy(enter)
+        compose.onNodeWithTag("timeline").assertDoesNotExist()
+        compose.onNodeWithTag("changes").assertExists()
+        assertEquals(statusX, x("tabUnderline"), 1f)
     }
 }

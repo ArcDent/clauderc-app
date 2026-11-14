@@ -1,5 +1,6 @@
 package clauderc.app.sessions
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -33,6 +35,7 @@ import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.UnderlineField
 import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.Lift
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Symbols
 
@@ -52,7 +55,7 @@ fun CreateSessionScreen(
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
-    Column(Modifier.fillMaxSize().imePadding()) {
+    Column(Modifier.fillMaxSize().background(c.bg).imePadding()) {
         AppBar(
             navigation = { SymbolButton(Symbols.Close, "关闭", onClick = onClose) },
             title = { BarTitle("新建会话") },
@@ -83,29 +86,14 @@ fun CreateSessionScreen(
                 FieldLabel("工作目录")
                 UnderlineField(state.dir, onDir, mono = true, error = state.dirError != null, placeholder = "/path/to/project")
                 state.dirError?.let { FieldError(it) }
-                Column(Modifier.padding(top = sp.sp2)) {
-                    state.visibleDirs.forEach { dir ->
-                        val checked = dir == state.dir.trim()
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .selectable(selected = checked, role = Role.RadioButton, onClick = { onPickDir(dir) })
-                                .padding(vertical = 10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(sp.sp4),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                if (checked) Symbols.RadioChecked else Symbols.RadioUnchecked,
-                                contentDescription = null,
-                                tint = if (checked) c.accent else c.fg3,
-                            )
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(baseName(dir), fontSize = 15.sp)
-                                Text(shortPath(dir), fontFamily = MonoFamily, fontSize = 11.sp, color = c.fg3, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
+                Column(Modifier.padding(top = sp.sp2).testTag("dirs")) {
+                    val head = state.recent.take(5)
+                    head.forEach { DirRow(it, it == state.dir.trim(), onPickDir) }
+                    // 「全部 N 个」 grows the rest in with the lift rule instead of popping them in.
+                    Lift(visible = state.showAllDirs) {
+                        Column { state.recent.drop(head.size).forEach { DirRow(it, it == state.dir.trim(), onPickDir) } }
                     }
-                    if (!state.showAllDirs && state.recent.size > 5) {
+                    Lift(visible = !state.showAllDirs && state.recent.size > head.size) {
                         Text(
                             "全部 ${state.recent.size} 个",
                             modifier = Modifier
@@ -126,6 +114,29 @@ fun CreateSessionScreen(
                 UnderlineField(state.prompt, onPrompt, singleLine = false, minLines = 2, placeholder = "不填就只启动会话")
             }
             state.error?.let { FieldError(it) }
+        }
+    }
+}
+
+@Composable
+private fun DirRow(dir: String, checked: Boolean, onPickDir: (String) -> Unit) {
+    val c = Clauderc.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .selectable(selected = checked, role = Role.RadioButton, onClick = { onPickDir(dir) })
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp4),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (checked) Symbols.RadioChecked else Symbols.RadioUnchecked,
+            contentDescription = null,
+            tint = if (checked) c.accent else c.fg3,
+        )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(baseName(dir), fontSize = 15.sp)
+            Text(shortPath(dir), fontFamily = MonoFamily, fontSize = 11.sp, color = c.fg3, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

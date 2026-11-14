@@ -6,8 +6,10 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,6 +71,7 @@ import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Symbols
+import clauderc.app.ui.theme.pressShrink
 
 fun glyphOf(state: SessionState) = when (state) {
     SessionState.Pending -> Glyph.Need
@@ -245,8 +248,15 @@ private fun GroupHeader(group: SessionGroup, enabled: Boolean, onRename: () -> U
         horizontalArrangement = Arrangement.spacedBy(sp.sp2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val press = remember { MutableInteractionSource() }
         Row(
-            Modifier.then(if (group.canRename) Modifier.clickable(role = Role.Button, onClickLabel = "改档位名", onClick = onRename) else Modifier),
+            Modifier.then(
+                if (group.canRename) {
+                    Modifier.pressShrink(press).clickable(press, LocalIndication.current, role = Role.Button, onClickLabel = "改档位名", onClick = onRename)
+                } else {
+                    Modifier
+                },
+            ),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

@@ -3,6 +3,7 @@ package clauderc.app.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -13,6 +14,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -24,6 +26,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.PressIndication
+import clauderc.app.ui.theme.pressShrink
 
 /** .btn.accent / .ink / .tonal / .outline */
 enum class PillStyle { Accent, Ink, Tonal, Outline }
@@ -46,13 +50,15 @@ fun PillButton(
         style == PillStyle.Tonal -> c.surface to c.fg
         else -> Color.Transparent to c.fg
     }
+    val press = remember { MutableInteractionSource() }
     Row(
         modifier
+            .pressShrink(press)
             .height(height)
             .clip(CircleShape)
             .background(bg)
             .then(if (style == PillStyle.Outline && enabled) Modifier.border(1.dp, c.surface2, CircleShape) else Modifier)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(press, PressIndication(fg), enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = if (height < 48.dp) Clauderc.spacing.sp4 else Clauderc.spacing.sp6),
         horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp2, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
@@ -81,11 +87,13 @@ fun TextAction(
         tone == TextTone.Danger -> c.danger
         else -> c.fg
     }
+    val press = remember { MutableInteractionSource() }
     Box(
         modifier
+            .pressShrink(press)
             .height(40.dp)
             .clip(CircleShape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(press, PressIndication(color), enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = Clauderc.spacing.sp3),
         contentAlignment = Alignment.Center,
     ) {
@@ -105,11 +113,13 @@ fun SymbolButton(
     tint: Color = Clauderc.colors.fg,
 ) {
     val box = if (small) 40.dp else 48.dp
+    val press = remember { MutableInteractionSource() }
     Box(
         modifier
+            .pressShrink(press)
             .size(box)
             .clip(CircleShape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+            .clickable(press, PressIndication(tint), enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(

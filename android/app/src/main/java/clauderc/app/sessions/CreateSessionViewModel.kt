@@ -39,7 +39,6 @@ data class CreateUiState(
     val submitting: Boolean = false,
 ) {
     val canSubmit get() = canCreate && dir.isNotBlank() && !submitting
-    val visibleDirs get() = if (showAllDirs) recent else recent.take(5)
 }
 
 /** The new-session form of one profile (task 12.4, design D8). */

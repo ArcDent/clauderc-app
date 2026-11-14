@@ -164,10 +164,10 @@ data class ClaudercRadii(
 /** --ease-* and --dur-* */
 @Immutable
 data class ClaudercMotion(
-    val easeEmph: CubicBezierEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f),
-    val easeEmphIn: CubicBezierEasing = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f),
-    val easeSpring: CubicBezierEasing = CubicBezierEasing(0.34f, 1.5f, 0.64f, 1f),
-    val durS: Int = 200,
-    val durM: Int = 350,
-    val durL: Int = 500,
+    val easeEmph: CubicBezierEasing = CubicBezierEasing(0.25f, 1f, 0.5f, 1f),
+    val easeEmphIn: CubicBezierEasing = CubicBezierEasing(0.3f, 0f, 1f, 1f),
+    val easeSpring: CubicBezierEasing = CubicBezierEasing(0.34f, 1.3f, 0.64f, 1f),
+    val durS: Int = 150,
+    val durM: Int = 280,
+    val durL: Int = 350,
 )
