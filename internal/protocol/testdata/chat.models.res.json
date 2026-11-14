@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-024",
+  "method": "chat.models",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "models": [
+      {"id": "Default (recommended)", "label": "Default (recommended)", "description": "Use the default model (currently deepseek-v4.1-flash[1m]) · Set by ANTHROPIC_DEFAULT_MODEL", "current": false},
+      {"id": "Opus 5.5", "label": "Opus 5.5", "description": "Custom Opus model (claude-opus-5-5[1M])", "current": false},
+      {"id": "glm-5.3-flash[1M]", "label": "glm-5.3-flash[1M]", "description": "Custom Haiku model", "current": true}
+    ]
+  }
+}

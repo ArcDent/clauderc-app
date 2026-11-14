@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-044",
+  "method": "git.diff",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "path": "internal/agent/conn/conn.go",
+    "binary": false,
+    "patch": "@@ -10,3 +10,4 @@ func run() {\n \tfor {\n-\t\ttime.Sleep(time.Second)\n+\t\ttime.Sleep(backoff)\n+\t\tbackoff = min(backoff*2, maxBackoff)\n \t}\n",
+    "collapsed": false
+  }
+}

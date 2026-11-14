@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-031",
+  "method": "session.create",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"profileId": "default", "cwd": "/Users/me/notes"}
+}

@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-045",
+  "method": "git.diff",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"dir": "/Users/me/code/clauderc", "path": "internal/protocol/chat.go", "staged": true}
+}

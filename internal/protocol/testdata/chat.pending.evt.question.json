@@ -1,0 +1,36 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.pending",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "pending": {
+      "toolUseId": "toolu_01C",
+      "kind": "question",
+      "questions": [
+        {
+          "question": "你喜欢哪种颜色",
+          "header": "颜色",
+          "multiSelect": false,
+          "options": [
+            {"label": "红", "description": "暖色"},
+            {"label": "绿", "description": "自然"},
+            {"label": "蓝", "description": "冷色"}
+          ]
+        },
+        {
+          "question": "要启用哪些检查",
+          "header": "检查",
+          "multiSelect": true,
+          "options": [
+            {"label": "gofmt", "description": "格式"},
+            {"label": "go vet", "description": "静态检查"},
+            {"label": "go test", "description": "单元测试"}
+          ]
+        }
+      ]
+    }
+  }
+}

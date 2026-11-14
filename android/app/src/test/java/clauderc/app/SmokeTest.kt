@@ -1,0 +1,38 @@
+package clauderc.app
+
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
+
+/** The real activity and app container start; an unpaired phone lands on the machine page and scans only after 「添加」. */
+@RunWith(AndroidJUnit4::class)
+@Config(qualifiers = "w390dp-h844dp")
+class SmokeTest {
+    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+
+    private fun waitFor(text: String) =
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty() }
+
+    @Test fun unpairedPhoneOpensTheMachinePageAndScansFromAdd() {
+        waitFor("还没有目标机")
+        compose.onNodeWithText("还没有目标机").assertIsDisplayed()
+        compose.onNodeWithText("扫描配对二维码").assertDoesNotExist()
+
+        compose.onNodeWithText("添加").performClick()
+        waitFor("扫描配对二维码")
+        compose.onNodeWithText("二维码 5 分钟内有效，只能用一次").assertIsDisplayed()
+        compose.onNodeWithContentDescription("返回").assertIsDisplayed().performClick()
+
+        waitFor("还没有目标机")
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("扫描配对二维码")).fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithContentDescription("添加目标机").assertIsDisplayed()
+    }
+}

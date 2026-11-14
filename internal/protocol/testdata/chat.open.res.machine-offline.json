@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-012",
+  "method": "chat.open",
+  "machine": "m-91c2",
+  "client": "c-12",
+  "error": {"code": "machineOffline", "message": "目标机 linux-box 离线"}
+}

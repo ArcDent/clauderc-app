@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "client.gone",
+  "client": "c-12",
+  "body": {}
+}

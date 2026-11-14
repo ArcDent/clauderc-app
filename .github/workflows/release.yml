@@ -1,0 +1,270 @@
+# Release: pushing a tag like v1.2.3 or v1.2.3-beta.1 runs the pre-commit
+# checks, then builds everything each machine needs:
+#   relay server   multi-arch image on ghcr.io, plus relay binaries
+#   target machine npm packages @arcdent/clauderc*, plus agent binaries
+#   phone          APK, signed when the signing secrets are set
+# and attaches the files to a GitHub Release.
+#
+# Repository secrets, all optional:
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
+#   ANDROID_KEY_PASSWORD   sign a release APK; without them a debug APK ships
+#   NPM_TOKEN              publish to npm; without it npm is skipped
+name: 发布
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 检查并构建
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 从标签取版本号
+        id: version
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]{1,2}\.[0-9]{1,2}(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::标签 $GITHUB_REF_NAME 要是 v1.2.3 或 v1.2.3-beta.1 的形式，次版本号和修订号不超过 99"
+            exit 1
+          fi
+          core=${version%%-*}
+          IFS=. read -r major minor patch <<<"$core"
+          # Android versionCode: MMmmpp then two digits that put prereleases
+          # (their trailing number, capped at 98) before the release (99).
+          if [ "$version" = "$core" ]; then
+            prerelease=false suffix=99
+          else
+            prerelease=true
+            suffix=$(printf '%s\n' "$version" | grep -Eo '[0-9]+$' || echo 0)
+            suffix=$(( 10#$suffix > 98 ? 98 : 10#$suffix ))
+          fi
+          code=$(( ((10#$major * 100 + 10#$minor) * 100 + 10#$patch) * 100 + suffix ))
+          {
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "code=$code"
+          } >>"$GITHUB_OUTPUT"
+          echo "版本 $version，versionCode $code，预发布 $prerelease"
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: 安装 Android SDK 平台和构建工具
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses >/dev/null
+          "$sdkmanager" --install 'platforms;android-37.0' 'build-tools;37.0.0' >/dev/null
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Go 检查和测试
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::这些文件没有 gofmt：$unformatted"
+            exit 1
+          fi
+          go vet ./...
+          go test ./...
+
+      - name: Android 单元测试
+        working-directory: android
+        run: ./gradlew testDebugUnitTest
+
+      - name: 准备 APK 签名
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::没有配置 ANDROID_KEYSTORE_BASE64，这次发布 debug 版 APK"
+            echo "apk=debug" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Same layout as a developer machine: build.gradle.kts reads
+          # .local/android-signing.properties, storeFile relative to it.
+          umask 077
+          mkdir -p .local
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d >.local/clauderc-release.jks
+          # Backslash is the escape character in .properties files.
+          esc() { printf '%s' "$1" | sed 's/\\/\\\\/g'; }
+          {
+            echo "storeFile=clauderc-release.jks"
+            echo "storePassword=$(esc "$STORE_PASSWORD")"
+            echo "keyAlias=$(esc "$KEY_ALIAS")"
+            echo "keyPassword=$(esc "$KEY_PASSWORD")"
+          } >.local/android-signing.properties
+          echo "apk=release" >>"$GITHUB_OUTPUT"
+
+      - name: 构建二进制和 APK
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          APK: ${{ steps.signing.outputs.apk }}
+          ORG_GRADLE_PROJECT_versionName: ${{ steps.version.outputs.version }}
+          ORG_GRADLE_PROJECT_versionCode: ${{ steps.version.outputs.code }}
+        run: scripts/build.sh "$VERSION"
+
+      - name: 打 npm 包
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: scripts/npm-pack.sh "$VERSION"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: |
+            dist/agent-*
+            dist/relay-*
+            dist/*.apk
+            dist/npm/*.tgz
+          if-no-files-found: error
+
+  image:
+    name: 中转服务器镜像
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+
+      - name: 准备构建目录
+        id: ctx
+        run: |
+          mkdir ctx
+          cp dist/relay-linux-amd64 dist/relay-linux-arm64 deploy/relay/entrypoint.sh ctx/
+          # Registry paths must be lowercase; the owner name may not be.
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/clauderc-relay" >>"$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v4
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tags 1.2.3, 1.2 and latest for a release; only 1.2.3-beta.1 for a prerelease.
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.ctx.outputs.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+          labels: |
+            org.opencontainers.image.title=clauderc-relay
+            org.opencontainers.image.description=clauderc 中转服务器
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: ctx
+          file: deploy/relay/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  release:
+    name: GitHub Release
+    needs: [build, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+
+      - name: 创建 Release 并上传文件
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+        run: |
+          cp deploy/relay/compose.yaml dist/
+          cd dist
+          sha256sum agent-* relay-* *.apk compose.yaml >SHA256SUMS
+          # A release drafted in the web UI for this tag gets the files added.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            set -- --generate-notes --title "$TAG"
+            if [ "$PRERELEASE" = true ]; then set -- "$@" --prerelease; fi
+            gh release create "$TAG" --verify-tag "$@"
+          fi
+          gh release upload "$TAG" agent-* relay-* *.apk compose.yaml SHA256SUMS --clobber
+
+  npm:
+    name: npm 包
+    needs: [build, image]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+
+      - name: 发布到 npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::warning::没有配置 NPM_TOKEN，跳过 npm 发布"
+            exit 0
+          fi
+          tag=latest
+          if [ "$PRERELEASE" = true ]; then tag=next; fi
+          # Platform packages first and the main package last, so installing
+          # the main package never misses its binary. Already published
+          # versions are skipped, which makes a re-run safe.
+          for name in clauderc-darwin-arm64 clauderc-darwin-x64 clauderc-linux-arm64 clauderc-linux-x64 clauderc; do
+            if npm view "@arcdent/$name@$VERSION" version >/dev/null 2>&1; then
+              echo "@arcdent/$name@$VERSION 已发布，跳过"
+              continue
+            fi
+            npm publish --access public --tag "$tag" "dist/npm/arcdent-$name-$VERSION.tgz"
+          done

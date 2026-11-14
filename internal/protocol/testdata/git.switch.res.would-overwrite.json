@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-059",
+  "method": "git.switch",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "error": {
+    "code": "gitFailed",
+    "message": "error: Your local changes to the following files would be overwritten by checkout:\n\tinternal/protocol/chat.go\nPlease commit your changes or stash them before you switch branches.\nAborting"
+  }
+}

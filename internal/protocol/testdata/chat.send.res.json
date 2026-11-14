@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-014",
+  "method": "chat.send",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {}
+}

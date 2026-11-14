@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-014",
+  "method": "chat.send",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "text": "第一行\n第二行\n第三行",
+    "images": [{"mediaType": "image/jpeg", "data": "/9j/4AAQSkZJRgABAQ=="}]
+  }
+}

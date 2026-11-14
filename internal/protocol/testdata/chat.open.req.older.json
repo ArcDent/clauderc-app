@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-011",
+  "method": "chat.open",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"sessionId": "a1b2c3", "before": 251}
+}

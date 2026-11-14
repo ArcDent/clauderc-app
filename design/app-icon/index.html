@@ -1,0 +1,414 @@
+<title>clauderc 图标方案</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&family=Roboto+Mono:wght@500&display=swap">
+<style>
+/* Layout: one quiet column. Header with two switches, a 4x2 grid of candidates without cards, then two home screens. */
+:root {
+  --c-bg: #FFFFFF;
+  --c-fg: #111111;
+  --c-fg-2: #5E5E5E;
+  --c-fg-3: #9F9F9F;
+  --c-line: #ECECEC;
+  --c-accent: #2A45E0;
+  --icon-edge: rgba(0, 0, 0, 0.08);
+  --bezel: #111111;
+
+  /* Home-screen mockups keep fixed wallpapers so both can be compared side by side. */
+  --wall-light: linear-gradient(168deg, #EEF0F5 0%, #DADFE9 100%);
+  --wall-light-fg: #1F2328;
+  --wall-light-bar: rgba(255, 255, 255, 0.72);
+  --wall-dark: linear-gradient(168deg, #1C1F27 0%, #0D0E11 100%);
+  --wall-dark-fg: #E8EAEE;
+  --wall-dark-bar: rgba(255, 255, 255, 0.10);
+
+  /* Android 13 themed-icon colors, as the system would pick them from a blue wallpaper. */
+  --tl-bg: #DCE2FF; --tl-fg: #1A2A6C; --tl-ac: #717DAE;
+  --td-bg: #1F2847; --td-fg: #C6CFFF; --td-ac: #7B84AC;
+  --t-bg: var(--tl-bg); --t-fg: var(--tl-fg); --t-ac: var(--tl-ac);
+
+  --font-ui: "Roboto", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "Roboto Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --fs-display: 32px;
+  --fs-title: 20px;
+  --fs-body: 16px;
+  --fs-label: 14px;
+  --fs-caption: 12px;
+
+  --mask: 50%;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --c-bg: #000000; --c-fg: #F1F1F1; --c-fg-2: #9C9C9C; --c-fg-3: #626262; --c-line: #1F1F1F;
+    --c-accent: #8395FF; --icon-edge: rgba(255, 255, 255, 0.10); --bezel: #262626;
+    --t-bg: var(--td-bg); --t-fg: var(--td-fg); --t-ac: var(--td-ac);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --c-bg: #000000; --c-fg: #F1F1F1; --c-fg-2: #9C9C9C; --c-fg-3: #626262; --c-line: #1F1F1F;
+  --c-accent: #8395FF; --icon-edge: rgba(255, 255, 255, 0.10); --bezel: #262626;
+  --t-bg: var(--td-bg); --t-fg: var(--td-fg); --t-ac: var(--td-ac);
+  color-scheme: dark;
+}
+
+body {
+  background: var(--c-bg);
+  color: var(--c-fg);
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.page {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding-block: 56px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 64px;
+}
+@media (min-width: 720px) {
+  .page {
+    padding-left: max(40px, env(safe-area-inset-left, 0px));
+    padding-right: max(40px, env(safe-area-inset-right, 0px));
+  }
+}
+
+header { display: flex; flex-direction: column; gap: 24px; }
+h1 {
+  margin: 0;
+  font-size: var(--fs-display);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+h2 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 500;
+  line-height: 1.3;
+}
+.lede { margin: 8px 0 0; color: var(--c-fg-2); font-size: var(--fs-label); }
+
+.controls { display: flex; flex-wrap: wrap; gap: 12px 40px; }
+.seg { display: flex; align-items: baseline; gap: 16px; }
+.seg-label { color: var(--c-fg-3); font-size: var(--fs-caption); letter-spacing: 0.04em; }
+.seg button {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 4px 0;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--c-fg-3);
+  cursor: pointer;
+}
+.seg button[aria-pressed="true"] { color: var(--c-fg); border-bottom-color: var(--c-fg); }
+.seg button:hover { color: var(--c-fg); }
+
+/* Icon tile: the mask shape is the only "container" on the page. */
+.icon {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border-radius: var(--mask);
+  aspect-ratio: 1;
+  max-width: 100%;
+  flex: none;
+}
+.icon::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--icon-edge);
+  pointer-events: none;
+}
+.icon svg { display: block; width: 100%; height: 100%; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 56px 24px;
+}
+@media (max-width: 860px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px 20px; } }
+
+.cand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cand .big { width: 128px; outline: 2px solid transparent; outline-offset: 6px; }
+@media (max-width: 420px) { .cand .big { width: 112px; } }
+.cand[aria-pressed="true"] .big { outline-color: var(--c-accent); }
+.cand:focus-visible { outline: none; }
+.cand:focus-visible .big { outline-color: var(--c-fg-3); }
+.cand[aria-pressed="true"]:focus-visible .big { outline-color: var(--c-accent); }
+
+.meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.name { display: flex; align-items: baseline; gap: 10px; font-weight: 500; }
+.key { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--c-fg-3); }
+.cand[aria-pressed="true"] .key { color: var(--c-accent); }
+.note { font-size: var(--fs-label); color: var(--c-fg-2); line-height: 1.45; }
+.sizes { display: flex; align-items: flex-end; gap: 12px; }
+.s48 { width: 48px; }
+.s28 { width: 28px; }
+
+/* Home screens */
+.home { display: flex; flex-direction: column; gap: 28px; }
+.home-head { display: flex; flex-direction: column; gap: 4px; }
+.home-head p { margin: 0; color: var(--c-fg-2); font-size: var(--fs-label); }
+.phones { display: flex; flex-wrap: wrap; gap: 32px; }
+.phone {
+  width: 268px;
+  max-width: 100%;
+  aspect-ratio: 9 / 19;
+  padding: 8px;
+  border-radius: 40px;
+  background: var(--bezel);
+}
+.screen {
+  height: 100%;
+  border-radius: 32px;
+  display: flex;
+  flex-direction: column;
+  padding: 40px 14px 16px;
+  overflow: hidden;
+}
+.screen.wl { background: var(--wall-light); color: var(--wall-light-fg); --t-bg: var(--tl-bg); --t-fg: var(--tl-fg); --t-ac: var(--tl-ac); --bar: var(--wall-light-bar); }
+.screen.wd { background: var(--wall-dark); color: var(--wall-dark-fg); --t-bg: var(--td-bg); --t-fg: var(--td-fg); --t-ac: var(--td-ac); --bar: var(--wall-dark-bar); }
+.clock { padding-inline: 8px; }
+.clock .t { font-size: 44px; font-weight: 300; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.clock .d { margin-top: 8px; font-size: 12px; opacity: 0.75; }
+.spacer { flex: 1; }
+.apps, .dock { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.apps { row-gap: 14px; }
+.app { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.app .icon { width: 46px; }
+.app .icon::after { box-shadow: none; }
+.app span.l { font-size: 11px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.dock { margin-top: 22px; }
+.bar { margin-top: 16px; height: 40px; border-radius: 20px; background: var(--bar); }
+
+footer { color: var(--c-fg-3); font-size: var(--fs-caption); line-height: 1.6; max-width: 62ch; }
+footer p { margin: 0; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .icon { transition: border-radius 220ms cubic-bezier(0.2, 0, 0, 1); }
+  .cand .big { transition: outline-color 160ms ease, border-radius 220ms cubic-bezier(0.2, 0, 0, 1); }
+}
+</style>
+
+<div class="page">
+  <header>
+    <div>
+      <h1>clauderc 图标</h1>
+      <p class="lede">8 个方向，已选定 C 轨道。点别的可以在下面的桌面上对比。</p>
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="形状">
+        <span class="seg-label">形状</span>
+        <button type="button" id="mask-circle" data-mask="circle">圆形</button>
+        <button type="button" id="mask-squircle" data-mask="squircle">方圆</button>
+        <button type="button" id="mask-rounded" data-mask="rounded">圆角方</button>
+      </div>
+      <div class="seg" role="group" aria-label="样式">
+        <span class="seg-label">样式</span>
+        <button type="button" id="mode-color" data-mode="color">彩色</button>
+        <button type="button" id="mode-themed" data-mode="themed">主题图标</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="grid" id="grid" aria-label="图标方案"></section>
+
+  <section class="home">
+    <div class="home-head">
+      <h2>放到桌面上</h2>
+      <p id="current"></p>
+    </div>
+    <div class="phones">
+      <div class="phone"><div class="screen wl">
+        <div class="clock"><div class="t">14:20</div><div class="d">11月14日 星期六</div></div>
+        <div class="spacer"></div>
+        <div class="apps"></div>
+        <div class="dock"></div>
+        <div class="bar"></div>
+      </div></div>
+      <div class="phone"><div class="screen wd">
+        <div class="clock"><div class="t">14:20</div><div class="d">11月14日 星期六</div></div>
+        <div class="spacer"></div>
+        <div class="apps"></div>
+        <div class="dock"></div>
+        <div class="bar"></div>
+      </div></div>
+    </div>
+  </section>
+
+  <footer>
+    <p>按 Android 自适应图标规格绘制：108 dp 画布，图形都落在中间 66 dp 的安全区内，系统裁成哪种形状都切不到。主题图标是 Android 13 起的单色样式，颜色由系统按壁纸决定。</p>
+  </footer>
+</div>
+
+<script>
+// Geometry is on the 108x108 adaptive-icon canvas; the visible area is 18..90.
+const fill = c => `style="fill:${c}"`;
+const line = (c, w) => `style="fill:none;stroke:${c};stroke-width:${w};stroke-linecap:round;stroke-linejoin:round"`;
+
+const ICONS = [
+  {
+    id: 'prompt', name: '提示符', note: '终端里最熟的符号，一眼看出是命令行。',
+    color: { bg: '#2A45E0', fg: '#FFFFFF', ac: '#FFFFFF' },
+    draw: p => `<polyline points="38,42 50,54 38,66" ${line(p.fg, 6.5)}/>
+                <rect x="56" y="60" width="16" height="6.5" rx="1.5" ${fill(p.fg)}/>`,
+  },
+  {
+    id: 'ring', name: '环与光标', note: '小写 c 后面跟着光标，也像一个转着的环。',
+    color: { bg: '#2A45E0', fg: '#FFFFFF', ac: '#FFFFFF' },
+    draw: p => `<path d="M63.26,43.72 A16,16 0 1 0 63.26,64.28" ${line(p.fg, 8)}/>
+                <rect x="70" y="47" width="7" height="14" rx="1" ${fill(p.fg)}/>`,
+  },
+  {
+    id: 'orbit', name: '轨道', note: '会话在后台转着，手机在一旁看着。',
+    color: { bg: '#FFFFFF', fg: '#111111', ac: '#2A45E0' },
+    draw: p => `<path d="M72.65,50.37 A19,19 0 1 1 57.63,35.35" ${line(p.fg, 5)}/>
+                <circle cx="67.44" cy="40.56" r="6" ${fill(p.ac)}/>`,
+  },
+  {
+    id: 'mirror', name: '镜像', note: '电脑上一半，手机上一半，是同一个会话。',
+    color: { bg: '#FFFFFF', fg: '#111111', ac: '#2A45E0' },
+    draw: p => `<path d="M52,34 A20,20 0 0 0 52,74 Z" ${fill(p.fg)}/>
+                <path d="M56,34 A20,20 0 0 1 56,74 Z" ${fill(p.ac)}/>`,
+  },
+  {
+    id: 'relay', name: '中转', note: '手机、中转服务器、目标机，三点一线。',
+    color: { bg: '#111111', fg: '#FFFFFF', ac: '#6F84FF' },
+    draw: p => `<line x1="37" y1="67" x2="71" y2="41" ${line(p.fg, 3.5)}/>
+                <circle cx="37" cy="67" r="7" ${fill(p.fg)}/>
+                <circle cx="71" cy="41" r="7" ${fill(p.fg)}/>
+                <circle cx="54" cy="54" r="5.5" style="fill:${p.ac};stroke:${p.bg};stroke-width:3"/>`,
+  },
+  {
+    id: 'signal', name: '信号', note: '光标往外发信号，隔着网络操作。',
+    color: { bg: '#111111', fg: '#FFFFFF', ac: '#6F84FF' },
+    draw: p => `<rect x="37" y="56.5" width="10" height="18" rx="1.5" ${fill(p.fg)}/>
+                <path d="M47,44.5 A12,12 0 0 1 59,56.5" ${line(p.ac, 5)}/>
+                <path d="M47,34.5 A22,22 0 0 1 69,56.5" ${line(p.ac, 5)}/>`,
+  },
+  {
+    id: 'bubble', name: '气泡', note: '聊天框里一个光标，等你开口。',
+    color: { bg: '#2A45E0', fg: '#FFFFFF', ac: '#FFFFFF' },
+    draw: p => `<rect x="34" y="34" width="40" height="30" rx="12" ${fill(p.fg)}/>
+                <polygon points="40,58 38,73 53,62" style="fill:${p.fg};stroke:${p.fg};stroke-width:2;stroke-linejoin:round"/>
+                <rect x="45" y="42" width="6" height="14" rx="1" ${fill(p.bg)}/>`,
+  },
+  {
+    id: 'return', name: '回车', note: '在手机上按一下回车，会话接着跑。',
+    color: { bg: '#FFFFFF', fg: '#2A45E0', ac: '#2A45E0' },
+    draw: p => `<path d="M68,39.5 V53.5 A6,6 0 0 1 62,59.5 H39.5 M48.5,50.5 L39.5,59.5 L48.5,68.5" ${line(p.fg, 6.5)}/>`,
+  },
+];
+const KEYS = 'ABCDEFGH';
+const THEMED = { bg: 'var(--t-bg)', fg: 'var(--t-fg)', ac: 'var(--t-ac)' };
+const MASKS = { circle: '50%', squircle: '36%', rounded: '22%' };
+
+const state = { sel: 'orbit', mask: 'circle', mode: 'color' };
+try {
+  const saved = JSON.parse(localStorage.getItem('clauderc-icon') || '{}');
+  if (ICONS.some(i => i.id === saved.sel)) state.sel = saved.sel;
+  if (saved.mask in MASKS) state.mask = saved.mask;
+  if (saved.mode === 'color' || saved.mode === 'themed') state.mode = saved.mode;
+} catch (e) {}
+function save() {
+  try { localStorage.setItem('clauderc-icon', JSON.stringify(state)); } catch (e) {}
+}
+
+function iconSvg(ic) {
+  const p = state.mode === 'themed' ? THEMED : ic.color;
+  return `<svg viewBox="18 18 72 72" aria-hidden="true"><rect x="0" y="0" width="108" height="108" ${fill(p.bg)}/>${ic.draw(p)}</svg>`;
+}
+
+// Neutral stand-ins for other apps on the home screen.
+const SHAPES = [
+  c => `<circle cx="54" cy="54" r="12" ${fill(c)}/>`,
+  c => `<rect x="42" y="42" width="24" height="24" rx="6" ${fill(c)}/>`,
+  c => `<circle cx="54" cy="54" r="10.5" ${line(c, 5)}/>`,
+  c => `<rect x="40" y="50" width="28" height="8" rx="4" ${fill(c)}/>`,
+];
+function placeholderSvg(color, shape) {
+  const bg = state.mode === 'themed' ? 'var(--t-bg)' : color;
+  const fg = state.mode === 'themed' ? 'var(--t-fg)' : 'rgba(255,255,255,0.92)';
+  return `<svg viewBox="18 18 72 72" aria-hidden="true"><rect x="0" y="0" width="108" height="108" ${fill(bg)}/>${SHAPES[shape](fg)}</svg>`;
+}
+const APPS = [
+  ['时钟', '#3D7BF0', 2], ['日历', '#F2A93B', 1], ['相册', '#E5675A', 0], ['文件', '#4C9F70', 1],
+  ['设置', '#7A7F87', 2], null, ['备忘录', '#E9B93A', 3], ['地图', '#3FA7A0', 0],
+];
+const DOCK = [['电话', '#4C9F70', 0], ['信息', '#3D7BF0', 1], ['浏览器', '#E5675A', 2], ['相机', '#3A3D42', 0]];
+
+const grid = document.getElementById('grid');
+
+function renderGrid() {
+  grid.innerHTML = ICONS.map((ic, i) => `
+    <button class="cand" type="button" id="cand-${ic.id}" data-id="${ic.id}" aria-pressed="${ic.id === state.sel}">
+      <span class="icon big">${iconSvg(ic)}</span>
+      <span class="meta">
+        <span class="name"><span class="key">${KEYS[i]}</span>${ic.name}</span>
+        <span class="note">${ic.note}</span>
+      </span>
+      <span class="sizes"><span class="icon s48">${iconSvg(ic)}</span><span class="icon s28">${iconSvg(ic)}</span></span>
+    </button>`).join('');
+}
+
+function renderHome() {
+  const ic = ICONS.find(i => i.id === state.sel);
+  const app = a => a
+    ? `<div class="app"><span class="icon">${placeholderSvg(a[1], a[2])}</span><span class="l">${a[0]}</span></div>`
+    : `<div class="app"><span class="icon">${iconSvg(ic)}</span><span class="l">clauderc</span></div>`;
+  const dock = a => `<div class="app"><span class="icon">${placeholderSvg(a[1], a[2])}</span></div>`;
+  document.querySelectorAll('.screen').forEach(sc => {
+    sc.querySelector('.apps').innerHTML = APPS.map(app).join('');
+    sc.querySelector('.dock').innerHTML = DOCK.map(dock).join('');
+  });
+  document.getElementById('current').textContent = `当前：${KEYS[ICONS.indexOf(ic)]} ${ic.name}`;
+}
+
+function renderControls() {
+  document.documentElement.style.setProperty('--mask', MASKS[state.mask]);
+  document.querySelectorAll('[data-mask]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mask === state.mask));
+  document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === state.mode));
+}
+
+function render() { renderControls(); renderGrid(); renderHome(); }
+
+grid.addEventListener('click', e => {
+  const b = e.target.closest('.cand');
+  if (!b) return;
+  state.sel = b.dataset.id;
+  grid.querySelectorAll('.cand').forEach(c => c.setAttribute('aria-pressed', c === b));
+  renderHome();
+  save();
+});
+document.querySelectorAll('[data-mask]').forEach(b => b.addEventListener('click', () => {
+  state.mask = b.dataset.mask; renderControls(); save();
+}));
+document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+  state.mode = b.dataset.mode; render(); save();
+}));
+
+render();
+</script>

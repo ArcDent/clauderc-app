@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-002",
+  "method": "sessions.subscribe",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessions": [
+      {"id": "a1b2c3", "name": "fix reconnect", "cwd": "/Users/me/code/clauderc", "state": "pending", "profileId": "api.anthropic.com", "lastActiveAt": "2026-11-12T09:29:10Z"},
+      {"id": "d4e5f6", "name": "write tests", "cwd": "/Users/me/code/clauderc", "state": "working", "profileId": "default", "lastActiveAt": "2026-11-12T09:29:55Z"},
+      {"id": "g7h8i9", "name": "", "cwd": "/Users/me/notes", "state": "idle", "profileId": "default", "lastActiveAt": "2026-11-12T08:12:00Z"},
+      {"id": "j0k1l2", "name": "old run", "cwd": "/tmp/scratch", "state": "stopped", "profileId": "other", "lastActiveAt": "2026-11-10T17:45:30Z"}
+    ],
+    "profiles": [
+      {"id": "default", "kind": "default"},
+      {"id": "api.anthropic.com", "kind": "endpoint"},
+      {"id": "anyrouter.top", "kind": "endpoint"},
+      {"id": "other", "kind": "other"}
+    ]
+  }
+}

@@ -1,0 +1,1 @@
+{"state": "working", "respawnFlags": ["--settings", "{\"env\":{\"ANTHROPIC_BASE_URL\":\"https://anyrouter.top\",\"ANTHROPIC_AUTH_TOKEN\":\"redacted\"}}", "--agent", "claude"], "providerEnv": {}, "cwd": "/w/c", "updatedAt": "2026-11-13T00:31:11.000Z"}

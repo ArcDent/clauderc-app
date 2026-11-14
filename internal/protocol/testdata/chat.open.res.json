@@ -1,0 +1,21 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-010",
+  "method": "chat.open",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "items": [
+      {"seq": 251, "kind": "user", "text": "这是什么错误\n帮我看看", "images": [{"mediaType": "image/png", "data": "iVBORw0KGgo="}]},
+      {"seq": 252, "kind": "assistant", "text": "截图里是连接被拒绝的错误。"},
+      {"seq": 253, "kind": "tool", "tool": {"toolUseId": "toolu_01A", "toolName": "Read", "summary": "读取 README.md", "input": {"file_path": "/Users/me/code/clauderc/README.md"}, "result": {"content": "# clauderc", "isError": false}}},
+      {"seq": 254, "kind": "tool", "tool": {"toolUseId": "toolu_01B", "toolName": "Bash", "summary": "运行 touch marker.txt", "input": {"command": "touch marker.txt", "description": "Create marker"}}}
+    ],
+    "hasMore": true,
+    "state": "pending",
+    "model": "claude-opus-4-1",
+    "permissionMode": "default",
+    "pending": {"toolUseId": "toolu_01B", "kind": "permission", "toolName": "Bash", "input": {"command": "touch marker.txt", "description": "Create marker"}}
+  }
+}

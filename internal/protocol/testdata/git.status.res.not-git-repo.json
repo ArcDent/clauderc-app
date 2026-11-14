@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-041",
+  "method": "git.status",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "error": {"code": "notGitRepo", "message": "/tmp/scratch 不是 git 仓库"}
+}

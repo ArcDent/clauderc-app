@@ -1,0 +1,6 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "machine.status",
+  "body": {"id": "m-7f3a", "name": "mac-mini", "online": false, "lastSeenAt": "2026-11-12T09:40:12Z", "agentVersion": "0.1.0", "claudeVersion": "2.1.323"}
+}

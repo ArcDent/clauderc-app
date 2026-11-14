@@ -2,3 +2,29 @@
 /docs
 /openspec
 /prototype
+
+# Go build output
+/agent
+/relay
+/bin/
+/dist/
+
+# Local private files and keys
+.local/
+*.key
+
+# Android
+android/local.properties
+android/build/
+android/.gradle/
+
+# Prototype runtime output
+prototype/send-message/ws/
+__pycache__/
+
+# Personal notes and todo lists
+/todolist-done/
+TODOLIST.md
+
+# 工作流过程文件
+/TODOLIST-DONE.md

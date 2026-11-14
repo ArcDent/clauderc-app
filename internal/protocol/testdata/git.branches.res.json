@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-047",
+  "method": "git.branches",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "current": "main",
+    "local": ["main", "feat-x"],
+    "remote": [
+      {"remote": "origin", "name": "main"},
+      {"remote": "origin", "name": "feat-y"}
+    ]
+  }
+}

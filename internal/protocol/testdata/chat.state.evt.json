@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.state",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"sessionId": "a1b2c3", "state": "working", "model": "claude-sonnet-4-5", "permissionMode": "acceptEdits"}
+}

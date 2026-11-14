@@ -1,0 +1,25 @@
+# clauderc relay. Put PUBLIC_URL in .env next to this file, then run
+# docker compose up -d. The port is published on 127.0.0.1 only; an HTTPS
+# reverse proxy in front forwards to it. Optional .env settings:
+#   RELAY_BIND   listen address on the host, default 127.0.0.1:8787
+#   RELAY_IMAGE  image to run, e.g. a mirror or a pinned version
+services:
+  relay:
+    image: ${RELAY_IMAGE:-ghcr.io/arcdent/clauderc-relay:latest}
+    restart: unless-stopped
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL:?请在 .env 里设置 PUBLIC_URL，例如 wss://relay.example.com}
+    ports:
+      - ${RELAY_BIND:-127.0.0.1:8787}:8787
+    volumes:
+      - data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8787/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      start_interval: 1s
+      retries: 3
+
+volumes:
+  data:

@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-013",
+  "method": "chat.close",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {}
+}

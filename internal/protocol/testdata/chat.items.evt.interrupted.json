@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.items",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "items": [
+      {"seq": 256, "kind": "removed"},
+      {"seq": 257, "kind": "interrupted"}
+    ]
+  }
+}

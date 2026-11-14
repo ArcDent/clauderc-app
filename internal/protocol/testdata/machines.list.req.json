@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-001",
+  "method": "machines.list",
+  "body": {}
+}

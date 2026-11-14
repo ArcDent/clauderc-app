@@ -1,0 +1,683 @@
+package chat_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"clauderc/internal/agent"
+	"clauderc/internal/agent/attach"
+	"clauderc/internal/agent/chat"
+	"clauderc/internal/agent/discovery"
+	"clauderc/internal/agent/fakeattach"
+	"clauderc/internal/agent/fakeclaude"
+	"clauderc/internal/protocol"
+)
+
+var (
+	_ agent.Handler       = (*chat.Handler)(nil)
+	_ agent.ClientTracker = (*chat.Handler)(nil)
+)
+
+func TestMain(m *testing.M) {
+	fakeattach.RunIfFake()
+	os.Exit(m.Run())
+}
+
+const (
+	shortID   = "abc12345"
+	sessionID = "8f0c2a5e-0000-4000-8000-0000000000c1"
+)
+
+type fixture struct {
+	sample     string
+	transcript string
+	keys       string // bytes the fake attach received
+	uploads    string
+	events     chan protocol.Envelope
+	h          *chat.Handler
+	cwd        string // the session's working directory
+}
+
+type setup struct {
+	status, state string // claude agents status and state of the session
+	pid           string // "null" for a stopped session
+	attachEnv     []string
+	// replay, when set, replaces the fake attach with the output recorded
+	// from a real `claude attach` up to this mark of the attach package's
+	// testdata; received bytes still go to the key log.
+	replay string
+	opts   func(*chat.Options)
+	// cwd is the session's working directory; it defaults to /w/x.
+	cwd string
+}
+
+// replayCommand prints the recorded attach output up to mark, then logs
+// every byte it receives to keys.
+func replayCommand(t *testing.T, mark, keys string) func(string) []string {
+	t.Helper()
+	dir, err := filepath.Abs(filepath.Join("..", "attach", "testdata"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "recorded.marks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var marks map[string]int
+	if err := json.Unmarshal(b, &marks); err != nil {
+		t.Fatal(err)
+	}
+	n, ok := marks[mark]
+	if !ok {
+		t.Fatalf("no mark %q", mark)
+	}
+	raw := filepath.Join(dir, "recorded.raw")
+	return func(string) []string {
+		return []string{"/bin/sh", "-c", `stty raw -echo; head -c "$1" "$2"; exec cat > "$3"`, "sh", strconv.Itoa(n), raw, keys}
+	}
+}
+
+// newFixture runs the handler against the fake claude, listing one
+// background session whose transcript holds 60 messages "m1".."m60", and
+// the fake attach.
+func newFixture(t *testing.T, s setup) *fixture {
+	t.Helper()
+	if s.status == "" {
+		s.status, s.state = "idle", "done"
+	}
+	if s.pid == "" {
+		s.pid = "7"
+	}
+	if s.cwd == "" {
+		s.cwd = "/w/x"
+	}
+	f := &fixture{sample: t.TempDir(), uploads: filepath.Join(t.TempDir(), "uploads"), events: make(chan protocol.Envelope, 256), cwd: s.cwd}
+	fakeclaude.Setup(t, f.sample)
+	f.setAgents(t, s.status, s.state, s.pid)
+	proj := filepath.Join(f.sample, "projects", "-w-x")
+	if err := os.MkdirAll(proj, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f.transcript = filepath.Join(proj, sessionID+".jsonl")
+	var sb strings.Builder
+	sb.WriteString(`{"type":"permission-mode","permissionMode":"default"}` + "\n")
+	sb.WriteString(`{"type":"attachment","attachment":{"type":"model","identity":{"modelId":"claude-opus-5-5"}}}` + "\n")
+	for i := 1; i <= 60; i++ {
+		if i%2 == 1 {
+			sb.WriteString(userLine(fmt.Sprintf("m%d", i)))
+		} else {
+			sb.WriteString(assistantLine(fmt.Sprintf("m%d", i)))
+		}
+	}
+	if err := os.WriteFile(f.transcript, []byte(sb.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.keys = filepath.Join(t.TempDir(), "keys.log")
+	opts := chat.Options{
+		Source: discovery.Source{ClaudePath: fakeclaude.Path(), ClaudeDir: f.sample},
+		Push:   agent.PusherFunc(func(e protocol.Envelope) { f.events <- e }),
+		Attach: attach.Options{
+			Command: fakeattach.Command,
+			Env:     append(append(fakeattach.Env(f.keys), fakeattach.TranscriptEnv(f.transcript)...), s.attachEnv...),
+		},
+		UploadDir:       f.uploads,
+		ImageWait:       50 * time.Millisecond,
+		PollInterval:    200 * time.Millisecond,
+		StateInterval:   500 * time.Millisecond,
+		DeliveryTimeout: 2 * time.Second,
+	}
+	if s.replay != "" {
+		opts.Attach = attach.Options{Command: replayCommand(t, s.replay, f.keys)}
+	}
+	if s.opts != nil {
+		s.opts(&opts)
+	}
+	f.h = chat.New(opts)
+	t.Cleanup(f.h.Close)
+	return f
+}
+
+func (f *fixture) setAgents(t *testing.T, status, state, pid string) {
+	t.Helper()
+	body := fmt.Sprintf(`[{"pid": %s, "id": %q, "cwd": %q, "kind": "background", "startedAt": 1794529871000, "sessionId": %q, "name": "t", "status": %q, "state": %q}]`,
+		pid, shortID, f.cwd, sessionID, status, state)
+	if err := os.WriteFile(filepath.Join(f.sample, "agents.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func userLine(text string) string {
+	b, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}})
+	return string(b) + "\n"
+}
+
+func assistantLine(text string) string {
+	b, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant",
+		"content": []any{map[string]any{"type": "text", "text": text}}}})
+	return string(b) + "\n"
+}
+
+func (f *fixture) appendTranscript(t *testing.T, s string) {
+	t.Helper()
+	fh, err := os.OpenFile(f.transcript, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fh.Close()
+	if _, err := fh.WriteString(s); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func req(id, client string, method protocol.Method, body any) protocol.Envelope {
+	raw, _ := json.Marshal(body)
+	return protocol.Envelope{V: protocol.Version, Kind: protocol.KindRequest, ID: id, Method: method, Machine: "m-1", Client: client, Body: raw}
+}
+
+func (f *fixture) call(t *testing.T, client string, method protocol.Method, body any) protocol.Envelope {
+	t.Helper()
+	res := f.h.Handle(context.Background(), req("r-"+string(method), client, method, body))
+	if res.Kind != protocol.KindResponse || res.Method != method || res.Client != client {
+		t.Fatalf("%s response envelope = %+v", method, res)
+	}
+	return res
+}
+
+func (f *fixture) ok(t *testing.T, client string, method protocol.Method, body any) json.RawMessage {
+	t.Helper()
+	res := f.call(t, client, method, body)
+	if res.Error != nil {
+		t.Fatalf("%s failed: %+v", method, res.Error)
+	}
+	return res.Body
+}
+
+// nextEvent waits up to timeout for an event of method.
+func (f *fixture) nextEvent(t *testing.T, method protocol.Method, timeout time.Duration) protocol.Envelope {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case e := <-f.events:
+			if e.Method == method {
+				return e
+			}
+		case <-deadline:
+			t.Fatalf("no %s event within %v", method, timeout)
+		}
+	}
+}
+
+// keyLog returns what the fake attach received after its cursor reply,
+// once the log has not changed for 300ms: the fake logs asynchronously.
+func (f *fixture) keyLog() string {
+	b, _ := os.ReadFile(f.keys)
+	for {
+		time.Sleep(300 * time.Millisecond)
+		next, _ := os.ReadFile(f.keys)
+		if bytes.Equal(next, b) {
+			break
+		}
+		b = next
+	}
+	return strings.TrimPrefix(string(b), "\x1b[1;1R")
+}
+
+func TestOpenLatestPageAndFollow(t *testing.T) {
+	f := newFixture(t, setup{})
+	var res protocol.ChatOpenResponse
+	if err := json.Unmarshal(f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID}), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 50 || res.Items[0].Seq != 11 || res.Items[0].Text != "m11" || res.Items[49].Text != "m60" || !res.HasMore {
+		t.Fatalf("latest page: %d items, first %+v, hasMore %v", len(res.Items), res.Items[0], res.HasMore)
+	}
+	if res.State != protocol.StateIdle || res.Model != "claude-opus-5-5" || res.PermissionMode != protocol.PermissionDefault || res.Pending != nil {
+		t.Fatalf("status = %+v pending %+v", res.ChatStatus, res.Pending)
+	}
+
+	var older protocol.ChatOpenResponse
+	if err := json.Unmarshal(f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID, Before: 11}), &older); err != nil {
+		t.Fatal(err)
+	}
+	if len(older.Items) != 10 || older.Items[0].Text != "m1" || older.Items[9].Text != "m10" || older.HasMore {
+		t.Fatalf("older page: %d items, hasMore %v", len(older.Items), older.HasMore)
+	}
+
+	f.appendTranscript(t, userLine("from the computer"))
+	e := f.nextEvent(t, protocol.EventChatItems, 2*time.Second)
+	var items protocol.ChatItemsEvent
+	if err := json.Unmarshal(e.Body, &items); err != nil {
+		t.Fatal(err)
+	}
+	if e.Client != "c1" || items.SessionID != shortID || len(items.Items) != 1 || items.Items[0].Seq != 61 || items.Items[0].Text != "from the computer" {
+		t.Fatalf("chat.items = %+v to %s", items, e.Client)
+	}
+
+	f.ok(t, "c1", protocol.MethodChatClose, protocol.ChatCloseRequest{SessionID: shortID})
+	f.appendTranscript(t, userLine("after close"))
+	time.Sleep(time.Second)
+	for len(f.events) > 0 {
+		if e := <-f.events; e.Method == protocol.EventChatItems {
+			t.Fatalf("chat.items after close: %s", e.Body)
+		}
+	}
+}
+
+func TestOpenUnknownSession(t *testing.T) {
+	f := newFixture(t, setup{})
+	res := f.call(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: "zzz99999"})
+	if res.Error == nil || res.Error.Code != protocol.CodeSessionNotFound {
+		t.Fatalf("response = %+v", res.Error)
+	}
+}
+
+func TestSendClearsInputThenPastes(t *testing.T) {
+	f := newFixture(t, setup{})
+	f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "第一行\n第二行"})
+	if got, want := f.keyLog(), "\x15\x1b[200~第一行\n第二行\x1b[201~\r"; got != want {
+		t.Fatalf("keys = %q, want %q", got, want)
+	}
+}
+
+// A busy session takes the message right away; Claude Code queues it and
+// writes an enqueue record, which counts as delivered.
+func TestSendWhileBusyIsDeliveredByEnqueue(t *testing.T) {
+	f := newFixture(t, setup{status: "busy", state: "working", attachEnv: []string{fakeattach.DeliverEnv("enqueue")}})
+	f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "排队的消息"})
+	if got, want := f.keyLog(), "\x15\x1b[200~排队的消息\x1b[201~\r"; got != want {
+		t.Fatalf("keys = %q, want %q", got, want)
+	}
+	b, _ := os.ReadFile(f.transcript)
+	if !bytes.Contains(b, []byte(`"operation":"enqueue"`)) {
+		t.Fatal("fake did not enqueue")
+	}
+}
+
+func TestSendNotDelivered(t *testing.T) {
+	f := newFixture(t, setup{attachEnv: []string{fakeattach.DeliverEnv("none")}})
+	start := time.Now()
+	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "lost"})
+	if res.Error == nil || res.Error.Code != protocol.CodeNotDelivered {
+		t.Fatalf("response error = %+v", res.Error)
+	}
+	if want := "消息发出后 2 秒内没有出现在会话里，可能没有送达"; res.Error.Message != want {
+		t.Errorf("message %q, want %q", res.Error.Message, want)
+	}
+	if d := time.Since(start); d < 2*time.Second {
+		t.Fatalf("gave up after %v, before the delivery timeout", d)
+	}
+}
+
+func TestSendImages(t *testing.T) {
+	f := newFixture(t, setup{})
+	png := []byte("\x89PNG fake")
+	jpg := []byte("\xff\xd8\xff fake")
+	f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "这是什么", Images: []protocol.Image{
+		{MediaType: "image/png", Data: png}, {MediaType: "image/jpeg", Data: jpg},
+	}})
+	entries, err := os.ReadDir(f.uploads)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("uploads = %v, %v", entries, err)
+	}
+	var paths []string
+	for _, want := range []struct {
+		ext  string
+		data []byte
+	}{{".png", png}, {".jpg", jpg}} {
+		var found string
+		for _, e := range entries {
+			if filepath.Ext(e.Name()) == want.ext {
+				found = filepath.Join(f.uploads, e.Name())
+			}
+		}
+		if found == "" {
+			t.Fatalf("no %s upload in %v", want.ext, entries)
+		}
+		fi, _ := os.Stat(found)
+		if fi.Mode().Perm() != 0o600 {
+			t.Errorf("%s mode %v, want 0600", found, fi.Mode().Perm())
+		}
+		if b, _ := os.ReadFile(found); !bytes.Equal(b, want.data) {
+			t.Errorf("%s content differs", found)
+		}
+		paths = append(paths, found)
+	}
+	want := "\x15\x1b[200~" + paths[0] + "\x1b[201~\x1b[200~" + paths[1] + "\x1b[201~\x1b[200~ 这是什么\x1b[201~\r"
+	if got := f.keyLog(); got != want {
+		t.Fatalf("keys = %q, want %q", got, want)
+	}
+}
+
+// Uploads are named by 32 random hex digits plus .png or .jpg; only such
+// files older than 24 hours are removed, anything else in the directory
+// is left alone.
+func TestSendRemovesOldUploads(t *testing.T) {
+	f := newFixture(t, setup{})
+	if err := os.MkdirAll(f.uploads, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldJPG := filepath.Join(f.uploads, "0123456789abcdef0123456789abcdef.jpg")
+	oldPNG := filepath.Join(f.uploads, "fedcba9876543210fedcba9876543210.png")
+	recent := filepath.Join(f.uploads, "00000000000000000000000000000000.jpg")
+	foreign := []string{
+		filepath.Join(f.uploads, "notes.txt"),
+		filepath.Join(f.uploads, "old.jpg"),
+		filepath.Join(f.uploads, "0123456789abcdef0123456789abcdeg.jpg"),
+		filepath.Join(f.uploads, "0123456789abcdef0123456789abcdef.gif"),
+		filepath.Join(f.uploads, "0123456789abcdef0123456789abcdef0.png"),
+	}
+	for _, p := range append([]string{oldJPG, oldPNG, recent}, foreign...) {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		age := 25 * time.Hour
+		if p == recent {
+			age = 23 * time.Hour
+		}
+		if err := os.Chtimes(p, time.Now().Add(-age), time.Now().Add(-age)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "hi"})
+	for _, p := range []string{oldJPG, oldPNG} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("upload older than 24h still there: %s %v", filepath.Base(p), err)
+		}
+	}
+	for _, p := range append([]string{recent}, foreign...) {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s removed: %v", filepath.Base(p), err)
+		}
+	}
+}
+
+func TestSendRejects(t *testing.T) {
+	f := newFixture(t, setup{})
+	big := make([]byte, protocol.MaxImageBytes+1)
+	six := make([]protocol.Image, 6)
+	for i := range six {
+		six[i] = protocol.Image{MediaType: "image/png", Data: []byte("x")}
+	}
+	cases := []struct {
+		name string
+		body protocol.ChatSendRequest
+		code protocol.ErrorCode
+	}{
+		{"empty", protocol.ChatSendRequest{SessionID: shortID}, protocol.CodeInvalidParams},
+		{"too many images", protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: six}, protocol.CodeInvalidParams},
+		{"image too big", protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: []protocol.Image{{MediaType: "image/png", Data: big}}}, protocol.CodeInvalidParams},
+		{"not an image", protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: []protocol.Image{{MediaType: "text/html", Data: []byte("x")}}}, protocol.CodeInvalidParams},
+		{"unknown session", protocol.ChatSendRequest{SessionID: "zzz99999", Text: "x"}, protocol.CodeSessionNotFound},
+	}
+	for _, c := range cases {
+		res := f.call(t, "c1", protocol.MethodChatSend, c.body)
+		if res.Error == nil || res.Error.Code != c.code {
+			t.Errorf("%s: error %+v, want %s", c.name, res.Error, c.code)
+		}
+	}
+	if got := f.keyLog(); got != "" {
+		t.Fatalf("keys sent for rejected messages: %q", got)
+	}
+}
+
+// /model <name> saves the model as the default in ~/.claude/settings.json,
+// and a bare /model opens the picker where the next Enter does the same
+// (RESULTS.md), so neither is typed.
+func TestSendRefusesModelCommand(t *testing.T) {
+	f := newFixture(t, setup{})
+	for _, text := range []string{"/model sonnet", "/model", "  /model  opus\n", "\n/model\tsonnet", "/MODEL sonnet"} {
+		res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: text})
+		if res.Error == nil || res.Error.Code != protocol.CodeInvalidParams || !strings.Contains(res.Error.Message, "切换模型") {
+			t.Errorf("%q: error %+v, want invalidParams pointing to model switching", text, res.Error)
+		}
+	}
+	if got := f.keyLog(); got != "" {
+		t.Fatalf("keys sent for /model: %q", got)
+	}
+	// Other text mentioning /model is a plain message.
+	for _, text := range []string{"/models", "说说 /model sonnet 的作用"} {
+		f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: text})
+	}
+}
+
+// Waking a stopped session belongs to chat.send later (task 8.2); until
+// then it is refused without touching the session.
+func TestSendToStoppedSession(t *testing.T) {
+	f := newFixture(t, setup{status: "idle", state: "done", pid: "null"})
+	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "继续"})
+	if res.Error == nil || res.Error.Code != protocol.CodeInvalidParams {
+		t.Fatalf("error = %+v", res.Error)
+	}
+	if _, err := os.Stat(f.keys); !os.IsNotExist(err) {
+		t.Fatal("an attach was started for a stopped session")
+	}
+}
+
+func TestPendingIsPushedAndCleared(t *testing.T) {
+	f := newFixture(t, setup{})
+	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
+	f.appendTranscript(t, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_p1","name":"Bash","input":{"command":"touch marker.txt"}}]}}`+"\n")
+	f.setAgents(t, "waiting", "blocked", "7")
+	e := f.nextEvent(t, protocol.EventChatPending, 3*time.Second)
+	var ev protocol.ChatPendingEvent
+	if err := json.Unmarshal(e.Body, &ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.Pending == nil || ev.Pending.ToolUseID != "toolu_p1" || ev.Pending.Kind != protocol.PendingPermission || ev.Pending.ToolName != "Bash" {
+		t.Fatalf("chat.pending = %s", e.Body)
+	}
+	// Answered on the computer: the prompt goes away within 2 seconds.
+	f.appendTranscript(t, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_p1","content":"ok"}]}}`+"\n")
+	e = f.nextEvent(t, protocol.EventChatPending, 2*time.Second)
+	if err := json.Unmarshal(e.Body, &ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.Pending != nil {
+		t.Fatalf("chat.pending after the answer = %s", e.Body)
+	}
+}
+
+// fakeWaker records Wake calls; wake runs on each call.
+type fakeWaker struct {
+	mu    sync.Mutex
+	calls []string
+	wake  func() error
+}
+
+func (w *fakeWaker) Wake(ctx context.Context, sessionID string) error {
+	w.mu.Lock()
+	w.calls = append(w.calls, sessionID)
+	w.mu.Unlock()
+	return w.wake()
+}
+
+func TestSendWakesStoppedSession(t *testing.T) {
+	w := &fakeWaker{}
+	f := newFixture(t, setup{status: "idle", state: "done", pid: "null", opts: func(o *chat.Options) { o.Waker = w }})
+	w.wake = func() error {
+		f.setAgents(t, "idle", "done", "7") // the session runs again
+		return nil
+	}
+	f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "继续"})
+	if len(w.calls) != 1 || w.calls[0] != sessionID {
+		t.Fatalf("Wake calls = %q, want [%q]", w.calls, sessionID)
+	}
+	if got, want := f.keyLog(), "\x15\x1b[200~继续\x1b[201~\r"; got != want {
+		t.Fatalf("keys = %q, want %q", got, want)
+	}
+}
+
+func TestSendWakeFails(t *testing.T) {
+	w := &fakeWaker{wake: func() error { return errors.New("resume failed") }}
+	f := newFixture(t, setup{status: "idle", state: "done", pid: "null", opts: func(o *chat.Options) { o.Waker = w }})
+	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "继续"})
+	if res.Error == nil || res.Error.Code != protocol.CodeInternal {
+		t.Fatalf("error = %+v", res.Error)
+	}
+	if len(w.calls) != 1 {
+		t.Fatalf("Wake calls = %q", w.calls)
+	}
+	if _, err := os.Stat(f.keys); !os.IsNotExist(err) {
+		t.Fatal("an attach was started although waking failed")
+	}
+}
+
+func TestSendWakeFailsWithCode(t *testing.T) {
+	w := &fakeWaker{wake: func() error {
+		return &protocol.Error{Code: protocol.CodeDirNotFound, Message: "会话的工作目录已不存在：/w/gone"}
+	}}
+	f := newFixture(t, setup{status: "idle", state: "done", pid: "null", opts: func(o *chat.Options) { o.Waker = w }})
+	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "继续"})
+	if res.Error == nil || res.Error.Code != protocol.CodeDirNotFound || !strings.Contains(res.Error.Message, "/w/gone") {
+		t.Fatalf("error = %+v, want the Waker's code and reason", res.Error)
+	}
+}
+
+// Control bytes in a message would end the paste early and turn the rest
+// into keys; they are dropped before the /model check and typing.
+func TestSendCleansControlBytes(t *testing.T) {
+	f := newFixture(t, setup{})
+	// What is left after cleaning starts with /model, so it is refused.
+	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "\x1b/model opus"})
+	if res.Error == nil || res.Error.Code != protocol.CodeInvalidParams || !strings.Contains(res.Error.Message, "切换模型") {
+		t.Errorf("ESC before /model: error %+v", res.Error)
+	}
+	f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "hi\x1b[201~\x15/model opus\r"})
+	got := f.keyLog()
+	if want := "\x15\x1b[200~hi[201~/model opus\x1b[201~\r"; got != want {
+		t.Errorf("keys %q, want %q", got, want)
+	}
+	body := strings.TrimSuffix(strings.TrimPrefix(got, "\x15\x1b[200~"), "\x1b[201~\r")
+	if strings.ContainsAny(body, "\x1b\x15\r") || strings.Count(got, "\x15") != 1 || strings.Count(got, "\r") != 1 {
+		t.Errorf("control bytes typed: %q", got)
+	}
+}
+
+// A custom answer is typed key by key; Shift+Tab and Ctrl+C in it are not.
+func TestAnswerCustomCleansControlBytes(t *testing.T) {
+	f := newFixture(t, setup{})
+	f.blockedOn(t, "toolu_q1", "AskUserQuestion", `{"questions":[{"question":"颜色？","header":"颜色","multiSelect":false,"options":[{"label":"红","description":""},{"label":"绿","description":""}]}]}`)
+	f.ok(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_q1", Answers: []protocol.Answer{{Custom: "都\x1b[Z不\x03要"}}})
+	got := f.keyLog()
+	if want := "\x1b[B\x1b[B都[Z不要\r"; got != want {
+		t.Errorf("keys %q, want %q", got, want)
+	}
+	if strings.Contains(got, "\x1b[Z") || strings.Contains(got, "\x03") {
+		t.Errorf("control keys typed: %q", got)
+	}
+}
+
+// Design D5: blocked without an unanswered tool call falls through to the
+// status, so a busy session is working and can be interrupted.
+func TestBlockedButBusyIsWorking(t *testing.T) {
+	// Interrupt first: chat.open starts an attach that types Ctrl+L.
+	f := newFixture(t, setup{status: "busy", state: "blocked"})
+	f.ok(t, "c1", protocol.MethodChatInterrupt, protocol.ChatInterruptRequest{SessionID: shortID})
+	if got := f.keyLog(); got != "\x1b" {
+		t.Fatalf("interrupt keys %q, want Esc", got)
+	}
+	var res protocol.ChatOpenResponse
+	if err := json.Unmarshal(f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID}), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.State != protocol.StateWorking || res.Pending != nil {
+		t.Fatalf("state %q pending %+v, want working with nothing pending", res.State, res.Pending)
+	}
+
+	// With the tool call unanswered it is pending, and Esc would deny it.
+	f = newFixture(t, setup{})
+	f.appendTranscript(t, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_p1","name":"Bash","input":{"command":"touch x"}}]}}`+"\n")
+	f.setAgents(t, "busy", "blocked", "7")
+	f.ok(t, "c1", protocol.MethodChatInterrupt, protocol.ChatInterruptRequest{SessionID: shortID})
+	if got := f.keyLog(); got != "" {
+		t.Fatalf("interrupt keys %q on a pending prompt", got)
+	}
+	if err := json.Unmarshal(f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID}), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.State != protocol.StatePending || res.Pending == nil {
+		t.Fatalf("state %q pending %+v, want pending", res.State, res.Pending)
+	}
+}
+
+// The phone shows error messages as they are, so they are Chinese.
+func TestErrorMessagesAreChinese(t *testing.T) {
+	f := newFixture(t, setup{attachEnv: []string{fakeattach.ModesEnv("default")}})
+	six := make([]protocol.Image, 6)
+	for i := range six {
+		six[i] = protocol.Image{MediaType: "image/png", Data: []byte("x")}
+	}
+	big := make([]byte, protocol.MaxImageBytes+1)
+	cases := []struct {
+		name   string
+		method protocol.Method
+		body   any
+		want   string
+	}{
+		{"no session id", protocol.MethodChatOpen, protocol.ChatOpenRequest{}, "缺少会话 id"},
+		{"unknown session", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: "zzz99999"}, "找不到这个后台会话，可能已经被移除"},
+		{"empty message", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID}, "消息是空的"},
+		{"control bytes only", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "\x1b\x15\r"}, "消息是空的"},
+		{"too many images", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: six}, "一条消息最多附 5 张图片"},
+		{"image too big", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: []protocol.Image{{MediaType: "image/png", Data: big}}}, "图片不能为空，也不能超过 10 MB"},
+		{"not an image", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: []protocol.Image{{MediaType: "text/html", Data: []byte("x")}}}, "只支持 PNG 和 JPEG 图片"},
+		{"nothing pending", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_x", Decision: protocol.DecisionAllow}, "待确认的内容已变化，请看最新的请求再回答"},
+		{"no model", protocol.MethodChatSetModel, protocol.ChatSetModelRequest{SessionID: shortID}, "缺少要切换的模型"},
+		{"unknown model", protocol.MethodChatSetModel, protocol.ChatSetModelRequest{SessionID: shortID, Model: "sonnet"}, "模型列表里没有这个模型，已取消"},
+		{"bypass mode", protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: shortID, Mode: protocol.PermissionBypass}, "这个权限模式不能从手机切换"},
+		{"mode never reached", protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: shortID, Mode: protocol.PermissionAuto}, "按了 4 次切换键仍没到目标权限模式"},
+	}
+	for _, c := range cases {
+		res := f.call(t, "c1", c.method, c.body)
+		if res.Error == nil || res.Error.Message != c.want {
+			t.Errorf("%s: error %+v, want message %q", c.name, res.Error, c.want)
+		}
+	}
+
+	// A body that is not JSON.
+	bad := req("r-bad", "c1", protocol.MethodChatSend, nil)
+	bad.Body = json.RawMessage(`"x"`)
+	if res := f.h.Handle(context.Background(), bad); res.Error == nil || res.Error.Message != "请求内容格式不对" {
+		t.Errorf("malformed body: error %+v", res.Error)
+	}
+
+	// Answers that do not fit the questions.
+	f.blockedOn(t, "toolu_q1", "AskUserQuestion", twoQuestionInputForMessages)
+	for want, body := range map[string]protocol.ChatAnswerRequest{
+		"回答的题数和提问的题数不一致":       {SessionID: shortID, ToolUseID: "toolu_q1", Answers: []protocol.Answer{{Selected: []int{0}}}},
+		"选的选项不存在":              {SessionID: shortID, ToolUseID: "toolu_q1", Answers: []protocol.Answer{{Selected: []int{9}}, {Selected: []int{0}}}},
+		"有题目还没回答":              {SessionID: shortID, ToolUseID: "toolu_q1", Answers: []protocol.Answer{{}, {Selected: []int{0}}}},
+		"单选题只能选一个答案":           {SessionID: shortID, ToolUseID: "toolu_q1", Answers: []protocol.Answer{{Selected: []int{0, 1}}, {Selected: []int{0}}}},
+		"提问要选选项或填写回答，不能选允许或拒绝": {SessionID: shortID, ToolUseID: "toolu_q1", Decision: protocol.DecisionAllow},
+	} {
+		if res := f.call(t, "c1", protocol.MethodChatAnswer, body); res.Error == nil || res.Error.Message != want {
+			t.Errorf("answer %+v: error %+v, want message %q", body, res.Error, want)
+		}
+	}
+	f.blockedOn(t, "toolu_p1", "Bash", `{"command":"touch x"}`)
+	if res := f.call(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_p1", Decision: "maybe"}); res.Error == nil || res.Error.Message != "权限请求只能选允许或拒绝" {
+		t.Errorf("bad decision: error %+v", res.Error)
+	}
+
+	// A stopped session.
+	f = newFixture(t, setup{status: "idle", state: "done", pid: "null"})
+	for _, m := range []protocol.Method{protocol.MethodChatModels, protocol.MethodChatSend} {
+		res := f.call(t, "c1", m, protocol.ChatSendRequest{SessionID: shortID, Text: "x"})
+		if res.Error == nil || res.Error.Message != "会话已停止，无法操作" {
+			t.Errorf("%s on a stopped session: error %+v", m, res.Error)
+		}
+	}
+}
+
+const twoQuestionInputForMessages = twoQuestionInput
