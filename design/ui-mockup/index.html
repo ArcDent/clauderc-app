@@ -63,12 +63,12 @@
   --r-md: 16px;
   --r-lg: 28px;
   --r-pill: 999px;
-  --ease-emph: cubic-bezier(0.2, 0, 0, 1);
-  --ease-emph-in: cubic-bezier(0.3, 0, 0.8, 0.15);
-  --ease-spring: cubic-bezier(0.34, 1.5, 0.64, 1);
-  --dur-s: 200ms;
-  --dur-m: 350ms;
-  --dur-l: 500ms;
+  --ease-emph: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-emph-in: cubic-bezier(0.3, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --dur-s: 150ms;
+  --dur-m: 280ms;
+  --dur-l: 350ms;
 
   /* 审阅页本身，不属于 APP 主题 */
   --desk-bg: #F4F4F4;
@@ -1442,7 +1442,7 @@ Aborting</pre>
   var rootStyle = getComputedStyle(document.documentElement);
   function tok(name) { return rootStyle.getPropertyValue(name).trim(); }
   var EASE = { emph: tok("--ease-emph") || "ease", in: tok("--ease-emph-in") || "ease-in", spring: tok("--ease-spring") || "ease" };
-  var D = { s: parseFloat(tok("--dur-s")) || 200, m: parseFloat(tok("--dur-m")) || 350, l: parseFloat(tok("--dur-l")) || 500 };
+  var D = { s: parseFloat(tok("--dur-s")) || 150, m: parseFloat(tok("--dur-m")) || 280, l: parseFloat(tok("--dur-l")) || 350 };
   var reduceMq = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
   var booted = false;
   function animOK() { return booted && !(reduceMq && reduceMq.matches) && typeof Element.prototype.animate === "function"; }

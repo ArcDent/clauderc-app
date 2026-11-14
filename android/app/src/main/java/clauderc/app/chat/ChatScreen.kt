@@ -12,6 +12,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -92,7 +93,9 @@ import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Lift
 import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.MonoFamily
+import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.Symbols
+import clauderc.app.ui.theme.pressShrink
 import java.util.Base64
 import kotlinx.coroutines.delay
 
@@ -431,16 +434,18 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
             ) {
                 state.attachments.forEachIndexed { i, a ->
                     val bitmap = rememberChatImage(a) { a.jpeg }
+                    val press = remember { MutableInteractionSource() }
                     Box(Modifier.size(60.dp).clip(RoundedCornerShape(12.dp)).background(c.surface)) {
                         if (bitmap != null) Image(bitmap, contentDescription = a.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                         Box(
                             Modifier
                                 .align(Alignment.TopEnd)
                                 .padding(3.dp)
+                                .pressShrink(press)
                                 .size(20.dp)
                                 .clip(CircleShape)
                                 .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
-                                .clickable(role = Role.Button, onClickLabel = "移除") { actions.onRemoveImage(i) }
+                                .clickable(press, PressIndication(androidx.compose.ui.graphics.Color.White), role = Role.Button, onClickLabel = "移除") { actions.onRemoveImage(i) }
                                 .semantics { contentDescription = "移除 ${a.name}" },
                             contentAlignment = Alignment.Center,
                         ) {
@@ -449,8 +454,14 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                     }
                 }
                 if (state.attachments.size < ChatLimits.MAX_IMAGES) {
+                    val press = remember { MutableInteractionSource() }
                     Box(
-                        Modifier.size(60.dp).clip(RoundedCornerShape(12.dp)).background(c.surface).clickable(role = Role.Button, onClickLabel = "再添加图片", onClick = onAttach),
+                        Modifier
+                            .pressShrink(press)
+                            .size(60.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(c.surface)
+                            .clickable(press, PressIndication(c.fg2), role = Role.Button, onClickLabel = "再添加图片", onClick = onAttach),
                         contentAlignment = Alignment.Center,
                     ) { Icon(Symbols.Add, contentDescription = "再添加图片", tint = c.fg2) }
                 }
@@ -468,8 +479,13 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
             horizontalArrangement = Arrangement.spacedBy(sp.sp1),
             verticalAlignment = Alignment.Bottom,
         ) {
+            val attachPress = remember { MutableInteractionSource() }
             Box(
-                Modifier.size(44.dp).clip(CircleShape).clickable(enabled = enabled, role = Role.Button, onClick = onAttach),
+                Modifier
+                    .pressShrink(attachPress)
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable(attachPress, PressIndication(c.fg2), enabled = enabled, role = Role.Button, onClick = onAttach),
                 contentAlignment = Alignment.Center,
             ) { Icon(Symbols.Image, contentDescription = "添加图片", tint = if (enabled) c.fg2 else c.fg3) }
             BasicTextField(
@@ -498,12 +514,14 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                 },
             )
             val canSend = enabled && !state.sending && (text.isNotBlank() || state.attachments.isNotEmpty())
+            val sendPress = remember { MutableInteractionSource() }
             Box(
                 Modifier
+                    .pressShrink(sendPress)
                     .size(44.dp)
                     .clip(CircleShape)
                     .background(if (canSend) c.fg else c.surface2)
-                    .clickable(enabled = canSend, role = Role.Button, onClickLabel = "发送") { if (actions.onSend(text)) text = "" }
+                    .clickable(sendPress, PressIndication(c.bg), enabled = canSend, role = Role.Button, onClickLabel = "发送") { if (actions.onSend(text)) text = "" }
                     .semantics { contentDescription = "发送" },
                 contentAlignment = Alignment.Center,
             ) {

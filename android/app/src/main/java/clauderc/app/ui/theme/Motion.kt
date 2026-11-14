@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.InfiniteRepeatableSpec
@@ -32,7 +33,8 @@ import androidx.compose.ui.unit.dp
  * 1. Things appear in durM on easeEmph and leave in durS on easeEmphIn; scrims only fade, in durS.
  * 2. Going deeper slides the new page in from the right over the old one, which gives way by a
  *    quarter; going back is the reverse. The three top-level pages swap with a 24dp shift and a fade.
- * 3. Only the nav bar overshoots, when it springs back onto the top-level pages.
+ * 3. Only two things overshoot: the nav bar when it springs back onto the top-level pages, and a
+ *    small control springing back to size after a press (Press.kt).
  * Loops (spinners, the pending beacon, the scan line) keep their own fixed periods, listed here too.
  */
 object Motion {
@@ -80,6 +82,10 @@ object Motion {
     /** The nav bar drops 140% of its height away on deeper pages and springs back onto the top-level ones. */
     val navBarIn: EnterTransition = slideInVertically(tween(t.durL, easing = t.easeSpring)) { it * 7 / 5 }
     val navBarOut: ExitTransition = slideOutVertically(exit()) { it * 7 / 5 }
+
+    /** Pressed small controls shrink in 90ms and spring back on release with the nav bar's curve. */
+    fun <T> pressIn(): FiniteAnimationSpec<T> = tween(90, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f))
+    fun <T> pressOut(): FiniteAnimationSpec<T> = tween(t.durS, easing = t.easeSpring)
 
     // Loops.
     val spin: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart)

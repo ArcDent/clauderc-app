@@ -1,19 +1,26 @@
 package clauderc.app.git
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -38,6 +46,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -50,6 +60,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -83,7 +94,10 @@ import clauderc.app.ui.components.TextTone
 import clauderc.app.ui.components.UnderlineField
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
+import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.Symbols
+import clauderc.app.ui.theme.pressShrink
+import kotlin.math.roundToInt
 
 class GitActions(
     val onRefresh: () -> Unit = {},
@@ -125,7 +139,19 @@ fun GitScreen(state: GitUiState, actions: GitActions, snack: SnackState = rememb
                 else -> {
                     Tabs(state, actions.onTab)
                     BranchBar(state) { actions.onLoadBranches(); sheet = GitSheet.Branches }
-                    if (state.tab == GitTab.Log) Timeline(state, actions) else StatusPage(state, actions) { actions.onLoadBranches(); sheet = GitSheet.Branches }
+                    // The two tabs swap like the top-level pages: a 24dp shift and a fade.
+                    val shift = with(LocalDensity.current) { 24.dp.roundToPx() }
+                    AnimatedContent(
+                        targetState = state.tab,
+                        modifier = Modifier.weight(1f),
+                        transitionSpec = {
+                            val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                            Motion.tabIn(shift, dir).togetherWith(Motion.tabOut(shift, dir))
+                        },
+                        label = "gitTabs",
+                    ) { tab ->
+                        if (tab == GitTab.Log) Timeline(state, actions) else StatusPage(state, actions) { actions.onLoadBranches(); sheet = GitSheet.Branches }
+                    }
                 }
             }
         }
@@ -244,28 +270,46 @@ private fun Empty(title: String, path: String?, button: String, onClick: () -> U
 private fun Tabs(state: GitUiState, onTab: (GitTab) -> Unit) {
     val c = Clauderc.colors
     val count = state.status?.let { it.staged.size + it.unstaged.size }
+    // Left edge and width of each tab, for the one underline that slides between them.
+    val spans = remember { mutableStateMapOf<GitTab, Pair<Int, Int>>() }
     Column {
-        Row(Modifier.padding(horizontal = Clauderc.spacing.page), horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp8)) {
-            listOf(GitTab.Log to "时间线", GitTab.Status to "改动").forEach { (tab, label) ->
-                val on = state.tab == tab
-                Column(
-                    Modifier
-                        .width(IntrinsicSize.Max)
-                        .clickable(role = Role.Tab) { onTab(tab) }
-                        .semantics { selected = on },
-                ) {
-                    Text(
-                        buildAnnotatedString {
-                            append(label)
-                            if (tab == GitTab.Status && count != null && count > 0) append("($count)")
-                        },
-                        modifier = Modifier.padding(top = 12.dp, bottom = 12.dp),
-                        fontSize = Clauderc.fontSizes.label,
-                        fontWeight = FontWeight.Medium,
-                        color = if (on) c.fg else c.fg3,
-                    )
-                    Box(Modifier.height(2.dp).fillMaxWidth().background(if (on) c.fg else androidx.compose.ui.graphics.Color.Transparent))
+        Box(Modifier.padding(horizontal = Clauderc.spacing.page)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp8)) {
+                listOf(GitTab.Log to "时间线", GitTab.Status to "改动").forEach { (tab, label) ->
+                    val on = state.tab == tab
+                    Column(
+                        Modifier
+                            .width(IntrinsicSize.Max)
+                            .onPlaced { spans[tab] = it.positionInParent().x.roundToInt() to it.size.width }
+                            .clickable(role = Role.Tab) { onTab(tab) }
+                            .semantics { selected = on },
+                    ) {
+                        Text(
+                            buildAnnotatedString {
+                                append(label)
+                                if (tab == GitTab.Status && count != null && count > 0) append("($count)")
+                            },
+                            modifier = Modifier.padding(top = 12.dp, bottom = 12.dp),
+                            fontSize = Clauderc.fontSizes.label,
+                            fontWeight = FontWeight.Medium,
+                            color = if (on) c.fg else c.fg3,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                    }
                 }
+            }
+            spans[state.tab]?.let { (left, width) ->
+                val x by animateIntAsState(left, Motion.enter(), label = "underlineX")
+                val w by animateIntAsState(width, Motion.enter(), label = "underlineWidth")
+                Box(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .offset { IntOffset(x, 0) }
+                        .width(with(LocalDensity.current) { w.toDp() })
+                        .height(2.dp)
+                        .background(c.fg)
+                        .testTag("tabUnderline"),
+                )
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
@@ -281,7 +325,11 @@ private fun BranchBar(state: GitUiState, onBranches: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp4),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(Modifier.clickable(role = Role.Button, onClickLabel = "切换分支", onClick = onBranches), verticalAlignment = Alignment.CenterVertically) {
+        val press = remember { MutableInteractionSource() }
+        Row(
+            Modifier.pressShrink(press).clickable(press, LocalIndication.current, role = Role.Button, onClickLabel = "切换分支", onClick = onBranches),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(st?.branch?.ifEmpty { "分离的 HEAD" } ?: "…", fontFamily = MonoFamily, fontSize = 15.sp)
             Icon(Symbols.ExpandMore, contentDescription = null, tint = c.fg3, modifier = Modifier.size(18.dp))
         }

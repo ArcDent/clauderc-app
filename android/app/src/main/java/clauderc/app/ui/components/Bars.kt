@@ -1,6 +1,7 @@
 package clauderc.app.ui.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -27,7 +29,9 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
+import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.Symbols
+import clauderc.app.ui.theme.pressShrink
 
 /** .appbar: 56dp row; top-level pages indent their title to the page gutter. */
 @Composable
@@ -81,9 +85,11 @@ fun RowScope.BarTitle(
 @Composable
 fun BarSubButton(text: String, onClick: () -> Unit, enabled: Boolean = true, mono: Boolean = false) {
     val c = Clauderc.colors
+    val press = remember { MutableInteractionSource() }
     Row(
         Modifier
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .pressShrink(press)
+            .clickable(press, PressIndication(c.fg2), enabled = enabled, role = Role.Button, onClick = onClick)
             .then(if (enabled) Modifier else Modifier),
         verticalAlignment = Alignment.CenterVertically,
     ) {

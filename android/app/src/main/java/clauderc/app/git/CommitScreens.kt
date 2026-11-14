@@ -1,5 +1,8 @@
 package clauderc.app.git
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -53,6 +56,7 @@ import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercColors
 import clauderc.app.ui.theme.MonoFamily
+import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.Symbols
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -219,9 +223,15 @@ fun DiffScreen(path: String, subtitle: String, state: Loadable<GitDiffResponse>,
                 PillButton("展开", onClick = { expanded = true }, style = PillStyle.Tonal, modifier = Modifier.padding(top = sp.sp3))
             }
             lines.isEmpty() -> Text("没有差异", Modifier.padding(sp.page), fontSize = Clauderc.fontSizes.label, color = c.fg3)
-            else -> Box(Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) {
-                LazyColumn(Modifier.fillMaxSize().navigationBarsPadding().testTag("diff"), contentPadding = PaddingValues(bottom = sp.sp6)) {
-                    items(lines) { l -> DiffRow(l) }
+            else -> {
+                // A long diff opened with 展开 only fades in: growing a thousand lines in height would stutter.
+                val shown = remember { MutableTransitionState(!expanded) }.apply { targetState = true }
+                AnimatedVisibility(shown, enter = fadeIn(Motion.enter())) {
+                    Box(Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) {
+                        LazyColumn(Modifier.fillMaxSize().navigationBarsPadding().testTag("diff"), contentPadding = PaddingValues(bottom = sp.sp6)) {
+                            items(lines) { l -> DiffRow(l) }
+                        }
+                    }
                 }
             }
         }

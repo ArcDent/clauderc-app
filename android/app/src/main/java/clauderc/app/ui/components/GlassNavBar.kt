@@ -2,8 +2,10 @@ package clauderc.app.ui.components
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -46,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Motion
+import clauderc.app.ui.theme.pressShrink
 import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.HazeBlurStyle
@@ -150,11 +153,13 @@ private fun NavCell(tab: NavTab, selected: Boolean, modifier: Modifier, onClick:
     // The selected look fades in as the indicator arrives, like the mockup's FILL transition.
     val on by animateFloatAsState(if (selected) 1f else 0f, Motion.enter(), label = "navCell")
     val tint = lerp(c.fg2, c.fg, on)
+    val press = remember { MutableInteractionSource() }
     Box(
         modifier
+            .pressShrink(press)
             .fillMaxHeight()
             .clip(RoundedCornerShape(26.dp))
-            .selectable(selected = selected, role = Role.Tab, onClick = onClick),
+            .selectable(selected = selected, interactionSource = press, indication = LocalIndication.current, role = Role.Tab, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(1.dp)) {

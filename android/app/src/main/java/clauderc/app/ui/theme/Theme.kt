@@ -1,5 +1,6 @@
 package clauderc.app.ui.theme
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
@@ -68,6 +69,7 @@ fun ClaudercTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composab
     ) {
         MaterialTheme(colorScheme = scheme) {
             CompositionLocalProvider(
+                LocalIndication provides PressIndication(),
                 LocalContentColor provides c.fg,
                 LocalTextStyle provides TextStyle(fontSize = sizes.body, color = c.fg),
                 content = content,
