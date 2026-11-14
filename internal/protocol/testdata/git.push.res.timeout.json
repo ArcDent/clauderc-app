@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-057",
+  "method": "git.push",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "error": {"code": "timeout", "message": "git push 超过 30 秒未完成"}
+}

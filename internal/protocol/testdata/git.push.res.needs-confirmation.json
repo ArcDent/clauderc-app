@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-055",
+  "method": "git.push",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "error": {"code": "needsConfirmation", "message": "当前分支 feat-x 没有上游，确认后推送到 origin/feat-x 并设为上游"}
+}

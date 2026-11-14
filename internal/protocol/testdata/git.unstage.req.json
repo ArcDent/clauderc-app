@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-049",
+  "method": "git.unstage",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"dir": "/Users/me/code/clauderc", "path": "internal/protocol/chat.go"}
+}

@@ -1,0 +1,17 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-018",
+  "method": "chat.answer",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "toolUseId": "toolu_01C",
+    "answers": [
+      {"selected": [1]},
+      {"selected": [0, 2]},
+      {"custom": "都不喜欢"}
+    ]
+  }
+}

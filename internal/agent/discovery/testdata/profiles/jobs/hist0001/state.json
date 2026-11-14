@@ -1,0 +1,1 @@
+{"state": "done", "respawnFlags": ["--settings", "{\"env\":{\"ANTHROPIC_BASE_URL\":\"https://relay.example.net/v1\"}}"], "providerEnv": {}, "cwd": "/w/old", "updatedAt": "2026-11-01T10:00:00.000Z"}

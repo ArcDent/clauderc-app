@@ -1,0 +1,95 @@
+#!/bin/sh
+# Test double for the claude CLI. POSIX sh only, no jq or python.
+# Tests drive it through the clauderc/internal/agent/fakeclaude package.
+#
+# Environment:
+#   FAKE_CLAUDE_DIR    sample directory; `agents ...` prints its agents.json
+#                      (or [] when the file is missing). If agents.delay
+#                      exists there, `agents` first sleeps that many seconds.
+#   FAKE_CLAUDE_LOG    if set, every call creates <LOG>/<6-digit seq>/ with
+#                      args  each argument followed by a NUL byte
+#                      env   NAME=value lines for PATH, HOME, PWD, USER,
+#                            SHELL, TMPDIR and every ANTHROPIC_* or CLAUDE_*
+#                            variable, except names containing TOKEN, KEY,
+#                            SECRET or PASSWORD, which are never recorded
+#                      cwd   physical working directory (pwd -P), so
+#                            compare against filepath.EvalSymlinks
+#                      done  empty, written last: the record is complete
+#                      The directory must exist and be writable, otherwise
+#                      the call exits 3.
+#   FAKE_CLAUDE_BG_ID  short id printed by `--bg` (default f00dcafe)
+#
+# Handled calls:
+#   agents [--json] [--all]   print the sample list
+#   ... --bg ...              print "backgrounded · <id> · <name>", name from
+#                             -n/--name (default "session")
+#   stop <id>, rm <id>        succeed silently
+# Anything else, or -n/--name without a value, exits 2.
+
+if [ -n "$FAKE_CLAUDE_LOG" ]; then
+	if [ ! -d "$FAKE_CLAUDE_LOG" ] || [ ! -w "$FAKE_CLAUDE_LOG" ]; then
+		printf '%s\n' "fake-claude: FAKE_CLAUDE_LOG is not a writable directory" >&2
+		exit 3
+	fi
+	n=1
+	while ! mkdir "$FAKE_CLAUDE_LOG/$(printf '%06d' "$n")" 2>/dev/null; do
+		n=$((n + 1))
+	done
+	rec="$FAKE_CLAUDE_LOG/$(printf '%06d' "$n")"
+	: >"$rec/args"
+	for a in "$@"; do
+		printf '%s\000' "$a" >>"$rec/args"
+	done
+	: >"$rec/env"
+	for name in $(env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | sort -u); do
+		case "$name" in
+		*TOKEN* | *KEY* | *SECRET* | *PASSWORD*) continue ;;
+		PATH | HOME | PWD | USER | SHELL | TMPDIR | ANTHROPIC_* | CLAUDE_*) ;;
+		*) continue ;;
+		esac
+		value=$(printenv "$name") || continue
+		printf '%s=%s\n' "$name" "$value" >>"$rec/env"
+	done
+	pwd -P >"$rec/cwd"
+	: >"$rec/done"
+fi
+
+case "$1" in
+agents)
+	if [ -f "$FAKE_CLAUDE_DIR/agents.delay" ]; then
+		# Detach sleep from stdout so killing this shell ends the output.
+		sleep "$(cat "$FAKE_CLAUDE_DIR/agents.delay")" </dev/null >/dev/null 2>&1
+	fi
+	if [ -f "$FAKE_CLAUDE_DIR/agents.json" ]; then
+		cat "$FAKE_CLAUDE_DIR/agents.json"
+	else
+		printf '%s\n' '[]'
+	fi
+	exit 0
+	;;
+stop | rm)
+	[ -n "$2" ] || { printf '%s\n' "fake-claude: $1 needs an id" >&2; exit 2; }
+	exit 0
+	;;
+esac
+
+bg=
+name=session
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--bg) bg=1 ;;
+	-n | --name)
+		[ $# -ge 2 ] || { printf '%s\n' "fake-claude: $1 needs a value" >&2; exit 2; }
+		shift
+		name=$1
+		;;
+	esac
+	shift
+done
+if [ -n "$bg" ]; then
+	printf '%s\n' "backgrounded · ${FAKE_CLAUDE_BG_ID:-f00dcafe} · $name"
+	exit 0
+fi
+
+printf '%s\n' "fake-claude: unsupported call" >&2
+exit 2

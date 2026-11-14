@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-022",
+  "method": "chat.commands",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "commands": [
+      {"name": "model", "description": "Set the AI model for Claude Code"},
+      {"name": "compact", "description": "Clear conversation history but keep a summary in context"},
+      {"name": "openspec-propose", "description": "Propose a new change with all artifacts generated in one step"}
+    ]
+  }
+}

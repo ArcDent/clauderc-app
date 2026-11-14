@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-043",
+  "method": "git.show",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "hash": "c4d2b19",
+    "parents": ["c2f8c03"],
+    "author": "me",
+    "time": "2026-11-12T08:00:00Z",
+    "message": "修复重连\n\n断线后按逐步拉长的间隔重连，最长 60 秒。",
+    "files": [
+      {"path": "internal/agent/conn/conn.go", "added": 42, "deleted": 7, "binary": false},
+      {"path": "docs/relay.md", "oldPath": "docs/server.md", "added": 1, "deleted": 1, "binary": false},
+      {"path": "design/logo.png", "added": 0, "deleted": 0, "binary": true}
+    ]
+  }
+}

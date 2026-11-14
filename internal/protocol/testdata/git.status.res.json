@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-040",
+  "method": "git.status",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "branch": "main",
+    "upstream": "origin/main",
+    "ahead": 1,
+    "behind": 2,
+    "staged": [
+      {"path": "internal/protocol/chat.go", "change": "modified"}
+    ],
+    "unstaged": [
+      {"path": "docs/relay.md", "oldPath": "docs/server.md", "change": "renamed"},
+      {"path": "cmd/agent/main.go", "change": "deleted"},
+      {"path": "notes.txt", "change": "untracked"}
+    ]
+  }
+}

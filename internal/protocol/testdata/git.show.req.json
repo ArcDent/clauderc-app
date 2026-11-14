@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-043",
+  "method": "git.show",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"dir": "/Users/me/code/clauderc", "hash": "c4d2b19"}
+}

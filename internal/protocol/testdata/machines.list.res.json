@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-001",
+  "method": "machines.list",
+  "body": {
+    "machines": [
+      {"id": "m-7f3a", "name": "mac-mini", "online": true, "lastSeenAt": "2026-11-12T09:30:00Z", "agentVersion": "0.1.0", "claudeVersion": "2.1.323"},
+      {"id": "m-91c2", "name": "linux-box", "online": false, "lastSeenAt": "2026-11-11T22:05:41Z", "agentVersion": "0.1.0", "claudeVersion": "2.1.320"}
+    ]
+  }
+}

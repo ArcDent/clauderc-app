@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-042",
+  "method": "git.log",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "commits": [
+      {"hash": "c5e1f0a", "parents": ["c4d2b19", "c3a7e55"], "author": "me", "time": "2026-11-12T09:00:00Z", "subject": "Merge branch 'feat-x'", "refs": [{"name": "main", "kind": "branch"}, {"name": "origin/main", "kind": "remoteBranch"}, {"name": "v0.2.0", "kind": "tag"}], "lane": 0, "edges": [{"from": 0, "to": 0}, {"from": 0, "to": 1}]},
+      {"hash": "c4d2b19", "parents": ["c2f8c03"], "author": "me", "time": "2026-11-12T08:00:00Z", "subject": "修复重连", "lane": 0, "edges": [{"from": 0, "to": 0}, {"from": 1, "to": 1}]},
+      {"hash": "c3a7e55", "parents": ["c2f8c03"], "author": "me", "time": "2026-11-11T20:00:00Z", "subject": "加图片发送", "refs": [{"name": "feat-x", "kind": "branch"}], "lane": 1, "edges": [{"from": 0, "to": 0}, {"from": 1, "to": 0}]},
+      {"hash": "c2f8c03", "parents": ["c1b0d77"], "author": "me", "time": "2026-11-11T10:00:00Z", "subject": "定义协议", "lane": 0, "edges": [{"from": 0, "to": 0}]},
+      {"hash": "c1b0d77", "parents": [], "author": "me", "time": "2026-11-10T10:00:00Z", "subject": "初始化仓库", "lane": 0, "edges": []}
+    ],
+    "hasMore": false
+  }
+}

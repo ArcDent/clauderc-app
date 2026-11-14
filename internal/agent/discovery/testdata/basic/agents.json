@@ -1,0 +1,8 @@
+[
+  {"pid": null, "id": "stop0001", "cwd": "/w/stopped", "kind": "background", "startedAt": 1794400000123, "sessionId": "8f0c2a5e-0000-4000-8000-000000000001", "name": "old run", "status": "idle", "state": "blocked"},
+  {"id": "stop0002", "cwd": "/w/nopid", "kind": "background", "startedAt": 1794400000999, "sessionId": "8f0c2a5e-0000-4000-8000-000000000002", "name": "no pid field", "status": "busy", "state": "working"},
+  {"pid": 101, "id": "pend0001", "cwd": "/w/pending", "kind": "background", "startedAt": 1794529871884, "sessionId": "8f0c2a5e-0000-4000-8000-000000000003", "name": "needs ok", "status": "waiting", "state": "blocked"},
+  {"pid": 102, "id": "work0001", "cwd": "/w/working", "kind": "background", "startedAt": 1794529871000, "sessionId": "8f0c2a5e-0000-4000-8000-000000000004", "name": "busy one", "status": "busy", "state": "working"},
+  {"pid": 103, "id": "idle0001", "cwd": "/w/idle", "kind": "background", "startedAt": 1794529871500, "sessionId": "8f0c2a5e-0000-4000-8000-000000000005", "name": "", "status": "idle", "state": "done"},
+  {"pid": 200, "id": "fore0001", "cwd": "/w/terminal", "kind": "interactive", "startedAt": 1794529871884, "sessionId": "8f0c2a5e-0000-4000-8000-000000000006", "name": "terminal", "status": "busy", "state": "working"}
+]

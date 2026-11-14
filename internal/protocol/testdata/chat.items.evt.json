@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.items",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "items": [
+      {"seq": 254, "kind": "tool", "tool": {"toolUseId": "toolu_01B", "toolName": "Bash", "summary": "运行 touch marker.txt", "input": {"command": "touch marker.txt", "description": "Create marker"}, "result": {"content": "The user doesn't want to proceed with this tool use.", "isError": true}}},
+      {"seq": 255, "kind": "assistant", "text": "好的，不创建这个文件。"}
+    ]
+  }
+}

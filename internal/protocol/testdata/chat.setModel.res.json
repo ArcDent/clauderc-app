@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-020",
+  "method": "chat.setModel",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {}
+}

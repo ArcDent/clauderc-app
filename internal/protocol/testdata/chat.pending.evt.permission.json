@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.pending",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "pending": {"toolUseId": "toolu_01B", "kind": "permission", "toolName": "Bash", "input": {"command": "touch marker.txt", "description": "Create marker"}}
+  }
+}

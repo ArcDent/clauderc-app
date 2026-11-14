@@ -1,0 +1,29 @@
+{
+  "name": "@arcdent/clauderc",
+  "version": "0.0.0-dev",
+  "description": "用手机查看和操作 Claude Code 后台会话：装在电脑上的目标机程序",
+  "license": "AGPL-3.0-only",
+  "bin": {
+    "clauderc": "bin/clauderc.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@arcdent/clauderc-darwin-arm64": "0.0.0-dev",
+    "@arcdent/clauderc-darwin-x64": "0.0.0-dev",
+    "@arcdent/clauderc-linux-arm64": "0.0.0-dev",
+    "@arcdent/clauderc-linux-x64": "0.0.0-dev"
+  }
+}

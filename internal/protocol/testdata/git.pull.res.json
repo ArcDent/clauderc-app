@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-051",
+  "method": "git.pull",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {}
+}

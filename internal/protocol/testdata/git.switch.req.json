@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-058",
+  "method": "git.switch",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"dir": "/Users/me/code/clauderc", "branch": "feat-y"}
+}

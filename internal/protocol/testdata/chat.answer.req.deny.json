@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-017",
+  "method": "chat.answer",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"sessionId": "a1b2c3", "toolUseId": "toolu_01B", "decision": "deny"}
+}

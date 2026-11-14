@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-030",
+  "method": "session.create",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"sessionId": "m3n4o5"}
+}

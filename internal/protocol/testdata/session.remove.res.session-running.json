@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-034",
+  "method": "session.remove",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "error": {"code": "sessionRunning", "message": "会话仍在运行，先停止再移出"}
+}

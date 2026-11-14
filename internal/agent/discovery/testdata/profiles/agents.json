@@ -1,0 +1,7 @@
+[
+  {"pid": 11, "id": "dflt0001", "cwd": "/w/a", "kind": "background", "startedAt": 1794529871000, "sessionId": "8f0c2a5e-0000-4000-8000-000000000011", "name": "routed", "status": "idle", "state": "done"},
+  {"pid": 12, "id": "anth0001", "cwd": "/w/b", "kind": "background", "startedAt": 1794529871000, "sessionId": "8f0c2a5e-0000-4000-8000-000000000012", "name": "official", "status": "idle", "state": "done"},
+  {"pid": 13, "id": "anyr0001", "cwd": "/w/c", "kind": "background", "startedAt": 1794529871000, "sessionId": "8f0c2a5e-0000-4000-8000-000000000013", "name": "any", "status": "busy", "state": "working"},
+  {"pid": null, "id": "bad00001", "cwd": "/w/d", "kind": "background", "startedAt": 1794529871000, "sessionId": "8f0c2a5e-0000-4000-8000-000000000014", "name": "corrupt job", "status": "idle", "state": "done"},
+  {"pid": null, "id": "miss0001", "cwd": "/w/e", "kind": "background", "startedAt": 1794529871000, "sessionId": "8f0c2a5e-0000-4000-8000-000000000015", "name": "no job", "status": "idle", "state": "done"}
+]

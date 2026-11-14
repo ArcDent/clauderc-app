@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-017",
+  "method": "chat.answer",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "error": {"code": "pendingChanged", "message": "待确认已变化"}
+}
