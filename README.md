@@ -27,7 +27,6 @@
 - 看对话、发消息，回答 claude 的权限请求和提问
 - 新建和停止会话，会话按启动档位分组，档位就是会话启动时用的接口地址
 - 看 git 提交历史，暂存、提交、拉取和推送
-- 目标机程序只读 `~/.claude`，从不修改里面的文件；停掉它，Claude Code 照常使用
 
 ## 快速开始
 
@@ -36,7 +35,7 @@
 | 程序 | 装在哪 | 做什么 |
 |---|---|---|
 | 中转服务器 `relay` | 有公网地址的 Linux 服务器，装有 Docker，前面要有提供 HTTPS 的反向代理 | 手机和电脑都主动连它，它负责认证和转发 |
-| 目标机程序 `clauderc` | 每台跑 Claude Code 的电脑，macOS 或 Linux，要有 Node.js 18 或更新；Claude Code 2.1.323 下测试通过，git 2.31 或更新 | 读取后台会话，把手机上的操作换成按键敲进会话 |
+| 目标机程序 `clauderc` | 每台跑 Claude Code 的电脑，macOS 或 Linux，要有 Node.js 18 或更新 | 读取后台会话，把手机上的操作换成按键敲进会话 |
 | Android APP | Android 10 或更新的手机 | 扫码配对后连中转服务器 |
 
 APK、各平台的二进制和 `compose.yaml` 都在 [Releases](../../releases/latest) 页面下载，中转服务器的镜像是 `ghcr.io/arcdent/clauderc-relay`。
@@ -73,7 +72,7 @@ PUBLIC_URL=wss://relay.example.com
 scripts/deploy-relay.sh <ssh 主机> wss://relay.example.com
 ```
 
-首次启动时，容器自动生成注册密钥，和配对数据一起存在 Docker 卷里，升级时都不变。
+首次启动时，容器自动生成注册密钥，和配对数据一起存在 Docker 卷里
 
 | 设置 | 默认 | 说明 |
 |---|---|---|
@@ -84,7 +83,9 @@ scripts/deploy-relay.sh <ssh 主机> wss://relay.example.com
 | 本机环境变量 `REMOTE_DIR` | `/opt/clauderc-relay` | 部署脚本在服务器上用的目录 |
 | 本机环境变量 `RELAY_IMAGE` | 不设置 | 设置后部署脚本把它写进服务器的 `.env` |
 
-反向代理把 `https://relay.example.com` 转到 `127.0.0.1:8787`，要支持 WebSocket 升级。Caddy 一行就够：
+反向代理把 `https://relay.example.com` 转到 `127.0.0.1:8787`，要支持 WebSocket 升级。
+
+Caddy 配置如下：
 
 ```
 relay.example.com {
@@ -106,7 +107,8 @@ location / {
 
 `curl https://relay.example.com/healthz` 返回 200 说明服务正常。
 
-不用 Docker 时，也可以直接运行 Releases 里的 `relay-linux-<架构>`：用 `openssl rand -hex 32` 生成注册密钥，存成 600 权限的文件，按[配置](#配置)一节写 `relay.toml`，再运行 `relay serve --config <relay.toml 的路径>`。
+不用 Docker 时，也可以直接运行 Releases 里的 `relay-linux-<架构>`：
+- 用 `openssl rand -hex 32` 生成注册密钥，存成 600 权限的文件，按[配置](#配置)一节写 `relay.toml`，再运行 `relay serve --config <relay.toml 的路径>`
 
 </details>
 
@@ -120,9 +122,9 @@ npm i -g @arcdent/clauderc
 clauderc --version
 ```
 
-npm 只装本机系统和架构对应的程序包，支持 macOS、Linux 的 x64 和 arm64。不用 npm 时，Releases 里的 `agent-<系统>-<架构>` 是同一个程序，把下面命令里的 `clauderc` 换成它的文件名即可。
+npm 只装本机系统和架构对应的程序包，支持 macOS、Linux 的 x64 和 arm64。不用 npm 时，用 Releases 里的 `agent-<系统>-<架构>`，把下面命令里的 `clauderc` 换成它的文件名即可
 
-把中转服务器上的注册密钥取到目标机，存成 600 权限的文件。部署脚本结束时会打印现成的命令；下面这条对应 Compose 部署在 `/opt/clauderc-relay`，用 `docker run` 部署时，把引号里的命令换成 `docker exec clauderc-relay cat /data/enroll.key`：
+下面这条对应 Compose 部署在 `/opt/clauderc-relay`，用 `docker run` 部署时，把引号里的命令换成 `docker exec clauderc-relay cat /data/enroll.key`：
 
 ```sh
 mkdir -p ~/.config/clauderc && (umask 077; ssh <ssh 主机> 'cd /opt/clauderc-relay && docker compose exec -T relay cat /data/enroll.key' > ~/.config/clauderc/enroll.key)
@@ -193,7 +195,7 @@ clauderc revoke <id>     # 吊销一台手机，它的连接会立即断开
 | 键 | 必填 | 说明 |
 |---|---|---|
 | `listen` | 否 | 本机监听地址，默认 `127.0.0.1:8787`。对外由反向代理提供 HTTPS |
-| `public_url` | 是 | 手机和目标机使用的 `wss://` 地址，会写进配对二维码，不能带查询参数 |
+| `public_url` | 是 | 手机和目标机使用的 `wss://` 地址，会直接写进配对二维码 |
 | `enroll_key_file` | 是 | 注册密钥文件，权限必须是 600 或更严 |
 | `state_file` | 是 | 状态文件路径，存目标机列表和已配对手机的凭证摘要，权限 600 |
 
@@ -214,7 +216,8 @@ clauderc revoke <id>     # 吊销一台手机，它的连接会立即断开
 
 注册密钥也可以用环境变量 `CLAUDERC_ENROLL_KEY` 提供，设置后优先于 `enroll_key_file`。
 
-目标机程序会在 `agent.toml` 所在目录生成两个文件，都不要手动改：`machine-id` 是这台目标机的标识，首次运行时生成；`profiles.json` 记着每个启动档位最近一次的启动参数，权限 600，里面可能有接口密钥，不会发给手机。
+- 目标机程序会在 `agent.toml` 所在目录生成两个文件，都不需要手动改：`machine-id` 是这台目标机的标识，首次运行时生成
+- `profiles.json` 记着每个启动档位最近一次的启动参数，权限 600，不会对外暴露
 
 </details>
 
