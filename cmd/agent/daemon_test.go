@@ -53,7 +53,7 @@ func TestStartAndStop(t *testing.T) {
 	if !isOurRun(pid, cfg) {
 		t.Fatalf("process %d is not running run --config %s", pid, cfg)
 	}
-	if sid, err := syscall.Getsid(pid); err != nil || sid != pid {
+	if sid, err := getsid(pid); err != nil || sid != pid {
 		t.Errorf("getsid(%d) = %d, %v; want its own session", pid, sid, err)
 	}
 
