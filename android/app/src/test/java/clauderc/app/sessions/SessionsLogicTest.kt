@@ -28,8 +28,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.job
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -149,8 +151,9 @@ class SessionsLogicTest {
         val other = SessionsViewModel("m-2", fleet, relay, names)
         assertEquals("anyrouter.top", eventually { other.state.first { it.groups != null } }.groups!![2].title)
 
-        // A new store on the same file, as after an app restart.
-        storeScope.cancel()
+        // A new store on the same file, as after an app restart. DataStore frees the file only once
+        // the old store's scope has finished, so wait for that rather than just asking it to stop.
+        eventually { storeScope.coroutineContext.job.cancelAndJoin() }
         val restarted = profileNames(tmp.root, CoroutineScope(Dispatchers.IO + Job()))
         assertEquals("any", eventually { restarted.names("m-1").first { it.isNotEmpty() } }["anyrouter.top"])
     }
