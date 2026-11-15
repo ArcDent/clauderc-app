@@ -266,5 +266,16 @@ jobs:
               echo "@arcdent/$name@$VERSION 已发布，跳过"
               continue
             fi
-            npm publish --access public --tag "$tag" "dist/npm/arcdent-$name-$VERSION.tgz"
+            # The registry read cache can lag behind a publish for a few
+            # minutes, so on a re-run npm view may miss the version and the
+            # publish then fails with E403. Treat that as already published.
+            if ! output=$(npm publish --access public --tag "$tag" "dist/npm/arcdent-$name-$VERSION.tgz" 2>&1); then
+              printf '%s\n' "$output"
+              if printf '%s\n' "$output" | grep -q 'previously published versions'; then
+                echo "@arcdent/$name@$VERSION 已由上次运行发布，跳过"
+                continue
+              fi
+              exit 1
+            fi
+            printf '%s\n' "$output"
           done

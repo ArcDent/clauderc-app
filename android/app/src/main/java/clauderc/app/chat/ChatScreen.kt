@@ -59,9 +59,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -76,6 +79,7 @@ import clauderc.app.protocol.PermissionMode
 import clauderc.app.protocol.SessionState
 import clauderc.app.protocol.ToolCall
 import clauderc.app.sessions.display
+import clauderc.app.ui.contextPercent
 import clauderc.app.ui.components.AppBar
 import clauderc.app.ui.components.BarSubButton
 import clauderc.app.ui.components.BarTitle
@@ -125,6 +129,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     var sheet by remember { mutableStateOf<ChatSheet?>(null) }
+    val openModels = { actions.onLoadModels(); sheet = ChatSheet.Model }
     val title = state.session?.let(::display) ?: "会话"
 
     Box(Modifier.fillMaxSize().background(c.bg)) {
@@ -133,8 +138,11 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
                 navigation = { SymbolButton(Symbols.ArrowBack, "返回", onClick = actions.onBack) },
                 title = {
                     BarTitle(title) {
-                        BarSubButton(modelLabel(state.model).ifEmpty { "模型" }, onClick = { actions.onLoadModels(); sheet = ChatSheet.Model }, enabled = state.online)
+                        BarSubButton(modelLabel(state.model).ifEmpty { "模型" }, onClick = openModels, enabled = state.online)
                         BarSubButton(permissionModeLabel(state.permissionMode), onClick = { sheet = ChatSheet.Mode }, enabled = state.online)
+                        contextPercent(state.session?.context)?.let {
+                            Text("上下文 $it%", fontSize = Clauderc.fontSizes.caption, color = c.fg2, maxLines = 1)
+                        }
                     }
                 },
                 actions = {
@@ -167,7 +175,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
                         PendingPanel(pending, enabled = state.online, onAllow = actions.onAllow, onDeny = actions.onDeny, onAnswer = actions.onAnswer)
                     }
                 } else {
-                    Composer(state, actions, onAttach = { sheet = ChatSheet.Attach })
+                    Composer(state, actions, onAttach = { sheet = ChatSheet.Attach }, onModels = openModels)
                 }
             }
         }
@@ -245,10 +253,11 @@ private fun MessageList(state: ChatUiState, onLoadOlder: () -> Unit, modifier: M
         if (note != null) {
             item(key = "notice") { Note(note, spinner = state.waking) }
         }
-        items(state.outgoing.asReversed(), key = { "out-${it.id}" }) { out ->
+        // contentType lets the list reuse a bubble's composition for the next bubble of the same kind.
+        items(state.outgoing.asReversed(), key = { "out-${it.id}" }, contentType = { ItemKind.USER }) { out ->
             Box(Modifier.animateItem(fadeInSpec = Motion.enter(), placementSpec = Motion.enter(), fadeOutSpec = Motion.exit())) { OutgoingBubble(out) }
         }
-        items(reversed, key = { it.seq }) { item ->
+        items(reversed, key = { it.seq }, contentType = { if (it.tool?.let(::isCommand) == true) "command" else it.kind }) { item ->
             Box(Modifier.animateItem(fadeInSpec = Motion.enter(), placementSpec = Motion.enter(), fadeOutSpec = Motion.exit())) {
                 ChatItemView(item, working = state.state == SessionState.Working)
             }
@@ -273,7 +282,7 @@ private fun ChatItemView(item: ChatItem, working: Boolean) {
     when (item.kind) {
         ItemKind.USER -> UserBubble(item)
         ItemKind.ASSISTANT -> AssistantBubble(item.text.orEmpty())
-        ItemKind.TOOL -> item.tool?.let { ToolRow(it, working) }
+        ItemKind.TOOL -> item.tool?.let { if (isCommand(it)) CommandView(it) else ToolRow(it, working) }
         ItemKind.INTERRUPTED -> Note("已中断")
     }
 }
@@ -291,23 +300,23 @@ private fun Note(text: String, spinner: Boolean = false) {
 @Composable
 private fun UserBubble(item: ChatItem) {
     val images = item.images.orEmpty()
-    UserBubbleLayout(item.text.orEmpty(), images.size, faded = false) { i ->
+    UserBubbleLayout(item.text.orEmpty(), images.size, faded = false, queued = item.queued == true) { i ->
         val data = images[i].data
         ChatPicture(rememberChatImage(data) { Base64.getDecoder().decode(data) })
     }
 }
 
-/** A message on its way: faded until the transcript shows it. */
+/** A message on its way: faded until delivered, then marked queued until the transcript shows it. */
 @Composable
 private fun OutgoingBubble(out: Outgoing) {
-    UserBubbleLayout(out.text, out.attachments.size, faded = true) { i ->
+    UserBubbleLayout(out.text, out.attachments.size, faded = !out.queued, queued = out.queued) { i ->
         val a = out.attachments[i]
         ChatPicture(rememberChatImage(a) { a.jpeg })
     }
 }
 
 @Composable
-private fun UserBubbleLayout(text: String, pictures: Int, faded: Boolean, picture: @Composable (Int) -> Unit) {
+private fun UserBubbleLayout(text: String, pictures: Int, faded: Boolean, queued: Boolean = false, picture: @Composable (Int) -> Unit) {
     val c = Clauderc.colors
     // The card style speaks in its accent; the minimal one in black on white.
     val card = isCardStyle
@@ -325,6 +334,9 @@ private fun UserBubbleLayout(text: String, pictures: Int, faded: Boolean, pictur
                     lineHeight = 1.55.em,
                 )
             }
+            if (queued) {
+                Text("排队中", Modifier.padding(end = Clauderc.spacing.sp2), fontSize = Clauderc.fontSizes.caption, color = c.fg3)
+            }
         }
     }
 }
@@ -341,9 +353,11 @@ private fun ChatPicture(bitmap: ImageBitmap?) {
 private fun AssistantBubble(text: String) {
     val c = Clauderc.colors
     val card = isCardStyle
+    // Parsed once per text, not on every recomposition as the reply scrolls in.
+    val rich = remember(text, c.fg) { richText(text, c.fg) }
     Box(Modifier.fillMaxWidth(0.82f)) {
         Text(
-            richText(text, c.fg),
+            rich,
             modifier = Modifier.clip(RoundedCornerShape(if (card) 20.dp else 22.dp)).background(if (card) c.card else c.surface).padding(horizontal = 16.dp, vertical = 10.dp),
             color = c.fg,
             fontSize = 15.sp,
@@ -352,13 +366,53 @@ private fun AssistantBubble(text: String) {
     }
 }
 
+/** A slash command the user ran: their own bubble, with its output, if any, folded into a row under it. */
+@Composable
+private fun CommandView(tool: ToolCall) {
+    val output = tool.result?.content.orEmpty().trim()
+    Column(Modifier.fillMaxWidth()) {
+        UserBubbleLayout(tool.summary, 0, faded = false) {}
+        if (output.isNotEmpty()) {
+            val fg = Clauderc.colors.fg
+            FoldRow(tool.toolUseId, "输出", output.lineSequence().first { it.isNotBlank() }) {
+                buildAnnotatedString { withStyle(SpanStyle(color = fg)) { append(output) } }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ToolRow(tool: ToolCall, working: Boolean) {
     val c = Clauderc.colors
-    val sp = Clauderc.spacing
-    var open by rememberSaveable(tool.toolUseId) { mutableStateOf(false) }
-    val turn by animateFloatAsState(if (open) 90f else 0f, Motion.turn(), label = "chevron")
     val (verb, arg) = splitSummary(tool)
+    FoldRow(
+        tool.toolUseId, verb, arg,
+        status = {
+            when {
+                tool.result == null && working -> Spinner(size = 12.dp, color = c.fg3)
+                isRefusal(tool) -> Text("已拒绝", fontSize = Clauderc.fontSizes.caption, color = c.danger)
+                tool.result?.isError == true -> Text("出错", fontSize = Clauderc.fontSizes.caption, color = c.danger)
+            }
+        },
+    ) {
+        buildAnnotatedString {
+            toolDetail(tool).forEachIndexed { i, (k, v) ->
+                if (i > 0) append("\n")
+                withStyle(SpanStyle(color = c.fg3)) { append(k) }
+                append("\n")
+                withStyle(SpanStyle(color = c.fg)) { append(v) }
+            }
+        }
+    }
+}
+
+/** A one-line row, a grey [verb] and a mono [arg], that unfolds [detail] under it; [detail] is built only when open. */
+@Composable
+private fun FoldRow(key: String, verb: String?, arg: String, status: @Composable () -> Unit = {}, detail: @Composable () -> AnnotatedString) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    var open by rememberSaveable(key) { mutableStateOf(false) }
+    val turn by animateFloatAsState(if (open) 90f else 0f, Motion.turn(), label = "chevron")
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier
@@ -371,11 +425,7 @@ private fun ToolRow(tool: ToolCall, working: Boolean) {
         ) {
             if (verb != null) Text(verb, fontSize = 13.sp, color = c.fg3)
             Text(arg, Modifier.weight(1f), fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm, color = c.fg2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            when {
-                tool.result == null && working -> Spinner(size = 12.dp, color = c.fg3)
-                isRefusal(tool) -> Text("已拒绝", fontSize = Clauderc.fontSizes.caption, color = c.danger)
-                tool.result?.isError == true -> Text("出错", fontSize = Clauderc.fontSizes.caption, color = c.danger)
-            }
+            status()
             Icon(Symbols.ChevronRight, contentDescription = null, tint = c.fg3, modifier = Modifier.size(18.dp).rotate(turn))
         }
         AnimatedVisibility(
@@ -384,14 +434,7 @@ private fun ToolRow(tool: ToolCall, working: Boolean) {
             exit = shrinkVertically(Motion.exit()) + fadeOut(Motion.exit()),
         ) {
             Text(
-                buildAnnotatedString {
-                    toolDetail(tool).forEachIndexed { i, (k, v) ->
-                        if (i > 0) append("\n")
-                        withStyle(SpanStyle(color = c.fg3)) { append(k) }
-                        append("\n")
-                        withStyle(SpanStyle(color = c.fg)) { append(v) }
-                    }
-                },
+                detail(),
                 modifier = Modifier
                     .padding(start = sp.sp2, end = sp.sp2, top = 2.dp, bottom = sp.sp2)
                     .fillMaxWidth()
@@ -410,25 +453,37 @@ private fun ToolRow(tool: ToolCall, working: Boolean) {
 }
 
 @Composable
-private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> Unit) {
+private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> Unit, onModels: () -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     // The card style floats a card on its grey page and sends with the accent.
     val card = isCardStyle
-    var text by rememberSaveable { mutableStateOf("") }
+    // The cursor is kept with the text, so a picked command can put it after itself.
+    var field by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+    val text = field.text
     // A failed send hands its text back, unless something new was typed meanwhile.
-    LaunchedEffect(state.restore) { state.restore?.let { if (text.isBlank()) text = it.text } }
-    val hits = filterCommands(state.commands, text)
+    LaunchedEffect(state.restore) { state.restore?.let { if (field.text.isBlank()) field = TextFieldValue(it.text, TextRange(it.text.length)) } }
+    val word = if (field.selection.collapsed) slashWord(text, field.selection.end) else null
+    val hits = filterCommands(state.commands, word)
     val enabled = state.online
     Column(
         Modifier.fillMaxWidth().background(c.bg).navigationBarsPadding().padding(start = sp.sp3, end = sp.sp3, top = sp.sp2, bottom = sp.sp3),
         verticalArrangement = Arrangement.spacedBy(sp.sp2),
     ) {
         // Keep the last matches while the popup leaves.
-        var shownHits by remember { mutableStateOf(emptyList<Command>()) }
-        if (hits != null) shownHits = hits
+        var shown by remember { mutableStateOf(emptyList<Command>() to "") }
+        if (hits != null && word != null) shown = hits to word.query
         Lift(visible = hits != null && enabled) {
-            SlashPopup(shownHits, query = text.drop(1)) { cmd -> text = "/${cmd.name} " }
+            SlashPopup(shown.first, query = shown.second) { cmd ->
+                val w = word ?: return@SlashPopup
+                if (cmd.name.equals("model", ignoreCase = true)) {
+                    // /model would change the computer's default model; the phone's picker changes only this session.
+                    field = TextFieldValue(text.removeRange(w.start, w.end), TextRange(w.start))
+                    onModels()
+                } else {
+                    field = pickCommand(field, w, cmd.name)
+                }
+            }
         }
         Lift(visible = state.state == SessionState.Working) {
             WorkingRow(state.workingSinceMillis, enabled, actions.onInterrupt)
@@ -501,8 +556,8 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                 contentAlignment = Alignment.Center,
             ) { Icon(Symbols.Image, contentDescription = "添加图片", tint = if (enabled) c.fg2 else c.fg3) }
             BasicTextField(
-                value = text,
-                onValueChange = { text = it },
+                value = field,
+                onValueChange = { field = it },
                 enabled = enabled,
                 modifier = Modifier.weight(1f).padding(horizontal = 4.dp, vertical = 12.dp).testTag("composer"),
                 textStyle = TextStyle(color = c.fg, fontSize = Clauderc.fontSizes.body, lineHeight = 1.4.em),
@@ -540,7 +595,15 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                             else -> c.surface2
                         },
                     )
-                    .clickable(sendPress, PressIndication(if (card) c.onAccent else c.bg), enabled = canSend, role = Role.Button, onClickLabel = "发送") { if (actions.onSend(text)) text = "" }
+                    .clickable(sendPress, PressIndication(if (card) c.onAccent else c.bg), enabled = canSend, role = Role.Button, onClickLabel = "发送") {
+                        when {
+                            isModelCommand(text) -> {
+                                field = TextFieldValue()
+                                onModels()
+                            }
+                            actions.onSend(text) -> field = TextFieldValue()
+                        }
+                    }
                     .semantics { contentDescription = "发送" },
                 contentAlignment = Alignment.Center,
             ) {

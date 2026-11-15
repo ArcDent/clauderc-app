@@ -47,6 +47,8 @@ type ChatItem struct {
 	Images []Image `json:"images,omitempty"`
 	// Tool is set for tool items.
 	Tool *ToolCall `json:"tool,omitempty"`
+	// Queued marks a user item still waiting in Claude Code's queue.
+	Queued bool `json:"queued,omitempty"`
 }
 
 // ToolCall is a tool_use paired with its tool_result.
@@ -148,6 +150,14 @@ type ChatSendRequest struct {
 	SessionID string  `json:"sessionId"`
 	Text      string  `json:"text"`
 	Images    []Image `json:"images,omitempty"`
+}
+
+// ChatSendResponse answers chat.send once the message shows up in the
+// transcript.
+type ChatSendResponse struct {
+	// Queued is set when the message waits in Claude Code's queue until
+	// the current turn ends.
+	Queued bool `json:"queued,omitempty"`
 }
 
 // Decision answers a permission request.

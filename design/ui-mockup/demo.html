@@ -72,6 +72,9 @@
   --dur-s: 150ms;
   --dur-m: 280ms;
   --dur-l: 350ms;
+  /* 设置里换外观时的圆形扩散：两头慢，看得出圆从点的位置长大 */
+  --ease-reveal: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-reveal: 650ms;
 
   /* 审阅页本身，不属于 APP 主题 */
   --desk-bg: #F4F4F4;
@@ -326,7 +329,7 @@ button { cursor: pointer; }
 .vf .tr { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; border-top-right-radius: 14px; }
 .vf .bl { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; border-bottom-left-radius: 14px; }
 .vf .br { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; border-bottom-right-radius: 14px; }
-.scanline { position: absolute; left: 16px; right: 16px; top: 10px; height: 1px; background: var(--c-on-camera); opacity: 0.55; animation: scan 2.6s ease-in-out infinite alternate; }
+.scanline { position: absolute; left: 16px; right: 16px; top: 10px; height: 1px; background: var(--c-on-camera); opacity: 0.55; animation: scan 3.6s ease-in-out infinite alternate; }
 .icon-btn.cam-back { position: absolute; top: var(--sp-1); left: var(--sp-1); z-index: 2; color: var(--c-on-camera); }
 .cam-fine { margin: var(--sp-6) 0 0; font-size: var(--fs-caption); opacity: 0.5; }
 .cam-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; background: var(--c-sheet); color: var(--c-fg); border-radius: var(--r-lg) var(--r-lg) 0 0; padding: var(--sp-6) var(--sp-page) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-3); }
@@ -766,6 +769,61 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   .device { width: 100%; height: 780px; border-radius: 28px; box-shadow: 0 0 0 1px var(--desk-line); }
   .caption { width: 100%; }
 }
+/* ---------- 待选方案（这一轮挑完就收敛成一种） ---------- */
+.knob h3 { margin: 6px 0 0; font-size: 13px; font-weight: 500; color: var(--desk-fg); }
+/* 扫码：光带从上往下扫，到底淡出再从头来 */
+.vf .band { position: absolute; left: 12px; right: 12px; top: 6px; height: 72px; border-radius: 10px 10px 2px 2px; opacity: 0; pointer-events: none;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--c-on-camera) 16%, transparent));
+  border-bottom: 1.5px solid color-mix(in srgb, var(--c-on-camera) 85%, transparent);
+  animation: band 2.4s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+@keyframes band { 0% { transform: translateY(-40px); opacity: 0; } 15% { opacity: 1; } 80% { opacity: 1; } 100% { transform: translateY(150px); opacity: 0; } }
+/* 扫码：没有扫描线，四角慢慢往里收再放开 */
+.vf.scan-breath i { animation: breath 2.4s ease-in-out infinite alternate; }
+.vf .tl { --dx: 1; --dy: 1; } .vf .tr { --dx: -1; --dy: 1; } .vf .bl { --dx: 1; --dy: -1; } .vf .br { --dx: -1; --dy: -1; }
+@keyframes breath { from { transform: none; } to { transform: translate(calc(var(--dx) * 6px), calc(var(--dy) * 6px)); } }
+/* 识别到二维码：扫描停下淡出，四角收拢到二维码上，中间转圈 */
+.vf i { transition: transform var(--dur-m) var(--ease-emph); }
+.vf.got i { animation: none; transform: translate(calc(var(--dx) * 30px), calc(var(--dy) * 30px)); }
+.vf.got .band, .vf.got .scanline { animation-play-state: paused; opacity: 0 !important; transition: opacity var(--dur-s); }
+.vf-wait { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity var(--dur-m) var(--ease-emph); pointer-events: none; }
+.vf-wait .spin { width: 28px; height: 28px; color: var(--c-on-camera); }
+.vf.got .vf-wait { opacity: 1; }
+.cam-fine .spin { width: 12px; height: 12px; vertical-align: -1px; margin-right: 6px; }
+@media (prefers-reduced-motion: reduce) { .vf .band, .vf.scan-breath i { animation: none !important; } }
+/* 会话两级：目录小标题 */
+.dh { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-3) var(--sp-page) 0; font-size: var(--fs-caption); color: var(--c-fg-3); }
+.dh .mono { font-size: var(--fs-mono-sm); color: var(--c-fg-2); }
+[data-style="card"] .dh { padding: var(--sp-3) var(--sp-4) 0; }
+[data-style="card"] .list > .dh + * { box-shadow: none; }
+/* 会话两级：目录行，可单独折叠 */
+.drow { display: flex; align-items: center; gap: var(--sp-3); width: 100%; border: 0; background: none; text-align: left; padding: 10px var(--sp-3) 10px var(--sp-page); color: var(--c-fg); position: relative; overflow: hidden; }
+.drow > .ms:first-child { font-size: 20px; color: var(--c-fg-3); }
+.drow .mono { font-size: var(--fs-mono); }
+.dsum { flex: 1; min-width: 0; font-size: var(--fs-caption); color: var(--c-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drow .chev { color: var(--c-fg-3); transform: rotate(180deg); transition: transform var(--dur-s) var(--ease-emph); }
+.dgroup.folded .drow .chev { transform: none; }
+.dgroup.folded .dkids { display: none; }
+.dkids .row { padding-left: calc(var(--sp-page) + 32px); }
+[data-style="card"] .drow { padding-left: var(--sp-4); }
+[data-style="card"] .dkids .row { padding-left: calc(var(--sp-4) + 32px); }
+[data-style="card"] .dkids > * { box-shadow: inset 0 1px 0 var(--c-line); }
+/* 用量 */
+.usage { padding: 0 var(--sp-page) var(--sp-2); font-size: var(--fs-label); color: var(--c-fg-2); display: flex; flex-direction: column; gap: 6px; }
+.usage b { font-weight: 500; color: var(--c-fg); font-variant-numeric: tabular-nums; }
+.usage .u-reset { color: var(--c-fg-3); font-size: var(--fs-caption); }
+.usage .u-row { display: flex; align-items: baseline; gap: var(--sp-2); }
+.usage.bars { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 6px var(--sp-3); }
+.usage.bars .u-row { display: contents; }
+.usage.bars .u-note { grid-column: 1 / -1; }
+.usage.bars b { text-align: right; }
+.u-bar { height: 3px; border-radius: 2px; background: var(--c-line); overflow: hidden; }
+.u-bar i { display: block; height: 100%; border-radius: 2px; background: var(--c-fg-2); }
+.usage .u-note { font-size: var(--fs-caption); color: var(--c-fg-3); }
+.usage.stale b, .usage.stale { color: var(--c-fg-3); }
+.usage.stale .u-bar i { background: var(--c-fg-3); }
+[data-style="card"] .usage { margin: 0 var(--sp-4) var(--sp-2); padding: var(--sp-4); background: var(--c-card); border-radius: var(--r-card); }
+[data-style="card"] .u-bar i { background: var(--c-accent); }
+[data-style="card"] .usage.stale .u-bar i { background: var(--c-fg-3); }
 </style>
 
 <div class="review">
@@ -781,6 +839,42 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       <button type="button" data-style-set="minimal" aria-pressed="true">极简</button>
       <button type="button" data-style-set="card" aria-pressed="false">卡片</button>
     </div>
+
+    <section class="knob">
+      <h2>待选方案</h2>
+      <p class="desk-note" style="margin:0">默认就是 APP 现在的样子（已选定），切到别的方案可以对比。</p>
+      <h3>换外观时的扩散</h3>
+      <div class="seg" data-pick="reveal" role="group" aria-label="扩散">
+        <button type="button" data-v="now">现状 350ms</button>
+        <button type="button" data-v="mid">适中 500ms</button>
+        <button type="button" data-v="slow">舒展 700ms</button>
+        <button type="button" data-v="soft">两头更缓 650ms</button>
+      </div>
+      <button type="button" class="desk-btn" id="replayReveal">在屏幕中央换一次样式</button>
+      <h3>扫码页</h3>
+      <div class="seg" data-pick="scan" role="group" aria-label="扫码页">
+        <button type="button" data-v="now">现状</button>
+        <button type="button" data-v="band">光带扫描</button>
+        <button type="button" data-v="breath">四角呼吸</button>
+      </div>
+      <p class="desk-note" style="margin:0">后两种都改成黑场淡入，点取景框模拟识别到二维码。</p>
+      <button type="button" class="desk-btn" id="openPair">打开扫码页</button>
+      <h3>会话分组</h3>
+      <div class="seg" data-pick="groups" role="group" aria-label="会话分组">
+        <button type="button" data-v="now">现状一级</button>
+        <button type="button" data-v="label">目录小标题</button>
+        <button type="button" data-v="tree">目录行可折叠</button>
+      </div>
+      <h3>用量</h3>
+      <div class="seg" data-pick="usage" role="group" aria-label="用量">
+        <button type="button" data-v="line">两行文字</button>
+        <button type="button" data-v="bars">细进度条</button>
+      </div>
+      <label class="check"><input type="checkbox" id="pickExpired">看登录凭证过期时的样子</label>
+      <button type="button" class="desk-btn" id="openSessions">打开会话页</button>
+      <p class="desk-note" style="margin:0">上下文占用在会话行末尾和会话页顶栏，几种分组都一样。</p>
+      <pre id="pickOut"></pre>
+    </section>
 
     <section class="knob">
       <h2>动效档位<span id="presetCustom" hidden>已手动调整</span></h2>
@@ -929,9 +1023,37 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     return "custom";
   }
 
+  // ---------- 待选方案 ----------
+  // 2026-11-14 用户选定：扩散「两头更缓 650ms」、扫码页维持现状（扫描线放慢到 3.6s）、分组「目录行可折叠」、用量「细进度条」，APP 照这些做；
+  // 其余方案留着方便以后对比。选择存在这个浏览器里，键名换过一次，之前点过的旧选择不再沿用。
+  var PICK_STORE = "clauderc-demo-pick-2";
+  var PICK_BASE = { reveal: "soft", scan: "now", groups: "tree", usage: "bars", expired: false };
+  var pick = (function () {
+    var p = Object.assign({}, PICK_BASE);
+    try {
+      var saved = JSON.parse(localStorage.getItem(PICK_STORE) || "null");
+      if (saved && typeof saved === "object") Object.keys(p).forEach(function (k) { if (typeof saved[k] === typeof p[k]) p[k] = saved[k]; });
+    } catch (err) { /* 读不到就用默认值 */ }
+    return p;
+  })();
+  function savePick() { try { localStorage.setItem(PICK_STORE, JSON.stringify(pick)); } catch (err) { /* 存不了就不记 */ } }
+  // 扩散的时长和曲线；现状是导航栏弹回的 durL 加进场曲线，前一百多毫秒就走完大半
+  var REVEAL = {
+    now: null,
+    mid: { d: 500, e: "0.4, 0, 0.2, 1" },
+    slow: { d: 700, e: "0.4, 0, 0.2, 1" },
+    soft: { d: 650, e: "0.65, 0, 0.35, 1" }
+  };
+  var PICK_NAME = {
+    reveal: { now: "现状 350ms", mid: "适中 500ms", slow: "舒展 700ms", soft: "两头更缓 650ms" },
+    scan: { now: "现状", band: "光带扫描", breath: "四角呼吸" },
+    groups: { now: "现状一级", label: "目录小标题", tree: "目录行可折叠" },
+    usage: { line: "两行文字", bars: "细进度条" }
+  };
+
   // ---------- 假数据 ----------
   var MACHINES0 = [
-    { id: "m1", name: "工作室 Mac mini", os: "macOS", online: true, ver: "2.1.330", icon: "computer" },
+    { id: "m1", name: "工作室 Mac mini", os: "macOS", online: true, ver: "2.1.330", icon: "computer", usage: { five: 60, fiveReset: "22:40", week: 70, weekReset: "周二 11:00", fetched: "15:12" } },
     { id: "m2", name: "MacBook Pro", os: "macOS", online: true, ver: "2.1.325", icon: "computer" },
     { id: "m3", name: "dev-linux", os: "Linux", online: false, seen: "昨天 23:41", icon: "dns" }
   ];
@@ -954,13 +1076,16 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     return {
       m1: [
         { id: "default", name: "默认", def: "默认", host: "", rename: true, create: true, folded: false, sessions: [
-          sess("s1", "clauderc 协议", "clauderc-app", "need", "2 分钟前", { pending: "permission", l3: "go vet ./... && go test ./internal/protocol/...", msgs: PROTO_MSGS.map(function (m) { return Object.assign({}, m); }) }),
-          sess("s2", "修复重连", "relay-svc", "work", "刚刚"),
-          sess("s3", "周报整理", "notes", "idle", "18 分钟前")
+          sess("s1", "clauderc 协议", "clauderc-app", "need", "2 分钟前", { pending: "permission", ctx: 25, l3: "go vet ./... && go test ./internal/protocol/...", msgs: PROTO_MSGS.map(function (m) { return Object.assign({}, m); }) }),
+          sess("s2", "修复重连", "relay-svc", "work", "刚刚", { ctx: 62 }),
+          sess("s9", "README 截图", "clauderc-app", "idle", "12 分钟前", { ctx: 18 }),
+          sess("s3", "周报整理", "notes", "idle", "18 分钟前", { ctx: 8 }),
+          sess("s10", "离线判定", "relay-svc", "idle", "1 小时前", { ctx: 41 })
         ] },
         { id: "official", name: "官方", def: "官方", host: "api.anthropic.com", rename: true, create: true, folded: false, sessions: [
-          sess("s4", "迁移脚本审查", "infra", "need", "5 分钟前", { pending: "question", l3: "错误码用哪种命名风格？" }),
-          sess("s5", "landing 页", "site", "stop", "昨天")
+          sess("s4", "迁移脚本审查", "infra", "need", "5 分钟前", { pending: "question", ctx: 33, l3: "错误码用哪种命名风格？" }),
+          sess("s11", "部署脚本", "infra", "idle", "40 分钟前", { ctx: 12 }),
+          sess("s5", "landing 页", "site", "stop", "昨天", { ctx: 71 })
         ] },
         { id: "anyrouter", name: "anyrouter.top", def: "anyrouter.top", host: "", mono: true, rename: true, create: true, folded: false, sessions: [] },
         { id: "other", name: "其他", def: "其他", host: "读不到启动参数", plain: true, rename: false, create: false, folded: false, sessions: [
@@ -969,8 +1094,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       ],
       m2: [
         { id: "default", name: "默认", def: "默认", host: "", rename: true, create: true, folded: false, sessions: [
-          sess("s7", "config-update-local-relay", "clauderc-app", "idle", "3 分钟前"),
-          sess("s8", "物理实验数据表", "physics-experiment", "idle", "10 分钟前")
+          sess("s7", "config-update-local-relay", "clauderc-app", "idle", "3 分钟前", { ctx: 54 }),
+          sess("s8", "物理实验数据表", "physics-experiment", "idle", "10 分钟前", { ctx: 22 })
         ] }
       ]
     };
@@ -1020,7 +1145,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   function initState() {
     S = {
       machines: MACHINES0.map(function (m) { return Object.assign({}, m); }),
-      groups: groups0(), machineId: "m1", tab: "machines",
+      groups: groups0(), machineId: "m1", tab: "machines", dirFold: {},
       git: {
         repo: REPOS[0], tab: "log", branch: "dev", msg: "",
         staged: [{ x: "A", name: "errors.go", dir: "internal/protocol", p: "+34" }],
@@ -1102,9 +1227,14 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     page.el.style.zIndex = "2";
     from.el.style.zIndex = "1";
     var d = dur("durM"), e = ez("emph");
-    note("进入下一层", d, e);
-    var a1 = page.el.animate([{ transform: "translateX(100%)" }, { transform: "none" }], { duration: d, easing: e });
-    var a2 = from.el.animate([{ transform: "none" }, { transform: "translateX(-25%)" }], { duration: d, easing: e, fill: "forwards" });
+    var fade = route.name === "pair" && pick.scan !== "now";
+    note(fade ? "进入扫码页：黑场淡入，取景框放大到位" : "进入下一层", d, e);
+    var a1 = fade
+      ? page.el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: d, easing: e })
+      : page.el.animate([{ transform: "translateX(100%)" }, { transform: "none" }], { duration: d, easing: e });
+    var a2 = fade
+      ? $(".vf", page.el).animate([{ transform: "scale(0.92)", opacity: 0 }, { transform: "none", opacity: 1 }], { duration: d, easing: e })
+      : from.el.animate([{ transform: "none" }, { transform: "translateX(-25%)" }], { duration: d, easing: e, fill: "forwards" });
     changed();
     run([a1, a2], function () {
       a2.cancel();
@@ -1124,9 +1254,15 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     leaving.el.style.zIndex = "2";
     target.el.style.zIndex = "1";
     var d = dur("durM"), e = ez("emph");
-    note("返回", d, e);
-    var a1 = leaving.el.animate([{ transform: "none" }, { transform: "translateX(100%)" }], { duration: d, easing: e, fill: "forwards" });
-    var a2 = target.el.animate([{ transform: "translateX(-25%)" }, { transform: "none" }], { duration: d, easing: e });
+    var fade = leaving.route.name === "pair" && pick.scan !== "now";
+    if (fade) { d = dur("durS"); e = ez("emphIn"); }
+    note(fade ? "离开扫码页：淡出" : "返回", d, e);
+    var a1 = fade
+      ? leaving.el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: d, easing: e, fill: "forwards" })
+      : leaving.el.animate([{ transform: "none" }, { transform: "translateX(100%)" }], { duration: d, easing: e, fill: "forwards" });
+    var a2 = fade
+      ? target.el.animate([{ opacity: 1 }, { opacity: 1 }], { duration: d })
+      : target.el.animate([{ transform: "translateX(-25%)" }, { transform: "none" }], { duration: d, easing: e });
     changed();
     run([a1, a2], function () { dropPage(leaving); target.el.style.zIndex = ""; });
   }
@@ -1541,7 +1677,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     var vt = document.startViewTransition(function () { html.classList.add("no-trans"); change(); });
     function done() { html.classList.toggle("no-trans", false); }
     vt.ready.then(function () {
-      var d = dur("durL"), e = ez("emph");
+      var rv = REVEAL[pick.reveal], d = rv ? rv.d * slowK() : dur("durL"), e = rv ? "cubic-bezier(" + rv.e + ")" : ez("emph");
       note("换主题：从" + (origin ? "所点的选项" : "屏幕中央") + "扩散", d, e);
       html.animate({ clipPath: ["circle(0px" + at + ")", "circle(" + rad + "px" + at + ")"] }, { duration: d, easing: e, pseudoElement: "::view-transition-new(device)" });
     }, noop);
@@ -1604,10 +1740,12 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     if (s.state !== "need") return STATE_TEXT[s.state];
     return s.pending === "question" ? "等你回答" : "等你允许";
   }
-  function sessionRow(s) {
-    var st = s.state === "need" ? '<span class="need">' + stateText(s) + "</span>" : stateText(s);
+  function ctxText(s) { return s.ctx == null ? "" : "上下文 " + s.ctx + "%"; }
+  // noDir：两级分组时目录已经写在上一层，行里不再重复
+  function sessionRow(s, noDir) {
+    var st = (noDir ? "" : '<span class="mono">' + esc(s.dir) + "</span> · ") + (s.state === "need" ? '<span class="need">' + stateText(s) + "</span>" : stateText(s)) + (s.ctx != null ? " · " + ctxText(s) : "");
     var l3 = s.state === "need" && s.l3 ? '<span class="row-l3 need"' + (s.pending === "question" ? ' style="font-family:var(--font-ui);font-size:13px"' : "") + ">" + esc(s.l3) + "</span>" : "";
-    return '<div class="srow' + (s.state === "stop" ? " dim" : "") + '"><button type="button" class="row" data-act="open-chat" data-id="' + s.id + '"><span class="glyph ' + GLYPH[s.state] + '"></span><span class="row-body"><span class="row-l1"><span class="row-title">' + esc(s.title) + "</span><time>" + esc(s.time) + '</time></span><span class="row-l2"><span class="mono">' + esc(s.dir) + "</span> · " + st + "</span>" + l3 + "</span></button>" +
+    return '<div class="srow' + (s.state === "stop" ? " dim" : "") + '"><button type="button" class="row" data-act="open-chat" data-id="' + s.id + '"><span class="glyph ' + GLYPH[s.state] + '"></span><span class="row-body"><span class="row-l1"><span class="row-title">' + esc(s.title) + "</span><time>" + esc(s.time) + '</time></span><span class="row-l2">' + st + "</span>" + l3 + "</span></button>" +
       '<button type="button" class="icon-btn sm" data-act="session-menu" data-id="' + s.id + '" aria-label="会话操作"><span class="ms">more_vert</span></button></div>';
   }
   function renderSessions() {
@@ -1616,7 +1754,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     var m = machine();
     var html = '<header class="appbar"></header><div class="content">';
     if (!m) { paint(n, html + '<div class="hero"><h1>会话</h1></div></div>'); return; }
-    html += '<div class="hero" style="padding-bottom:var(--sp-2)"><h1>' + esc(m.name) + "</h1><p>claude " + esc(m.ver) + "</p></div>";
+    html += '<div class="hero" style="padding-bottom:var(--sp-2)"><h1>' + esc(m.name) + "</h1><p>claude " + esc(m.ver) + "</p></div>" + usageHtml(m);
     groupsOf(m.id).forEach(function (g) {
       var need = g.sessions.filter(function (s) { return s.state === "need"; }).length;
       html += '<div class="gh' + (g.folded ? " collapsed" : "") + '">' +
@@ -1625,9 +1763,65 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
         '<span class="gh-sum">' + g.sessions.length + " 个会话" + (need ? ' · <span class="need">' + need + " 个等你</span>" : "") + "</span>" +
         (g.sessions.length ? '<button type="button" class="icon-btn sm gh-fold" data-act="fold" data-group="' + g.id + '" aria-label="折叠' + esc(g.name) + '档位" aria-expanded="' + !g.folded + '"><span class="ms">expand_more</span></button>' : "") +
         (g.create ? '<button type="button" class="icon-btn sm" data-act="create" data-group="' + g.id + '" aria-label="在' + esc(g.name) + '档位新建会话"><span class="ms">add</span></button>' : "") + "</div>";
-      html += g.sessions.length ? '<div class="list">' + g.sessions.map(sessionRow).join("") + "</div>" : '<p class="g-empty">没有会话</p>';
+      html += g.sessions.length ? '<div class="list">' + groupBody(g) + "</div>" : '<p class="g-empty">没有会话</p>';
     });
     paint(n, html + '<p class="foot"></p></div>');
+  }
+  function isNeed(s) { return s.state === "need"; }
+  // 档位里按目录分：有待确认的目录在前，其余保持最近活跃的顺序（会话本来就按最近活跃排好）
+  function dirGroups(g) {
+    var by = {}, order = [];
+    g.sessions.forEach(function (s) { if (!by[s.dir]) { by[s.dir] = []; order.push(s.dir); } by[s.dir].push(s); });
+    return order.map(function (d) { return { dir: d, sessions: by[d] }; }).sort(function (a, b) {
+      var na = a.sessions.some(isNeed), nb = b.sessions.some(isNeed);
+      return na === nb ? order.indexOf(a.dir) - order.indexOf(b.dir) : na ? -1 : 1;
+    });
+  }
+  function groupBody(g) {
+    if (pick.groups === "now") return g.sessions.map(function (s) { return sessionRow(s); }).join("");
+    if (pick.groups === "label") return dirGroups(g).map(function (d) {
+      return '<div class="dh"><span class="mono">' + esc(d.dir) + "</span>" + (d.sessions.length > 1 ? "<span>" + d.sessions.length + " 个</span>" : "") + "</div>" +
+        d.sessions.map(function (s) { return sessionRow(s, true); }).join("");
+    }).join("");
+    return dirGroups(g).map(function (d) {
+      var key = g.id + ":" + d.dir, folded = !!S.dirFold[key], need = d.sessions.filter(isNeed).length;
+      return '<div class="dgroup' + (folded ? " folded" : "") + '"><button type="button" class="drow" data-act="fold-dir" data-key="' + esc(key) + '" aria-expanded="' + !folded + '">' +
+        '<span class="ms">folder</span><span class="mono">' + esc(d.dir) + '</span><span class="dsum">' + d.sessions.length + " 个" + (need ? ' · <span class="need">' + need + " 个等你</span>" : "") + "</span>" +
+        '<span class="ms chev">expand_more</span></button><div class="dkids">' + d.sessions.map(function (s) { return sessionRow(s, true); }).join("") + "</div></div>";
+    }).join("");
+  }
+  // 目录折叠和档位折叠一样：收起用退场时长，展开用进场时长
+  function foldDir(btn) {
+    var key = btn.dataset.key, box = btn.parentElement, kids = btn.nextElementSibling;
+    S.dirFold[key] = !S.dirFold[key];
+    btn.setAttribute("aria-expanded", String(!S.dirFold[key]));
+    kids.getAnimations().forEach(function (a) { a.cancel(); });
+    kids.style.overflow = "hidden";
+    if (S.dirFold[key]) {
+      var h = kids.offsetHeight;
+      box.querySelector(".chev").style.transform = "none";
+      kids.animate([{ height: h + "px", opacity: 1 }, { height: "0px", opacity: 0 }], { duration: dur("durS"), easing: ez("emphIn") })
+        .finished.then(function () { kids.style.overflow = ""; box.querySelector(".chev").style.transform = ""; box.classList.add("folded"); }, noop);
+    } else {
+      box.classList.remove("folded");
+      var h2 = kids.offsetHeight;
+      kids.animate([{ height: "0px", opacity: 0 }, { height: h2 + "px", opacity: 1 }], { duration: dur("durM"), easing: ez("emph") })
+        .finished.then(function () { kids.style.overflow = ""; }, noop);
+    }
+  }
+  // 目标机登录账号的 5 小时和每周用量；没有数据就整块不显示，凭证过期时数值变灰并说明是哪个时刻的数据
+  function usageHtml(m) {
+    var u = m.usage;
+    if (!u) return "";
+    var rows = [["5 小时", u.five, u.fiveReset], ["每周", u.week, u.weekReset]];
+    var bars = pick.usage === "bars";
+    var body = rows.map(function (r) {
+      return bars
+        ? '<span class="u-row"><span>' + r[0] + '</span><span class="u-bar"><i style="width:' + r[1] + '%"></i></span><b>' + r[1] + '%</b><span class="u-reset">' + esc(r[2]) + " 重置</span></span>"
+        : '<span class="u-row"><span>' + r[0] + " <b>" + r[1] + '%</b></span><span class="u-reset">' + esc(r[2]) + " 重置</span></span>";
+    }).join("");
+    var note = pick.expired ? '<span class="u-note">登录凭证已过期，显示的是 ' + esc(u.fetched) + " 的数据</span>" : "";
+    return '<div class="usage' + (bars ? " bars" : "") + (pick.expired ? " stale" : "") + '">' + body + note + "</div>";
   }
   // 档位折叠：高度和透明度一起过渡，收起用退场时长，展开用进场时长
   function fold(gid, btn) {
@@ -1751,7 +1945,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   // ---------- 扫码 ----------
   function buildPair(page) {
     page.el.innerHTML = '<div class="cam"><button type="button" class="icon-btn cam-back" data-act="back" aria-label="返回"><span class="ms">arrow_back</span></button>' +
-      '<p class="cam-title">扫描配对二维码</p><button type="button" class="vf" data-act="scan" aria-label="扫描二维码"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i><span class="scanline"></span></button>' +
+      '<p class="cam-title">扫描配对二维码</p><button type="button" class="vf scan-' + pick.scan + '" data-act="scan" aria-label="扫描二维码"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i>' +
+      (pick.scan === "now" ? '<span class="scanline"></span>' : pick.scan === "band" ? '<span class="band"></span>' : "") + '<span class="vf-wait"><span class="spin"></span></span></button>' +
       '<p class="cam-fine">二维码 5 分钟内有效，只能用一次</p></div>';
   }
 
@@ -1939,7 +2134,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     page.panelKind = null;
     ensureMsgs(s);
     page.el.innerHTML = '<header class="appbar"><button type="button" class="icon-btn" data-act="back" aria-label="返回"><span class="ms">arrow_back</span></button>' +
-      '<div class="bar-title"><h1>' + esc(s.title) + '</h1><span class="bar-sub"><button type="button" data-act="model"><span class="v-model">' + esc(s.model) + '</span><span class="ms">expand_more</span></button><button type="button" data-act="mode"><span class="v-mode">' + esc(s.mode) + '</span><span class="ms">expand_more</span></button></span></div>' +
+      '<div class="bar-title"><h1>' + esc(s.title) + '</h1><span class="bar-sub"><button type="button" data-act="model"><span class="v-model">' + esc(s.model) + '</span><span class="ms">expand_more</span></button><button type="button" data-act="mode"><span class="v-mode">' + esc(s.mode) + '</span><span class="ms">expand_more</span></button>' + (s.ctx != null ? '<span class="v-ctx">' + ctxText(s) + "</span>" : "") + '</span></div>' +
       '<button type="button" class="icon-btn" data-act="chat-git" aria-label="打开 git"><span class="ms">account_tree</span></button></header>' +
       '<div class="content"><div class="msgs"></div></div>' +
       '<div class="dock"><div class="composer-wrap"><div class="slash" hidden><ul></ul></div>' +
@@ -2052,11 +2247,22 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     back: function () { back(); },
     "dlg-cancel": function () { closeOverlay(); },
     add: function () { push({ name: "pair" }); },
-    scan: function () {
-      if (S.machines.length) { toast("relay.example.com 上的目标机已经都在列表里"); }
-      else { S.machines = MACHINES0.map(function (m) { return Object.assign({}, m); }); S.machineId = "m1"; }
-      popTo(0);
+    scan: function (t) {
+      function paired() {
+        if (S.machines.length) { toast("relay.example.com 上的目标机已经都在列表里"); }
+        else { S.machines = MACHINES0.map(function (m) { return Object.assign({}, m); }); S.machineId = "m1"; }
+        popTo(0);
+      }
+      if (pick.scan === "now") { paired(); return; }
+      if (t.classList.contains("got")) return;
+      // 识别到二维码：扫描停下，四角收拢，中间转圈，下面改成「正在配对」，配好再退回
+      t.classList.add("got");
+      var fine = t.parentElement.querySelector(".cam-fine");
+      if (fine) { fine.innerHTML = '<span class="spin"></span>正在配对'; fine.style.opacity = "0.7"; }
+      note("识别到二维码：四角收拢", dur("durM"), ez("emph"));
+      setTimeout(function () { if (top().route.name === "pair") paired(); }, 900 * slowK());
     },
+    "fold-dir": function (t) { foldDir(t); },
     "machines-menu": function () { openOverlay(sheet("", mi({ act: "clear-all", icon: "delete", danger: true, html: "<span>清除全部配对</span><small>这台手机会忘记所有中转服务器的凭证</small>" }))); },
     "clear-all": function () { closeOverlay(); S.machines = []; S.machineId = null; refreshHome(); },
     "open-machine": function (t) {
@@ -2298,6 +2504,37 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     $("#resetAppBtn").addEventListener("click", resetApp);
   }
 
+  function syncPick() {
+    $$(".desk [data-pick]").forEach(function (seg) { $$("button", seg).forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.v === pick[seg.dataset.pick])); }); });
+    $("#pickExpired").checked = pick.expired;
+    var rv = REVEAL[pick.reveal];
+    $("#pickOut").textContent =
+      "扩散：" + PICK_NAME.reveal[pick.reveal] + "，" + (rv ? "cubic-bezier(" + rv.e + ")" : "cubic-bezier(" + cfg.emph + ")") + "\n" +
+      "扫码页：" + PICK_NAME.scan[pick.scan] + "\n会话分组：" + PICK_NAME.groups[pick.groups] + "\n用量：" + PICK_NAME.usage[pick.usage];
+  }
+  // 回到首页，不播动画
+  function goHome() {
+    settle();
+    closeOverlayNow();
+    stack.splice(1).forEach(dropPage);
+    home().el.hidden = false;
+    changed();
+  }
+  function bindPick() {
+    $$(".desk [data-pick]").forEach(function (seg) {
+      $$("button", seg).forEach(function (b) {
+        b.addEventListener("click", function () { pick[seg.dataset.pick] = b.dataset.v; savePick(); syncPick(); renderSessions(); });
+      });
+    });
+    $("#pickExpired").addEventListener("change", function (e) { pick.expired = e.target.checked; savePick(); syncPick(); renderSessions(); });
+    $("#replayReveal").addEventListener("click", function () {
+      var next = look.style === "card" ? "minimal" : "card";
+      reveal(null, function () { setLook("style", next); });
+    });
+    $("#openPair").addEventListener("click", function () { goHome(); push({ name: "pair" }); });
+    $("#openSessions").addEventListener("click", function () { goHome(); if (S.machineId == null) S.machineId = "m1"; renderSessions(); switchTab("sessions", true); });
+  }
+
   // ---------- 主题 ----------
   var root = document.documentElement;
   function setTheme(v) {
@@ -2327,6 +2564,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   }
   bindDesk();
   syncDesk();
+  bindPick();
+  syncPick();
   resetApp();
   // 给验收脚本用的只读入口
   window.demo = {
@@ -2334,6 +2573,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     last: function () { return last; },
     cfg: function () { return Object.assign({}, cfg); },
     look: function () { return Object.assign({ mode: themeMode() }, look); },
+    pick: function () { return Object.assign({}, pick); },
     back: back
   };
 })();

@@ -52,7 +52,8 @@ var bodyCases = []bodyCase{
 	{protocol.MethodChatClose, "chat.close", protocol.KindResponse, func() any { return &protocol.Empty{} }, `{}`},
 	{protocol.MethodChatSend, "chat.send", protocol.KindRequest, func() any { return &protocol.ChatSendRequest{} },
 		`{"sessionId":"a1","text":"a\nb","images":[{"mediaType":"image/jpeg","data":"/9j/4A=="}]}`},
-	{protocol.MethodChatSend, "chat.send", protocol.KindResponse, func() any { return &protocol.Empty{} }, `{}`},
+	{protocol.MethodChatSend, "chat.send", protocol.KindResponse, func() any { return &protocol.ChatSendResponse{} }, `{}`},
+	{protocol.MethodChatSend, "chat.send", protocol.KindResponse, func() any { return &protocol.ChatSendResponse{} }, `{"queued":true}`},
 	{protocol.MethodChatAnswer, "chat.answer", protocol.KindRequest, func() any { return &protocol.ChatAnswerRequest{} },
 		`{"sessionId":"a1","toolUseId":"toolu_1","decision":"allow"}`},
 	{protocol.MethodChatAnswer, "chat.answer", protocol.KindRequest, func() any { return &protocol.ChatAnswerRequest{} },
@@ -77,6 +78,8 @@ var bodyCases = []bodyCase{
 		`{"commands":[{"name":"model","description":"Set the AI model"}]}`},
 	{protocol.EventChatItems, "chat.items", protocol.KindEvent, func() any { return &protocol.ChatItemsEvent{} },
 		`{"sessionId":"a1","items":[{"seq":54,"kind":"tool","tool":{"toolUseId":"toolu_2","toolName":"Bash","summary":"运行 touch marker.txt","input":{"command":"touch marker.txt"}}}]}`},
+	{protocol.EventChatItems, "chat.items", protocol.KindEvent, func() any { return &protocol.ChatItemsEvent{} },
+		`{"sessionId":"a1","items":[{"seq":55,"kind":"user","text":"排队的消息","queued":true}]}`},
 	{protocol.EventChatPending, "chat.pending", protocol.KindEvent, func() any { return &protocol.ChatPendingEvent{} },
 		`{"sessionId":"a1","pending":{"toolUseId":"toolu_3","kind":"question","questions":[{"question":"你喜欢哪种颜色","header":"颜色","multiSelect":false,"options":[{"label":"红","description":""},{"label":"绿","description":""}]}]}}`},
 	{protocol.EventChatPending, "chat.pending", protocol.KindEvent, func() any { return &protocol.ChatPendingEvent{} },
@@ -94,6 +97,11 @@ var bodyCases = []bodyCase{
 	{protocol.MethodSessionRemove, "session.remove", protocol.KindResponse, func() any { return &protocol.Empty{} }, `{}`},
 	{protocol.MethodDirsRecent, "dirs.recent", protocol.KindRequest, func() any { return &protocol.Empty{} }, `{}`},
 	{protocol.MethodDirsRecent, "dirs.recent", protocol.KindResponse, func() any { return &protocol.DirsRecentResponse{} }, `{"dirs":["/p/x","/p/y"]}`},
+
+	// Plan usage.
+	{protocol.MethodUsageGet, "usage.get", protocol.KindRequest, func() any { return &protocol.Empty{} }, `{}`},
+	{protocol.MethodUsageGet, "usage.get", protocol.KindResponse, func() any { return &protocol.UsageResponse{} },
+		`{"available":true,"fiveHour":{"utilization":12.5,"resetsAt":"2026-11-14T22:00:00Z"},"sevenDay":{"utilization":30},"fetchedAt":"2026-11-14T18:00:00Z","stale":"expired"}`},
 
 	// Git.
 	{protocol.MethodGitStatus, "git.status", protocol.KindRequest, func() any { return &protocol.GitStatusRequest{} }, `{"dir":"/p/x"}`},
@@ -162,7 +170,7 @@ func TestEveryMethodHasBodyTypes(t *testing.T) {
 		"sessions.subscribe", "sessions.unsubscribe",
 		"chat.open", "chat.close", "chat.send", "chat.answer", "chat.interrupt",
 		"chat.models", "chat.setModel", "chat.setPermissionMode", "chat.commands",
-		"session.create", "session.stop", "session.remove", "dirs.recent",
+		"session.create", "session.stop", "session.remove", "dirs.recent", "usage.get",
 		"git.status", "git.log", "git.show", "git.diff", "git.branches", "git.stage",
 		"git.unstage", "git.commit", "git.pull", "git.push", "git.switch", "dir.busy",
 	}

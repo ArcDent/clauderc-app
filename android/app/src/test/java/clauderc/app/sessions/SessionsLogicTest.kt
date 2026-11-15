@@ -14,6 +14,8 @@ import clauderc.app.protocol.SessionCreateRequest
 import clauderc.app.protocol.SessionCreateResponse
 import clauderc.app.protocol.SessionList
 import clauderc.app.protocol.SessionState
+import clauderc.app.protocol.UsageResponse
+import clauderc.app.protocol.UsageWindow
 import clauderc.app.testing.FakeRelay
 import clauderc.app.testing.decode
 import clauderc.app.testing.eventually
@@ -191,5 +193,63 @@ class SessionsLogicTest {
         assertFalse(vm.state.value.canSubmit)
         vm.submit()
         assertTrue(relay.sent(Method.SESSION_CREATE).isEmpty())
+    }
+
+    @Test fun eachGroupSplitsByDirectoryWithPendingDirectoriesFirst() {
+        val list = SessionList(
+            listOf(
+                session("n1", "周报", SessionState.Idle, "default", minutesAgo = 1, cwd = "/p/notes"),
+                session("a1", "协议", SessionState.Pending, "default", minutesAgo = 10, cwd = "/p/app"),
+                session("r1", "重连", SessionState.Idle, "default", minutesAgo = 20, cwd = "/p/relay"),
+                session("a2", "截图", SessionState.Idle, "default", minutesAgo = 5, cwd = "/p/app"),
+                session("o1", "scratch", SessionState.Idle, "other", minutesAgo = 30, cwd = "/tmp/a"),
+                session("o2", "scratch 2", SessionState.Idle, "other", minutesAgo = 40, cwd = "/tmp/b"),
+            ),
+            sampleSessions.profiles,
+        )
+        val groups = groupSessions(list, emptyMap())
+        val dirs = groups[0].dirs
+        // /p/app waits for an answer; then /p/notes, active 1 minute ago, before /p/relay.
+        assertEquals(listOf("/p/app", "/p/notes", "/p/relay"), dirs.map { it.cwd })
+        assertEquals("the group's own order stays inside a directory", listOf("a1", "a2"), dirs[0].sessions.map { it.id })
+        assertEquals(1, dirs[0].pending)
+        assertEquals(listOf("app", "notes", "relay"), dirs.map { it.title })
+        assertEquals("「其他」 splits too", listOf("/tmp/a", "/tmp/b"), groups.last().dirs.map { it.cwd })
+        assertTrue(groups[2].dirs.isEmpty())
+    }
+
+    @Test fun directoriesWithTheSameNameShowTheirParent() {
+        val dirs = dirGroups(
+            listOf(
+                session("x", "x", SessionState.Idle, "default", minutesAgo = 1, cwd = "/work/app"),
+                session("y", "y", SessionState.Idle, "default", minutesAgo = 2, cwd = "/home/app/"),
+                session("z", "z", SessionState.Idle, "default", minutesAgo = 3, cwd = "/home/notes"),
+            ),
+            folded = setOf("/home/notes"),
+        )
+        assertEquals(listOf("work/app", "home/app", "notes"), dirs.map { it.title })
+        assertEquals(listOf(false, false, true), dirs.map { it.collapsed })
+    }
+
+    @Test fun foldedDirectoriesAreKeptPerMachineAndProfile() = runTest(dispatcher) {
+        val store = profileNames(tmp.root, scope)
+        store.setDirCollapsed("m-1", "default", "/p/app", true)
+        store.setDirCollapsed("m-1", "api.anthropic.com", "/p/infra", true)
+        eventually { store.collapsedDirs("m-1").first { it.size == 2 } }
+        assertEquals(mapOf("default" to setOf("/p/app"), "api.anthropic.com" to setOf("/p/infra")), store.collapsedDirs("m-1").first())
+        assertTrue(store.collapsedDirs("m-2").first().isEmpty())
+        store.setDirCollapsed("m-1", "default", "/p/app", false)
+        eventually { store.collapsedDirs("m-1").first { it.size == 1 } }
+    }
+
+    @Test fun usageIsReadWhenThePageOpensAndOnRefresh() = runTest(dispatcher) {
+        relay.respond(Method.USAGE_GET, UsageResponse.serializer(), UsageResponse(available = true, fiveHour = UsageWindow(60.0), sevenDay = UsageWindow(70.0)))
+        val vm = SessionsViewModel("m-1", Fleet(relay, scope), relay, profileNames(tmp.root, scope))
+        withTimeout(5_000) { vm.state.first { it.usage != null } }
+        assertEquals(listOf("m-1"), relay.sent(Method.USAGE_GET).map { it.machine })
+        vm.refresh()
+        withTimeout(5_000) { vm.state.first { !it.refreshing } }
+        assertEquals(2, relay.sent(Method.USAGE_GET).size)
+        assertEquals(70.0, vm.state.value.usage!!.sevenDay!!.utilization, 0.0)
     }
 }

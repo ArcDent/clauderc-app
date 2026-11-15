@@ -18,6 +18,7 @@ import clauderc.app.protocol.ChatOpenRequest
 import clauderc.app.protocol.ChatOpenResponse
 import clauderc.app.protocol.ChatPendingEvent
 import clauderc.app.protocol.ChatSendRequest
+import clauderc.app.protocol.ChatSendResponse
 import clauderc.app.protocol.ChatSetModelRequest
 import clauderc.app.protocol.ChatSetPermissionModeRequest
 import clauderc.app.protocol.ChatStateEvent
@@ -57,21 +58,26 @@ class Attachment(val name: String, val jpeg: ByteArray)
 
 /**
  * A message this phone sent that the transcript has not shown yet; drawn faded under the
- * last item. Only items after [afterSeq] can be its delivery.
+ * last item. Only items after [afterSeq] can be its delivery. [queued] is set once the agent
+ * says it waits in Claude Code's queue, as a slash command does: the transcript only shows
+ * it when it runs.
  */
-class Outgoing(val id: Long, val text: String, val attachments: List<Attachment>, val afterSeq: Long)
+data class Outgoing(val id: Long, val text: String, val attachments: List<Attachment>, val afterSeq: Long, val queued: Boolean = false)
 
 /** Text put back into the composer after a failed send; [id] tells two restores of the same text apart. */
 data class Restore(val id: Long, val text: String)
 
-/** Drops the outgoing messages that [delivered] user items show, oldest first. */
+/** Drops the outgoing messages that [delivered] user items or slash command rows show, oldest first. */
 fun settleOutgoing(outgoing: List<Outgoing>, delivered: List<ChatItem>): List<Outgoing> {
     if (outgoing.isEmpty()) return outgoing
     val left = outgoing.toMutableList()
     for (item in delivered) {
-        if (item.kind != ItemKind.USER) continue
         // Pictures show up as "[Image #1] " in front of the text, so compare the end.
-        val text = item.text.orEmpty().trim()
+        val text = when {
+            item.kind == ItemKind.USER -> item.text.orEmpty().trim()
+            item.tool != null && isCommand(item.tool) -> item.tool.summary.trim()
+            else -> continue
+        }
         val hit = left.firstOrNull { o ->
             item.seq > o.afterSeq && if (o.text.isEmpty()) !item.images.isNullOrEmpty() else text.endsWith(o.text)
         }
@@ -307,8 +313,10 @@ class ChatViewModel(
         viewModelScope.launch {
             try {
                 val images = withContext(background) { out.attachments.map { Image("image/jpeg", Base64.getEncoder().encodeToString(it.jpeg)) } }
-                relay.call(Method.CHAT_SEND, machineId, ChatSendRequest(sessionId, text, images.ifEmpty { null }), ChatSendRequest.serializer(), Empty.serializer())
-                _state.update { it.copy(sending = false) }
+                val res = relay.call(Method.CHAT_SEND, machineId, ChatSendRequest(sessionId, text, images.ifEmpty { null }), ChatSendRequest.serializer(), ChatSendResponse.serializer())
+                _state.update { s ->
+                    s.copy(sending = false, outgoing = if (res.queued == true) s.outgoing.map { if (it.id == out.id) it.copy(queued = true) else it } else s.outgoing)
+                }
             } catch (e: RemoteException) {
                 unsend(out)
                 _messages.send(if (e.code == ErrorCode.NOT_DELIVERED) "消息没有送达，请重试" else e.message ?: "发送失败")

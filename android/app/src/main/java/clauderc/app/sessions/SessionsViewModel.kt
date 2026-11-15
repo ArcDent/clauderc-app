@@ -16,7 +16,10 @@ import clauderc.app.protocol.Session
 import clauderc.app.protocol.SessionIdRequest
 import clauderc.app.protocol.SessionList
 import clauderc.app.protocol.SessionState
+import clauderc.app.protocol.UsageResponse
+import clauderc.app.ui.baseName
 import clauderc.app.ui.profileTitle
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,12 +41,48 @@ data class SessionGroup(
     val sessions: List<Session>,
     /** Folded on the session page: only the header shows, with the counts. */
     val collapsed: Boolean = false,
+    /** Working directories folded inside the group. */
+    val foldedDirs: Set<String> = emptySet(),
 ) {
+    /** The second level of the session page: the sessions by working directory. */
+    val dirs: List<DirGroup> = dirGroups(sessions, foldedDirs)
+
     val canCreate get() = profile.kind != ProfileKind.Other
     val canRename get() = profile.kind != ProfileKind.Other
     val pending get() = sessions.count { it.state == SessionState.Pending }
     /** The most recent session, whose launch flags a new session reuses (design D8). */
     val template get() = sessions.maxByOrNull { it.lastActiveAt }
+}
+
+/** One working directory inside a profile group. */
+data class DirGroup(
+    val cwd: String,
+    /** The folder name, with its parent when another folder in the group has the same name. */
+    val title: String,
+    val sessions: List<Session>,
+    val collapsed: Boolean = false,
+) {
+    val pending get() = sessions.count { it.state == SessionState.Pending }
+}
+
+/**
+ * Splits a group's [sessions] by working directory, keeping their order inside each. Directories
+ * with a session waiting for the user come first, then the most recently active.
+ */
+fun dirGroups(sessions: List<Session>, folded: Set<String> = emptySet()): List<DirGroup> {
+    val byDir = sessions.groupBy { it.cwd }
+    val sameName = byDir.keys.groupingBy { baseName(it) }.eachCount()
+    return byDir.entries
+        .sortedWith(
+            compareByDescending<Map.Entry<String, List<Session>>> { (_, list) -> list.any { it.state == SessionState.Pending } }
+                .thenByDescending { (_, list) -> list.maxOf { it.lastActiveAt } },
+        )
+        .map { (cwd, list) ->
+            val name = baseName(cwd)
+            val parent = baseName(cwd.trimEnd('/').substringBeforeLast('/', ""))
+            val title = if ((sameName[name] ?: 0) > 1 && parent.isNotEmpty()) "$parent/$name" else name
+            DirGroup(cwd, title, list, cwd in folded)
+        }
 }
 
 /** Groups sessions by profile in the agent's order, pending first, then most recent first. */
@@ -78,7 +117,12 @@ data class SessionsUiState(
     /** Null until the machine's first session list arrives. */
     val groups: List<SessionGroup>? = null,
     val refreshing: Boolean = false,
+    /** The plan usage of the machine's Claude login; shown only when available. */
+    val usage: UsageResponse? = null,
 )
+
+/** What the user set on this phone for the machine's groups. */
+private data class GroupSettings(val names: Map<String, String>, val folded: Set<String>, val foldedDirs: Map<String, Set<String>>)
 
 class SessionsViewModel(
     private val machineId: String,
@@ -93,19 +137,44 @@ class SessionsViewModel(
     /** Stops and removals already shown while the agent is still on them; null means removed. */
     private val pendingActs = MutableStateFlow<Map<String, SessionState?>>(emptyMap())
 
-    private val groupSettings = combine(names.names(machineId), names.collapsed(machineId)) { custom, folded -> custom to folded }
+    private val usage = MutableStateFlow<UsageResponse?>(null)
 
-    val state: StateFlow<SessionsUiState> = combine(fleet.machines, fleet.sessions, groupSettings, refreshing, pendingActs) { machines, sessions, (custom, folded), busy, acts ->
+    private val groupSettings = combine(names.names(machineId), names.collapsed(machineId), names.collapsedDirs(machineId), ::GroupSettings)
+    private val activity = combine(refreshing, pendingActs, usage, ::Triple)
+
+    val state: StateFlow<SessionsUiState> = combine(fleet.machines, fleet.sessions, groupSettings, activity) { machines, sessions, settings, (busy, acts, plan) ->
         SessionsUiState(
             machine = machines?.firstOrNull { it.id == machineId },
-            groups = sessions[machineId]?.let { list -> groupSessions(list.withActs(acts), custom).map { it.copy(collapsed = it.profile.id in folded) } },
+            groups = sessions[machineId]?.let { list ->
+                groupSessions(list.withActs(acts), settings.names).map {
+                    it.copy(collapsed = it.profile.id in settings.folded, foldedDirs = settings.foldedDirs[it.profile.id].orEmpty())
+                }
+            },
             refreshing = busy,
+            usage = plan,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SessionsUiState())
+
+    init {
+        loadUsage()
+    }
+
+    /** Reads the plan usage; when the read fails, what is shown stays. */
+    private fun loadUsage() {
+        viewModelScope.launch {
+            try {
+                usage.value = relay.call(Method.USAGE_GET, machineId, Empty(), Empty.serializer(), UsageResponse.serializer())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+        }
+    }
 
     fun refresh() {
         if (refreshing.value) return
         refreshing.value = true
+        loadUsage()
         viewModelScope.launch {
             if (!fleet.refresh(machineId)) _messages.send("刷新失败，检查目标机是否在线")
             refreshing.value = false
@@ -115,6 +184,11 @@ class SessionsViewModel(
     /** Folds or unfolds a group; the choice is kept on the phone. */
     fun toggle(group: SessionGroup) {
         viewModelScope.launch { names.setCollapsed(machineId, group.profile.id, !group.collapsed) }
+    }
+
+    /** Folds or unfolds one working directory of a group; kept on the phone like the group's own fold. */
+    fun toggleDir(group: SessionGroup, dir: DirGroup) {
+        viewModelScope.launch { names.setDirCollapsed(machineId, group.profile.id, dir.cwd, !dir.collapsed) }
     }
 
     fun rename(profileId: String, name: String?) {

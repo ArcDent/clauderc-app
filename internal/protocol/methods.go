@@ -45,6 +45,11 @@ const (
 	MethodDirsRecent    Method = "dirs.recent"
 )
 
+// Plan usage of the machine's Claude login.
+const (
+	MethodUsageGet Method = "usage.get"
+)
+
 // Git methods (design D3).
 const (
 	MethodGitStatus   Method = "git.status"

@@ -91,7 +91,8 @@ object Motion {
     // Loops.
     val spin: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart)
     val beacon: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(2400, easing = LinearEasing))
-    val scanLine: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(2600, easing = FastOutSlowInEasing), RepeatMode.Reverse)
+    /** The scan line crosses the viewfinder in 3.6s each way. */
+    val scanLine: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(3600, easing = FastOutSlowInEasing), RepeatMode.Reverse)
 }
 
 /**

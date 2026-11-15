@@ -19,6 +19,7 @@ import (
 	"clauderc/internal/agent/gitops"
 	"clauderc/internal/agent/lifecycle"
 	"clauderc/internal/agent/sessions"
+	"clauderc/internal/agent/usage"
 )
 
 // Options configures Run.
@@ -60,7 +61,8 @@ func Run(ctx context.Context, o Options) error {
 	life := lifecycle.New(lifecycle.Options{Source: src, Logger: log})
 	chats := chat.New(chat.Options{Source: src, Push: c, Waker: life, Attach: o.Attach})
 	defer chats.Close()
-	if err := c.Register(list, chats, life, gitops.New(gitops.Options{Source: src, Logger: log})); err != nil {
+	plan := usage.New(usage.Options{ClaudeDir: cfg.ClaudeDir, UserAgent: "clauderc/" + o.Version, Logger: log})
+	if err := c.Register(list, chats, life, gitops.New(gitops.Options{Source: src, Logger: log}), plan); err != nil {
 		return err
 	}
 	log.Info("agent starting", "version", o.Version, "machine", cfg.MachineID, "name", cfg.Name)

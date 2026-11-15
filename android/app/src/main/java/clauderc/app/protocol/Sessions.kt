@@ -32,7 +32,12 @@ data class Session(
     val state: SessionState = SessionState.Idle,
     val profileId: String = "",
     @Serializable(with = InstantSerializer::class) val lastActiveAt: Instant,
+    /** How full the context window was after the last reply; null before the first. */
+    val context: SessionContext? = null,
 )
+
+@Serializable
+data class SessionContext(val usedTokens: Int, val windowTokens: Int)
 
 @Serializable
 data class SessionList(

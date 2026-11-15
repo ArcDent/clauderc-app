@@ -39,8 +39,11 @@ android {
 
     buildTypes {
         release {
-            // R8 stays off for the beta so serialization, zxing and Haze need no keep rules yet.
-            isMinifyEnabled = false
+            // R8 shrinks and optimizes the code, which makes Compose noticeably smoother than an
+            // unoptimized build. Serialization, OkHttp, coroutines and DataStore ship their own rules.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release")
         }
     }

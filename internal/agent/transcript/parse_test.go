@@ -223,3 +223,35 @@ func TestParseQueueRemoved(t *testing.T) {
 		t.Fatalf("items\n%q\nwant\n%q", got, want)
 	}
 }
+
+// A skill run as a slash command is written with <command-message> first
+// and its body as an isMeta record; a local command with <command-name>
+// first and its output, colored with terminal escapes, in a later record.
+// Both become command items, and the output loses the escapes.
+func TestParseSkillAndLocalCommand(t *testing.T) {
+	lines := []string{
+		`{"type":"user","message":{"role":"user","content":"<command-message>todolist-workflow</command-message>\n<command-name>/todolist-workflow</command-name>\n<command-args>先用这个</command-args>"}}`,
+		`{"type":"user","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /x\n\n# todolist-workflow"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-args></command-args>"}}`,
+		`{"type":"user","message":{"role":"user","content":"<local-command-stdout>\u001b[2mCompacted (ctrl+o to see full summary)\u001b[22m</local-command-stdout>"}}`,
+	}
+	tr, err := transcript.Parse(strings.NewReader(strings.Join(lines, "\n") + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, it := range tr.Items() {
+		s := fmt.Sprintf("%d %s %s", it.Seq, it.Kind, it.Text)
+		if c := it.Command; c != nil {
+			s += fmt.Sprintf(" name=%s args=%s out=%q", c.Name, c.Args, c.Output)
+		}
+		got = append(got, s)
+	}
+	want := []string{
+		`1 command  name=/todolist-workflow args=先用这个 out=""`,
+		`2 command  name=/compact args= out="Compacted (ctrl+o to see full summary)"`,
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("items\n%q\nwant\n%q", got, want)
+	}
+}

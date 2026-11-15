@@ -45,7 +45,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** A pick in 设置 spreads the new theme out from the tapped option over durL; outside the circle the old one stays. */
+/** A pick in 设置 spreads the new theme out from the tapped option over durReveal; outside the circle the old one stays. */
 @RunWith(AndroidJUnit4::class)
 @Config(qualifiers = "w390dp-h844dp")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -131,13 +131,17 @@ class ThemeRevealTest {
         val below = Offset(b.center.x, b.bottom + with(compose.density) { 8.dp.toPx() })
         tapAndWaitForTheCircle(option)
 
-        compose.mainClock.advanceTimeBy(motion.durL / 2L, ignoreFrameDuration = true)
+        // Slow at the start: a quarter of the way in, the circle has not reached half its size.
+        compose.mainClock.advanceTimeBy(motion.durReveal / 4L, ignoreFrameDuration = true)
+        assertTrue("radius ${reveal.radius.value} of ${reveal.farthest()}", reveal.radius.value > 0f && reveal.radius.value <= reveal.farthest() / 2)
+
+        compose.mainClock.advanceTimeBy(motion.durReveal / 4L, ignoreFrameDuration = true)
         var image = shot()
         val corner = farCorner(b.center, image.width, image.height)
         assertEquals("next to the option the group card is already dark", CardDarkColors.card.toArgb(), image.at(below))
         assertEquals("the far corner still shows the light page", CardLightColors.bg.toArgb(), image.at(corner))
 
-        compose.mainClock.advanceTimeBy(motion.durL.toLong())
+        compose.mainClock.advanceTimeBy(motion.durReveal.toLong())
         image = shot()
         assertEquals("the far corner is dark at the end", CardDarkColors.bg.toArgb(), image.at(corner))
         assertFalse(reveal.running)
@@ -155,13 +159,14 @@ class ThemeRevealTest {
         fun tint(rgb: Long) = Color(0xFF000000 or rgb).copy(alpha = 0.14f).compositeOver(CardLightColors.card).toArgb()
         tapAndWaitForTheCircle(green)
 
-        // The first frame the circle shows at all.
-        while (reveal.radius.value == 0f) compose.mainClock.advanceTimeByFrame()
+        // The first frame the circle takes in the ring, 26dp from the swatch's centre.
+        val ringReach = with(compose.density) { 27.dp.toPx() }
+        while (reveal.radius.value < ringReach) compose.mainClock.advanceTimeByFrame()
         var image = shot()
         assertEquals("the picked swatch already has its green ring", Color(0xFF34C759).toArgb(), image.at(ring))
         assertClose("the nav bar is still blue", tint(0x007AFF), image.at(indicator))
 
-        compose.mainClock.advanceTimeBy(motion.durL.toLong())
+        compose.mainClock.advanceTimeBy(motion.durReveal.toLong())
         image = shot()
         assertClose("the nav bar is green at the end", tint(0x34C759), image.at(indicator))
     }
@@ -175,13 +180,13 @@ class ThemeRevealTest {
         val gap = with(compose.density) { Offset(390.dp.toPx() - 40.dp.toPx(), heading.top - 16.dp.toPx() - 6.dp.toPx()) }
         tapAndWaitForTheCircle(option)
 
-        compose.mainClock.advanceTimeBy(motion.durL / 2L, ignoreFrameDuration = true)
+        compose.mainClock.advanceTimeBy(motion.durReveal * 3L / 4, ignoreFrameDuration = true)
         var image = shot()
         val corner = farCorner(b.center, image.width, image.height)
         assertEquals("near the option the page is already the minimal white", LightColors.bg.toArgb(), image.at(gap))
         assertEquals("the far corner still shows the card grey", CardLightColors.bg.toArgb(), image.at(corner))
 
-        compose.mainClock.advanceTimeBy(motion.durL.toLong())
+        compose.mainClock.advanceTimeBy(motion.durReveal.toLong())
         image = shot()
         // The far corner is the lower right one, where the glass nav bar's soft shadow tints the white by a step.
         assertClose("the far corner is white at the end", LightColors.bg.toArgb(), image.at(corner))

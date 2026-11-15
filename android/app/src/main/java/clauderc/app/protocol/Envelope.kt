@@ -113,6 +113,7 @@ object Method {
     const val SESSION_STOP = "session.stop"
     const val SESSION_REMOVE = "session.remove"
     const val DIRS_RECENT = "dirs.recent"
+    const val USAGE_GET = "usage.get"
 
     const val GIT_STATUS = "git.status"
     const val GIT_LOG = "git.log"

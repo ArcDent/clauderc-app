@@ -57,6 +57,8 @@ data class ChatItem(
     val text: String? = null,
     val images: List<Image>? = null,
     val tool: ToolCall? = null,
+    /** True for a user message still waiting in Claude Code's queue. */
+    val queued: Boolean? = null,
 )
 
 @Serializable
@@ -111,6 +113,10 @@ data class ChatSendRequest(
     val text: String,
     val images: List<Image>? = null,
 )
+
+/** [queued] is true when the message waits in Claude Code's queue until the current turn ends. */
+@Serializable
+data class ChatSendResponse(val queued: Boolean? = null)
 
 @Serializable
 data class Answer(val selected: List<Int>? = null, val custom: String? = null)
