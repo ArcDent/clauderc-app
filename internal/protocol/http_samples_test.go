@@ -20,7 +20,8 @@ import (
 // Endpoints: pair = POST /api/pair, admin.pair-codes = POST
 // /api/admin/pair-codes, admin.devices.list = GET /api/admin/devices,
 // admin.devices.revoke = DELETE /api/admin/devices/{id} (204 on success),
-// ws.app = the refused /ws/app upgrade.
+// ws.app = the refused /ws/app upgrade, ws.agent = the refused /ws/agent
+// upgrade.
 // Every response with status >= 400 is an Error body.
 var httpSampleName = regexp.MustCompile(`^(.+)\.(req|res\.([0-9]{3}))(\.[a-z0-9-]+)?\.json$`)
 
@@ -40,6 +41,7 @@ var httpErrorStatus = map[protocol.ErrorCode]int{
 	protocol.CodePairCodeExpired: 410,
 	protocol.CodeRateLimited:     429,
 	protocol.CodeDeviceNotFound:  404,
+	protocol.CodeMachineInUse:    409,
 }
 
 // Error samples the phone relies on.

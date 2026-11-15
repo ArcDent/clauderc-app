@@ -152,6 +152,8 @@ clauderc start   # 在后台运行，关掉终端也不停
 clauderc stop    # 结束后台运行
 ```
 
+同一份配置只能运行一个，已经有一个在运行时，再执行 `clauderc run` 会提示它的进程号并退出。
+
 后台运行的进程号和日志写在配置文件同目录的 `agent.pid`、`agent.log`。想开机自动运行，就装成服务，不要和 `clauderc start` 同时用：
 
 ```sh
@@ -230,9 +232,10 @@ clauderc revoke <id>     # 吊销一台手机，它的连接会立即断开
 
 目标机程序会在 `agent.toml` 所在目录生成下面这些文件，都不需要手动改：
 
-- `machine-id` 是这台目标机的标识，首次运行时生成
+- `machine-id` 是这台目标机的标识，首次运行时生成。把配置拷到别的电脑时不要带上它，否则后运行的那台会被中转服务器拒绝
 - `profiles.json` 记着每个启动档位最近一次的启动参数，权限 600
 - `agent.pid` 和 `agent.log` 是 `clauderc start` 在后台运行时的进程号和日志
+- `agent.lock` 保证同一份配置只运行一个，里面写着正在运行的进程号
 
 5 小时和每周用量是目标机程序拿 Claude Code 的登录凭证向 `api.anthropic.com` 查的。凭证在 macOS 上从钥匙串里的 `Claude Code-credentials` 读，其他情况读 `~/.claude/.credentials.json`。电脑上没有登录官方账号时，APP 不显示用量。
 

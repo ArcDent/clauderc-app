@@ -105,6 +105,9 @@ const (
 	CodeRateLimited ErrorCode = "rateLimited"
 	// CodeDeviceNotFound: no paired device with that id (HTTP 404).
 	CodeDeviceNotFound ErrorCode = "deviceNotFound"
+	// CodeMachineInUse: an agent with the same machine id is connected and
+	// still answers pings, so the new one is refused (HTTP 409).
+	CodeMachineInUse ErrorCode = "machineInUse"
 )
 
 func (e Envelope) validate() error {

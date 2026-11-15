@@ -258,6 +258,7 @@ var errorCodes = map[protocol.ErrorCode]string{
 	protocol.CodePairCodeInvalid:       "pairCodeInvalid",
 	protocol.CodeRateLimited:           "rateLimited",
 	protocol.CodeDeviceNotFound:        "deviceNotFound",
+	protocol.CodeMachineInUse:          "machineInUse",
 }
 
 // Field names replaced when the wire names were unified must be rejected.

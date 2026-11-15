@@ -1,7 +1,9 @@
 package relay
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -38,6 +40,11 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.conns.Done()
+	if s.agentAnswers(r.Context(), m.ID) {
+		s.log.Warn("duplicate agent refused", "machine", m.ID)
+		writeError(w, http.StatusConflict, protocol.CodeMachineInUse, "这台目标机已有连接在线")
+		return
+	}
 	p := s.accept(w, r)
 	if p == nil {
 		return
@@ -46,6 +53,25 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 	s.agentOnline(a)
 	p.serve(func(data []byte) { s.fromAgent(a, data) })
 	s.agentOffline(a)
+}
+
+// probeTimeout bounds the ping that decides whether the connected agent
+// with the same id is still alive.
+const probeTimeout = 5 * time.Second
+
+// agentAnswers reports whether an agent with this id is connected and
+// answers a ping. One that does not was left behind by a network change
+// or a killed process and may be replaced by the new connection.
+func (s *Server) agentAnswers(ctx context.Context, id string) bool {
+	s.mu.Lock()
+	old := s.agents[id]
+	s.mu.Unlock()
+	if old == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, min(probeTimeout, s.opts.HeartbeatTimeout))
+	defer cancel()
+	return old.peer.conn.Ping(ctx) == nil
 }
 
 // fromAgent routes a response or event back to the phone named by Client.

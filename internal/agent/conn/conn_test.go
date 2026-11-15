@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +34,33 @@ type testRelay struct {
 
 	mu    sync.Mutex
 	dials []time.Time
+	conns []net.Conn
+}
+
+// Accept records each TCP connection so a test can cut them all.
+type recordingListener struct {
+	net.Listener
+	r *testRelay
+}
+
+func (l recordingListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err == nil {
+		l.r.mu.Lock()
+		l.r.conns = append(l.r.conns, c)
+		l.r.mu.Unlock()
+	}
+	return c, err
+}
+
+// cut closes every connection to the relay, as a network change would.
+func (r *testRelay) cut() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.conns {
+		c.Close()
+	}
+	r.conns = nil
 }
 
 func startRelay(t *testing.T) *testRelay {
@@ -46,7 +76,7 @@ func startRelay(t *testing.T) *testRelay {
 		HeartbeatInterval: 50 * time.Millisecond,
 		HeartbeatTimeout:  time.Second,
 	})}
-	r.http = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.http = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path == protocol.PathAgentWS {
 			r.mu.Lock()
 			r.dials = append(r.dials, time.Now())
@@ -54,6 +84,8 @@ func startRelay(t *testing.T) *testRelay {
 		}
 		r.srv.ServeHTTP(w, req)
 	}))
+	r.http.Listener = recordingListener{Listener: r.http.Listener, r: r}
+	r.http.StartTLS()
 	t.Cleanup(func() {
 		r.http.Close()
 		r.srv.Close()
@@ -288,28 +320,82 @@ func TestReconnectBackoff(t *testing.T) {
 	}
 }
 
-// Another connection with the same machine id replaces ours on the relay;
-// the agent reconnects, forgetting every phone each time.
+// After the connection drops the agent reconnects, forgetting every phone
+// each time.
 func TestReconnectAfterDrop(t *testing.T) {
 	r := startRelay(t)
 	e := runConn(t, r, nil)
 	eventually(t, "machine online", func() bool { return r.online("m-1") })
 	_, before := e.snapshot()
 
+	r.cut()
+	eventually(t, "the agent to dial again", func() bool { return len(r.dialTimes()) >= 2 })
+	eventually(t, "machine online again", func() bool { return r.online("m-1") })
+	if _, after := e.snapshot(); after < before+2 {
+		t.Errorf("AllClientsGone ran %d more times, want at least 2 (drop and reconnect)", after-before)
+	}
+}
+
+// runUntilExit runs a Conn with opts in the background and returns what Run
+// returns.
+func runUntilExit(t *testing.T, opts conn.Options) <-chan error {
+	t.Helper()
+	opts.MachineID, opts.EnrollKey = "m-1", enrollKey
+	opts.MinBackoff, opts.MaxBackoff = 20*time.Millisecond, 100*time.Millisecond
+	c, err := conn.New(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done, exited := make(chan error, 1), make(chan struct{})
+	go func() {
+		done <- c.Run(ctx)
+		close(exited)
+	}()
+	t.Cleanup(func() { cancel(); <-exited })
+	return done
+}
+
+// Refused because the same machine id is alive elsewhere, the agent stops
+// instead of retrying; any other refusal is still retried.
+func TestMachineInUseStops(t *testing.T) {
+	r := startRelay(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	intruder, _, err := websocket.Dial(ctx, "wss"+strings.TrimPrefix(r.http.URL, "https")+protocol.PathAgentWS+"?id=m-1", &websocket.DialOptions{
+	other, _, err := websocket.Dial(ctx, "wss"+strings.TrimPrefix(r.http.URL, "https")+protocol.PathAgentWS+"?id=m-1", &websocket.DialOptions{
 		HTTPClient: r.http.Client(),
 		HTTPHeader: http.Header{"Authorization": {"Bearer " + enrollKey}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer intruder.CloseNow()
+	defer other.CloseNow()
+	other.CloseRead(context.Background()) // answer pings
+	eventually(t, "machine online", func() bool { return r.online("m-1") })
+	before := len(r.dialTimes())
 
-	eventually(t, "the agent to dial again", func() bool { return len(r.dialTimes()) >= 3 })
-	eventually(t, "machine online again", func() bool { return r.online("m-1") })
-	if _, after := e.snapshot(); after < before+2 {
-		t.Errorf("AllClientsGone ran %d more times, want at least 2 (drop and reconnect)", after-before)
+	done := runUntilExit(t, conn.Options{RelayURL: r.http.URL, HTTPClient: r.http.Client()})
+	select {
+	case err := <-done:
+		if !errors.Is(err, conn.ErrMachineInUse) {
+			t.Fatalf("Run returned %v, want ErrMachineInUse", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run kept going after machineInUse")
 	}
+	if n := len(r.dialTimes()) - before; n != 1 {
+		t.Errorf("agent dialed %d times, want 1", n)
+	}
+
+	// A 409 with another code is an ordinary failure.
+	var dials atomic.Int32
+	conflict := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		dials.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(protocol.Error{Code: protocol.CodeInternal, Message: "x"})
+	}))
+	defer conflict.Close()
+	runUntilExit(t, conn.Options{RelayURL: conflict.URL, HTTPClient: conflict.Client()})
+	eventually(t, "three dial attempts", func() bool { return dials.Load() >= 3 })
 }

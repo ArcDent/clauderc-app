@@ -116,6 +116,11 @@ func runCmd(ctx context.Context, args []string, hc *http.Client, logOut io.Write
 	if err != nil {
 		return err
 	}
+	lock, err := lockConfig(cfgPath)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	return app.Run(ctx, app.Options{
 		Config:     cfg,
 		Version:    version,

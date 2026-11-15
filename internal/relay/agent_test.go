@@ -2,6 +2,7 @@ package relay_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/coder/websocket"
 
+	"clauderc/internal/protocol"
+	"clauderc/internal/relay"
 	"clauderc/internal/relay/store"
 )
 
@@ -94,6 +97,67 @@ func TestAgentHeartbeatTimeoutMarksOffline(t *testing.T) {
 	ms := reopened.Machines()
 	if len(ms) != 1 || !ms[0].LastSeenAt.Equal(seen) {
 		t.Fatalf("stored machines = %+v, want LastSeenAt %v", ms, seen)
+	}
+}
+
+// A second agent with the same id is refused while the first still answers
+// pings, so two copies of one config cannot keep replacing each other.
+func TestAgentDuplicateRefusedWhileAlive(t *testing.T) {
+	r := startRelay(t, nil)
+	first, _ := r.dial(t, agentQuery, enrollKey)
+	first.CloseRead(context.Background()) // answer pings
+	eventually(t, time.Second, "m-1 online", func() bool {
+		m, ok := r.machine("m-1")
+		return ok && m.Online
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	h := http.Header{"Authorization": {"Bearer " + enrollKey}}
+	_, resp, err := websocket.Dial(ctx, r.wsURL(agentQuery), &websocket.DialOptions{HTTPHeader: h})
+	if err == nil || resp == nil || resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second dial: err %v, resp %v; want 409", err, resp)
+	}
+	var body protocol.Error
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || body.Code != protocol.CodeMachineInUse {
+		t.Fatalf("body %+v (%v), want code %s", body, err, protocol.CodeMachineInUse)
+	}
+
+	if err := first.Ping(ctx); err != nil {
+		t.Fatalf("first connection was closed: %v", err)
+	}
+	if m, _ := r.machine("m-1"); !m.Online {
+		t.Fatal("m-1 went offline")
+	}
+}
+
+// A connection that no longer answers pings, left behind by a network
+// change or a killed agent, is replaced by the new one.
+func TestAgentDuplicateReplacesDeadConnection(t *testing.T) {
+	// Heartbeats would drop the dead connection on their own; keep them out
+	// of the way so the probe, bounded by the timeout, decides.
+	r := startRelay(t, func(o *relay.Options) {
+		o.HeartbeatInterval = time.Minute
+		o.HeartbeatTimeout = 300 * time.Millisecond
+	})
+	dead, _ := r.dial(t, agentQuery, enrollKey) // never read, so pings go unanswered
+	eventually(t, time.Second, "m-1 online", func() bool {
+		m, ok := r.machine("m-1")
+		return ok && m.Online
+	})
+
+	second, status := r.dial(t, agentQuery, enrollKey)
+	if status != http.StatusSwitchingProtocols {
+		t.Fatalf("second dial status = %d, want upgrade", status)
+	}
+	second.CloseRead(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, _, err := dead.Read(ctx); websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+		t.Fatalf("dead connection read: %v, want closed as replaced", err)
+	}
+	if m, _ := r.machine("m-1"); !m.Online {
+		t.Fatal("m-1 offline after the replacement")
 	}
 }
 

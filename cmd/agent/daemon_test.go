@@ -114,6 +114,28 @@ func TestStartRefusesBadConfig(t *testing.T) {
 	}
 }
 
+// A foreground run holds the lock without a pid file; start must not
+// launch a second agent that would only exit again.
+func TestStartWhileLocked(t *testing.T) {
+	cfg := writeConfig(t, "wss://127.0.0.1:1")
+	lock, err := lockConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	var out bytes.Buffer
+	if err := startCmd([]string{"--config", cfg}, "/nonexistent", &out); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if want := "已在运行，进程号 " + strconv.Itoa(os.Getpid()); !strings.Contains(out.String(), want) {
+		t.Errorf("start output %q, want %q", out.String(), want)
+	}
+	pidFile, _ := daemonFiles(cfg)
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Errorf("pid file written: %v", err)
+	}
+}
+
 func TestStartReportsEarlyExit(t *testing.T) {
 	cfg := writeConfig(t, "wss://127.0.0.1:1")
 	pidFile, logFile := daemonFiles(cfg)
