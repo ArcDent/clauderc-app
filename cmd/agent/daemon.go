@@ -55,6 +55,17 @@ func startCmd(args []string, exe string, out io.Writer) error {
 		_, err := fmt.Fprintf(out, "已在后台运行，进程号 %d\n日志：%s\n", pid, logFile)
 		return err
 	}
+	// A foreground run or the service may hold the config without a pid file.
+	lock, err := lockConfig(cfgPath)
+	var running *runningError
+	if errors.As(err, &running) {
+		_, err := fmt.Fprintf(out, "已在运行，进程号 %d\n", running.pid)
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	lock.Close()
 	log, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err

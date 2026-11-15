@@ -28,6 +28,8 @@ clauderc devices           # 列出已配对的手机
 clauderc revoke <id>       # 吊销一台手机
 ```
 
+同一份配置只能运行一个，已经有一个在运行时，再执行 `clauderc run` 会提示它的进程号并退出。
+
 后台运行的进程号和日志写在配置文件同目录的 `agent.pid`、`agent.log`。开机自启的服务和 `clauderc start` 选一种用，不要同时开。
 
 服务文件里写的是当前 Node.js 版本的 npm 全局目录下的程序路径。用 nvm 换了 Node.js 版本并在新版本下重装这个包后，要再执行一次 `clauderc service install`，否则服务还在跑旧目录里的程序。

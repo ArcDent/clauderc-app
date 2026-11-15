@@ -7,6 +7,7 @@ package conn
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -156,7 +157,12 @@ func (c *Conn) Push(evt protocol.Envelope) {
 	}
 }
 
-// Run stays connected until ctx ends and then returns ctx's error.
+// ErrMachineInUse ends Run: the relay refused the connection because an
+// agent with the same machine id is connected and alive there.
+var ErrMachineInUse = errors.New("这个目标机身份已在中转服务器上在线；如果配置目录是从别的电脑或别的目录拷来的，删掉其中的 machine-id 文件后再运行")
+
+// Run stays connected until ctx ends and then returns ctx's error, or
+// returns ErrMachineInUse without retrying.
 func (c *Conn) Run(ctx context.Context) error {
 	backoff := c.opts.MinBackoff
 	for {
@@ -164,6 +170,9 @@ func (c *Conn) Run(ctx context.Context) error {
 		c.allClientsGone()
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if errors.Is(err, ErrMachineInUse) {
+			return err
 		}
 		if connected {
 			backoff = c.opts.MinBackoff
@@ -186,16 +195,29 @@ func (c *Conn) allClientsGone() {
 	}
 }
 
+// machineInUse reports whether resp is the relay refusing a second agent
+// with our machine id.
+func machineInUse(resp *http.Response) bool {
+	if resp == nil || resp.StatusCode != http.StatusConflict {
+		return false
+	}
+	var e protocol.Error
+	return json.NewDecoder(resp.Body).Decode(&e) == nil && e.Code == protocol.CodeMachineInUse
+}
+
 // session dials once and serves until the connection drops; connected
 // tells whether the dial succeeded.
 func (c *Conn) session(ctx context.Context) (connected bool, err error) {
 	dialCtx, cancelDial := context.WithTimeout(ctx, c.opts.HeartbeatTimeout)
-	ws, _, err := websocket.Dial(dialCtx, c.wsURL, &websocket.DialOptions{
+	ws, resp, err := websocket.Dial(dialCtx, c.wsURL, &websocket.DialOptions{
 		HTTPClient: c.opts.HTTPClient,
 		HTTPHeader: http.Header{"Authorization": {"Bearer " + c.opts.EnrollKey}},
 	})
 	cancelDial()
 	if err != nil {
+		if machineInUse(resp) {
+			return false, ErrMachineInUse
+		}
 		return false, err
 	}
 	defer ws.CloseNow()
