@@ -121,6 +121,14 @@ class ChatLogicTest {
         assertEquals(listOf("/todolist-workflow 先用这个"), left.map { it.text })
     }
 
+    @Test fun aBangCommandGivesWayToItsCommandRow() {
+        val out = listOf(Outgoing(1, "!ls", emptyList(), afterSeq = 101), Outgoing(2, "! git status", emptyList(), afterSeq = 101))
+        val ls = ToolCall("command-102", "!", "! ls", buildJsonObject { put("args", "ls") })
+        val status = ToolCall("command-103", "!", "! git status", buildJsonObject { put("args", "git status") })
+        val left = settleOutgoing(out, listOf(ChatItem(102, ItemKind.TOOL, tool = ls), ChatItem(103, ItemKind.TOOL, tool = status)))
+        assertTrue(left.isEmpty())
+    }
+
     @Test fun aQueuedCommandIsMarkedUntilItRuns() = runTest(dispatcher) {
         val vm = viewModel()
         relay.respond(Method.CHAT_SEND, ChatSendResponse.serializer(), ChatSendResponse(queued = true))

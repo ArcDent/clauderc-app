@@ -30,7 +30,9 @@ func (t *Transcript) Info() Info {
 	return info
 }
 
-func (t *Transcript) attachment(a *attachment) {
+// attachment applies one attachment record and returns the indexes of the
+// items it added.
+func (t *Transcript) attachment(a *attachment) []int {
 	switch a.Type {
 	case "model":
 		if a.Identity.ModelID != "" {
@@ -50,7 +52,21 @@ func (t *Transcript) attachment(a *attachment) {
 			}
 			t.setSkill(protocol.Command{Name: name, Description: desc})
 		}
+	case "queued_command":
+		// Something taken in by a running turn; the queue remove next to
+		// it often carries the same text. A message of the user's, origin
+		// human, shows as its queued item already, and a subagent's
+		// report is not shown.
+		prompt := userText(textOf(a.Prompt))
+		switch {
+		case a.Origin.Kind == "task-notification":
+			return t.pairedNotice(noticeFromAttachment, prompt, "", taskNotificationText(prompt))
+		case a.Origin.Kind == "peer" && a.Origin.SenderTaskID == "":
+			title, body := peerNotice(a.Origin, prompt)
+			return t.pairedNotice(noticeFromAttachment, prompt, title, body)
+		}
 	}
+	return nil
 }
 
 // setSkill adds a skill or updates the one with the same name in place.

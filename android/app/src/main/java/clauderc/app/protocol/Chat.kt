@@ -16,6 +16,11 @@ object ItemKind {
     const val USER = "user"
     const val ASSISTANT = "assistant"
     const val TOOL = "tool"
+    /**
+     * Grey text, not a bubble: a background task notification and the like as one centered line,
+     * or, with a title, a message from another session under that title.
+     */
+    const val NOTICE = "notice"
     /** Where the user interrupted a turn; drawn as a centered 「已中断」. */
     const val INTERRUPTED = "interrupted"
     /** Replaces an item that is no longer shown, e.g. a queued message taken back on the computer. */
@@ -55,6 +60,8 @@ data class ChatItem(
     val seq: Long,
     val kind: String,
     val text: String? = null,
+    /** Set for a notice from another session, e.g. 「clauderc 发来」. */
+    val title: String? = null,
     val images: List<Image>? = null,
     val tool: ToolCall? = null,
     /** True for a user message still waiting in Claude Code's queue. */

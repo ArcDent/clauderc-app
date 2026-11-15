@@ -54,7 +54,12 @@ type Transcript struct {
 	// queuedCommands counts enqueue records without text, which is how
 	// Claude Code queues a slash command.
 	queuedCommands int
-	info           Info
+	// unpaired lists the notices made from one side of a delivery that
+	// may still see the same text from the other side, oldest first.
+	unpaired []unpairedNotice
+	// line counts the lines fed so far.
+	line int
+	info Info
 }
 
 // QueuedCommands returns how many slash commands were queued so far.
@@ -99,9 +104,27 @@ type record struct {
 	Operation string          `json:"operation"`
 	// Reason is why a queue-operation removed a message.
 	Reason string `json:"reason"`
+	// IsCompactSummary marks the record Claude Code writes in place of
+	// the conversation after /compact.
+	IsCompactSummary bool `json:"isCompactSummary"`
 	// PermissionMode is set on permission-mode records.
 	PermissionMode string      `json:"permissionMode"`
 	Attachment     *attachment `json:"attachment"`
+	// Origin tells who wrote a user record the user did not type, such as
+	// a background task notification or another session.
+	Origin origin `json:"origin"`
+}
+
+// origin is the origin of a user record or a queued command: a
+// background task notification, or a message from another session (peer),
+// which carries the sender's Name and the message Body.
+type origin struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+	Body string `json:"body"`
+	// SenderTaskID is set when a subagent sent the message; those reports
+	// are not shown.
+	SenderTaskID string `json:"senderTaskId"`
 }
 
 type attachment struct {
@@ -111,6 +134,10 @@ type attachment struct {
 	} `json:"identity"`
 	Content string   `json:"content"`
 	Names   []string `json:"names"`
+	// Prompt is the queued command's text, a string; the notification
+	// itself when CommandMode is task-notification.
+	Prompt json.RawMessage `json:"prompt"`
+	Origin origin          `json:"origin"`
 }
 
 type message struct {
@@ -140,6 +167,7 @@ func (t *Transcript) feed(line []byte) []int {
 	if len(line) == 0 {
 		return nil
 	}
+	t.line++
 	var r record
 	if json.Unmarshal(line, &r) != nil {
 		return nil
@@ -152,14 +180,11 @@ func (t *Transcript) feed(line []byte) []int {
 		return nil
 	case "attachment":
 		if r.Attachment != nil {
-			t.attachment(r.Attachment)
+			return t.attachment(r.Attachment)
 		}
 		return nil
 	case "user":
-		if r.IsMeta || r.Message == nil {
-			return nil
-		}
-		return t.user(r.Message.Content)
+		return t.userRecord(&r)
 	case "assistant":
 		if r.Message == nil {
 			return nil
@@ -169,15 +194,9 @@ func (t *Transcript) feed(line []byte) []int {
 		if r.Subtype != "local_command" {
 			return nil
 		}
-		var s string
-		if json.Unmarshal(r.Content, &s) != nil {
-			return nil
-		}
-		return t.commandText(s)
+		return t.commandText(textOf(r.Content))
 	case "queue-operation":
-		var s string
-		_ = json.Unmarshal(r.Content, &s)
-		return t.queueOperation(r.Operation, r.Reason, userText(s))
+		return t.queueOperation(r.Operation, r.Reason, textOf(r.Content))
 	}
 	return nil
 }
@@ -188,13 +207,25 @@ func (t *Transcript) feed(line []byte) []int {
 // running turn took it in; popAll, on interrupt, puts every queued
 // message back into the input box and any other remove drops one, so
 // those items are removed.
-func (t *Transcript) queueOperation(op, reason, text string) []int {
+func (t *Transcript) queueOperation(op, reason, raw string) []int {
+	text := userText(raw)
 	switch op {
 	case "enqueue":
-		if text == "" {
+		if raw == "" {
 			// A slash command: the record leaves out its text.
 			t.queuedCommands++
 			return nil
+		}
+		if text == "" || isTaskNotification(text) {
+			// Only wrappers, or a notification: no queued item. The
+			// notification's notice comes from the remove or the
+			// attachment, or from a later user record.
+			return nil
+		}
+		if strings.HasPrefix(text, "<bash-") {
+			// A "!" command typed while busy runs at once; its input and
+			// output wait in the queue for the user record repeating them.
+			return t.bashCommand(text, true)
 		}
 		i := t.add(Item{ChatItem: protocol.ChatItem{Kind: protocol.ItemUser, Text: text, Queued: true}})
 		t.queued = append(t.queued, i)
@@ -207,21 +238,41 @@ func (t *Transcript) queueOperation(op, reason, text string) []int {
 		t.queued = nil
 		return changed
 	case "remove":
-		for k, i := range t.queued {
-			if t.items[i].Text == text {
-				t.queued = append(t.queued[:k:k], t.queued[k+1:]...)
-				if reason == "absorbed_mid_turn" {
-					// Delivered within the turn as a queued_command
-					// attachment; no user record follows.
-					t.items[i].Queued = false
-				} else {
-					t.remove(i)
-				}
-				return []int{i}
+		if i, ok := t.unqueue(text); ok {
+			if reason != "absorbed_mid_turn" {
+				t.remove(i)
 			}
+			// Otherwise delivered within the turn as a queued_command
+			// attachment; no user record follows.
+			return []int{i}
+		}
+		if reason != "absorbed_mid_turn" {
+			return nil
+		}
+		// Taken in by the running turn with no queued item, which is how
+		// a notification or a message from another session arrives.
+		if isTaskNotification(text) {
+			return t.pairedNotice(noticeFromRemove, text, "", taskNotificationText(text))
+		}
+		if strings.HasPrefix(text, "<cross-session-message") {
+			title, body := peerNotice(origin{}, text)
+			return t.pairedNotice(noticeFromRemove, text, title, body)
 		}
 	}
 	return nil
+}
+
+// unqueue takes the queued item with the given text out of the queue and
+// returns its index.
+func (t *Transcript) unqueue(text string) (int, bool) {
+	for k, i := range t.queued {
+		if t.items[i].Text == text {
+			t.queued = append(t.queued[:k:k], t.queued[k+1:]...)
+			t.items[i].Queued = false
+			return i, true
+		}
+	}
+	return -1, false
 }
 
 // remove turns item i into a removed item, keeping its seq.
@@ -242,18 +293,85 @@ func (t *Transcript) add(it Item) int {
 	return len(t.items) - 1
 }
 
+// notice adds a grey line item; title is empty for a one-line notice.
+func (t *Transcript) notice(title, text string) []int {
+	return []int{t.add(Item{ChatItem: protocol.ChatItem{Kind: protocol.ItemNotice, Text: text, Title: title}})}
+}
+
+// userRecord handles a "user" line: a notice for what Claude Code wrote on
+// its own, a user message otherwise.
+func (t *Transcript) userRecord(r *record) []int {
+	if r.Origin.Kind == "peer" {
+		if r.Origin.SenderTaskID != "" {
+			// A subagent's report, which the phone does not show.
+			return nil
+		}
+		// Delivered while the session was idle; a busy session delivers
+		// it as a queue remove and a queued_command attachment instead.
+		text := ""
+		if r.Message != nil {
+			text = textOf(r.Message.Content)
+		}
+		return t.notice(peerNotice(r.Origin, text))
+	}
+	if r.IsCompactSummary {
+		return t.notice("", "上下文已压缩")
+	}
+	if r.IsMeta {
+		if r.Message == nil {
+			return nil
+		}
+		return t.metaNotice(r.Message.Content)
+	}
+	if r.Message == nil {
+		return nil
+	}
+	switch r.Origin.Kind {
+	case "task-notification":
+		return t.notice("", taskNotificationText(textOf(r.Message.Content)))
+	case "":
+		// The desktop client delivers a message from another session as
+		// a plain user record after a system reminder.
+		if text := userText(textOf(r.Message.Content)); strings.HasPrefix(text, "<cross-session-message") {
+			return t.notice(peerNotice(origin{}, text))
+		}
+	}
+	return t.user(r.Message.Content)
+}
+
+// metaNotice turns the cross-session notices Claude Code writes as isMeta
+// records into grey lines; other isMeta records, such as skill bodies and
+// image notes, are skipped.
+func (t *Transcript) metaNotice(content json.RawMessage) []int {
+	s := textOf(content)
+	switch {
+	case strings.HasPrefix(s, "[Cross-session idle notice]"):
+		return t.notice("", idleNoticeText(s))
+	case strings.HasPrefix(s, "[Cross-session delivery notice]"):
+		return t.notice("", deliveryNoticeText(s))
+	}
+	return nil
+}
+
 func (t *Transcript) user(content json.RawMessage) []int {
 	var s string
 	if json.Unmarshal(content, &s) == nil {
+		text := userText(s)
+		switch {
+		case strings.HasPrefix(text, "<bash-"):
+			// A "!" command; one typed while busy is queued already.
+			if i, ok := t.unqueue(text); ok {
+				return []int{i}
+			}
+			return t.bashCommand(text, false)
 		// A local command starts with <command-name>, a skill or custom
 		// command with <command-message>.
-		if strings.HasPrefix(s, "<command-name>") || strings.HasPrefix(s, "<command-message>") || strings.HasPrefix(s, "<local-command-") {
+		case strings.HasPrefix(text, "<command-name>") || strings.HasPrefix(text, "<command-message>") || strings.HasPrefix(text, "<local-command-"):
 			return t.commandText(s)
-		}
-		if text := userText(s); isInterruptMarker(text) {
+		case isInterruptMarker(text):
 			return []int{t.add(Item{ChatItem: protocol.ChatItem{Kind: protocol.ItemInterrupted}})}
 		}
-		return t.userMessage(userText(s), nil)
+		return t.userMessage(text, nil)
 	}
 	var blocks []block
 	if json.Unmarshal(content, &blocks) != nil {
@@ -265,11 +383,15 @@ func (t *Transcript) user(content json.RawMessage) []int {
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
-			if isInterruptMarker(strings.TrimSpace(b.Text)) {
+			text := stripWrappers(b.Text)
+			if text == "" {
+				continue
+			}
+			if isInterruptMarker(strings.TrimSpace(text)) {
 				changed = append(changed, t.add(Item{ChatItem: protocol.ChatItem{Kind: protocol.ItemInterrupted}}))
 				continue
 			}
-			texts = append(texts, b.Text)
+			texts = append(texts, text)
 		case "image":
 			if b.Source == nil || b.Source.Type != "base64" {
 				continue
@@ -302,13 +424,9 @@ func (t *Transcript) userMessage(text string, images []protocol.Image) []int {
 	if text == "" && len(images) == 0 {
 		return nil
 	}
-	for k, i := range t.queued {
-		if t.items[i].Text == text {
-			t.queued = append(t.queued[:k:k], t.queued[k+1:]...)
-			t.items[i].Queued = false
-			t.items[i].Images = images
-			return []int{i}
-		}
+	if i, ok := t.unqueue(text); ok {
+		t.items[i].Images = images
+		return []int{i}
 	}
 	return []int{t.add(Item{ChatItem: protocol.ChatItem{Kind: protocol.ItemUser, Text: text, Images: images}})}
 }
@@ -335,14 +453,216 @@ func (t *Transcript) commandText(s string) []int {
 		return []int{t.command}
 	}
 	if m := commandOutput.FindStringSubmatch(s); m != nil && t.command >= 0 {
-		i := t.command
-		c := *t.items[i].Command
-		c.Output = strings.TrimSpace(terminalEscape.ReplaceAllString(m[1], ""))
-		t.items[i].Command = &c
-		t.command = -1
-		return []int{i}
+		return []int{t.setOutput(terminalOutput(m[1]))}
 	}
 	return nil
+}
+
+// setOutput gives the command waiting for its output that output, empty
+// or not, and stops waiting, so later output cannot land on it. It
+// returns the command's index.
+func (t *Transcript) setOutput(out string) int {
+	i := t.command
+	c := *t.items[i].Command
+	c.Output = out
+	t.items[i].Command = &c
+	t.command = -1
+	return i
+}
+
+// terminalOutput is command output without its terminal escapes.
+func terminalOutput(s string) string {
+	return strings.TrimSpace(terminalEscape.ReplaceAllString(s, ""))
+}
+
+var (
+	bashInput  = regexp.MustCompile(`(?s)<bash-input>(.*?)</bash-input>`)
+	bashOutput = regexp.MustCompile(`(?s)<bash-(?:stdout|stderr)>(.*?)</bash-(?:stdout|stderr)>`)
+)
+
+// bashCommand handles a "!" command: <bash-input> holds the command line,
+// <bash-stdout> and <bash-stderr> its output. They come in one record or
+// in a later record; the output stays out of the chat until asked for.
+// A queued command waits in the queue under the record's text, s.
+func (t *Transcript) bashCommand(s string, queued bool) []int {
+	var changed []int
+	if m := bashInput.FindStringSubmatch(s); m != nil {
+		c := &Command{Name: "!", Args: strings.TrimSpace(m[1])}
+		// Text only matches the queued command with the user record that
+		// repeats it; the phone gets the command, not this text.
+		t.command = t.add(Item{ChatItem: protocol.ChatItem{Kind: ItemCommand, Text: s, Queued: queued}, Command: c})
+		if queued {
+			t.queued = append(t.queued, t.command)
+		}
+		changed = []int{t.command}
+	}
+	outputs := bashOutput.FindAllStringSubmatch(s, -1)
+	if len(outputs) == 0 || t.command < 0 {
+		return changed
+	}
+	var out []string
+	for _, m := range outputs {
+		if v := terminalOutput(m[1]); v != "" {
+			out = append(out, v)
+		}
+	}
+	if i := t.setOutput(strings.Join(out, "\n")); len(changed) == 0 {
+		changed = []int{i}
+	}
+	return changed
+}
+
+var (
+	taskSummary = regexp.MustCompile(`(?s)<summary>(.*?)</summary>`)
+	taskEvent   = regexp.MustCompile(`(?s)<event>(.*?)</event>`)
+	// crossSessionMessage matches the wrapper of a message from another
+	// session; crossSessionName reads its sender, which the desktop
+	// client writes as name instead of from-name.
+	crossSessionMessage = regexp.MustCompile(`(?s)<cross-session-message\b[^>]*>(.*?)</cross-session-message>`)
+	crossSessionName    = regexp.MustCompile(`<cross-session-message\b[^>]*?\b(?:from-)?name="([^"]*)"`)
+	idleNoticeName      = regexp.MustCompile(`^\[Cross-session idle notice\] "([^"]*)"`)
+	deliveryCount       = regexp.MustCompile(`^\[Cross-session delivery notice\] (\d+) of your messages`)
+	// leadingWrapper matches a block the desktop client puts before what
+	// the user typed: a system reminder, the artifact view context, which
+	// has attributes, or a side sessions event, which may be all there is.
+	leadingWrapper = regexp.MustCompile(`^\s*(?s:<system-reminder\b[^>]*>.*?</system-reminder>|<artifact-view-context\b[^>]*>.*?</artifact-view-context>|<side-sessions-event\b[^>]*>.*?</side-sessions-event>)`)
+)
+
+// textOf returns the string in raw, or "" for anything else.
+func textOf(raw json.RawMessage) string {
+	var s string
+	_ = json.Unmarshal(raw, &s)
+	return s
+}
+
+// stripWrappers removes the wrapper blocks at the start of s and keeps
+// the text after them. Phone sessions are background sessions, but a
+// transcript may still hold such records.
+func stripWrappers(s string) string {
+	for {
+		loc := leadingWrapper.FindStringIndex(s)
+		if loc == nil {
+			return s
+		}
+		s = strings.TrimSpace(s[loc[1]:])
+	}
+}
+
+// isTaskNotification reports whether s, trimmed, is a background task
+// notification.
+func isTaskNotification(s string) bool {
+	return strings.HasPrefix(s, "<task-notification>") && strings.HasSuffix(s, "</task-notification>")
+}
+
+// taskNotificationText is the grey line of a background task notification:
+// its summary, with the first line of the event after it when there is one.
+func taskNotificationText(s string) string {
+	summary := ""
+	if m := taskSummary.FindStringSubmatch(s); m != nil {
+		summary = strings.TrimSpace(m[1])
+	}
+	event := ""
+	if m := taskEvent.FindStringSubmatch(s); m != nil {
+		event = strings.TrimSpace(firstLine(m[1]))
+	}
+	switch {
+	case summary != "" && event != "":
+		return summary + "：" + event
+	case summary != "":
+		return summary
+	case event != "":
+		return event
+	}
+	return "后台任务通知"
+}
+
+// peerNotice is the title and body of a message from another session:
+// the sender and body o names, or those of the cross-session-message
+// wrapper in text where o leaves them out, as the desktop client and
+// some idle deliveries do.
+func peerNotice(o origin, text string) (title, body string) {
+	name, body := o.Name, o.Body
+	if m := crossSessionMessage.FindStringSubmatch(text); m != nil {
+		if body == "" {
+			body = strings.TrimSpace(m[1])
+		}
+		if n := crossSessionName.FindStringSubmatch(text); name == "" && n != nil {
+			name = n[1]
+		}
+	}
+	if name == "" {
+		return "另一个会话发来", body
+	}
+	return name + " 发来", body
+}
+
+// idleNoticeText is 「名字」空闲了 for the usual idle notice; any other
+// variant shows its first line. A session without a name is quoted by
+// its socket address, which tells the user nothing.
+func idleNoticeText(s string) string {
+	if m := idleNoticeName.FindStringSubmatch(s); m != nil && strings.Contains(s, "is idle now") {
+		if strings.HasPrefix(m[1], "uds:") {
+			return "另一个会话空闲了"
+		}
+		return "「" + m[1] + "」空闲了"
+	}
+	return strings.TrimSpace(firstLine(s))
+}
+
+// deliveryNoticeText is the note that the other session held messages
+// back, with their count when the notice names it.
+func deliveryNoticeText(s string) string {
+	if m := deliveryCount.FindStringSubmatch(s); m != nil {
+		return "有 " + m[1] + " 条消息被对方暂扣，没送到"
+	}
+	return "有消息被对方暂扣，没送到"
+}
+
+// noticeSide is the record one delivery of a notification arrives in.
+type noticeSide int
+
+const (
+	noticeFromRemove noticeSide = iota
+	noticeFromAttachment
+)
+
+// noticePairWindow is how many lines apart the queue remove and the
+// queued_command attachment of one delivery may be. They are usually
+// next to each other; a burst of deliveries writes all the removes, then
+// all the attachments, in the same order.
+const noticePairWindow = 8
+
+// unpairedNotice is a notice made from one side of a delivery.
+type unpairedNotice struct {
+	side noticeSide
+	text string
+	line int
+}
+
+// pairedNotice adds a notice for text, the userText of the record,
+// unless it is the other side of a recent delivery that already made
+// one: the queue remove and the queued_command attachment of a delivery
+// usually both appear, but either may be missing. Repeats of the same
+// text pair up oldest first.
+func (t *Transcript) pairedNotice(side noticeSide, text, title, body string) []int {
+	kept := t.unpaired[:0]
+	paired := false
+	for _, u := range t.unpaired {
+		switch {
+		case t.line-u.line > noticePairWindow:
+			// The other side never came.
+		case !paired && u.side != side && u.text == text:
+			paired = true
+		default:
+			kept = append(kept, u)
+		}
+	}
+	t.unpaired = kept
+	if paired {
+		return nil
+	}
+	t.unpaired = append(t.unpaired, unpairedNotice{side: side, text: text, line: t.line})
+	return t.notice(title, body)
 }
 
 func (t *Transcript) assistant(content json.RawMessage) []int {
@@ -403,10 +723,11 @@ func firstLine(s string) string {
 
 var pasted = regexp.MustCompile(`(?s)<pasted_content id="([^"]*)">\n(.*?)\n</pasted_content id="([^"]*)">`)
 
-// userText removes the <pasted_content> wrapper of multi-line messages.
+// userText removes the <pasted_content> wrapper of multi-line messages
+// and the desktop client's wrappers in front of the text.
 func userText(s string) string {
 	s = pasted.ReplaceAllString(s, "$2")
-	return strings.TrimSpace(s)
+	return strings.TrimSpace(stripWrappers(s))
 }
 
 // flatten turns tool_result content, a string or a list of blocks, into

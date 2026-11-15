@@ -114,6 +114,55 @@ class ChatScreenTest {
         compose.onNode(hasText("Request interrupted", substring = true)).assertDoesNotExist()
     }
 
+    @Test fun noticesAreGreyTextNotBubbles() {
+        val items = mergeItems(
+            emptyList(),
+            listOf(
+                ChatItem(1, ItemKind.USER, text = "等 CI 跑完告诉我"),
+                ChatItem(2, ItemKind.NOTICE, text = "Background command \"等 CI 跑完\" completed (exit code 0)"),
+                ChatItem(3, ItemKind.NOTICE, title = "协议文档 发来", text = "envelope.go 先别提交\n等我对完一遍。"),
+            ),
+        )
+        assertEquals(listOf(1L, 2L, 3L), items.map { it.seq })
+        show(baseState().copy(items = items, hasMore = false))
+        compose.onNodeWithText("Background command \"等 CI 跑完\" completed (exit code 0)").assertIsDisplayed()
+        compose.onNodeWithText("协议文档 发来").assertIsDisplayed()
+        // The message shows in full, not folded to its first line.
+        compose.onNodeWithText("envelope.go 先别提交\n等我对完一遍。").assertIsDisplayed()
+    }
+
+    @Test fun sendMessageIsAGreyBlockNotAToolRow() {
+        val tool = ToolCall(
+            "toolu_01S", "SendMessage", "SendMessage",
+            buildJsonObject {
+                put("to", "09588c02")
+                put("message", "灰字块已经画好了\n你那边可以接着做文档了")
+                put("content", "灰字块已经画好了…")
+            },
+        )
+        val items = mergeItems(emptyList(), listOf(ChatItem(1, ItemKind.USER, text = "继续"), ChatItem(2, ItemKind.TOOL, tool = tool)))
+        show(baseState().copy(items = items, hasMore = false))
+        compose.onNodeWithText("发给 09588c02").assertIsDisplayed()
+        compose.onNodeWithText("灰字块已经画好了\n你那边可以接着做文档了").assertIsDisplayed()
+        // Not a folded tool row, and the shortened content preview is not used.
+        compose.onNodeWithText("SendMessage").assertDoesNotExist()
+        compose.onNodeWithText("灰字块已经画好了…").assertDoesNotExist()
+    }
+
+    @Test fun sendMessageWithNoBodyWaitsForIdle() {
+        val tool = ToolCall(
+            "toolu_01T", "SendMessage", "SendMessage",
+            buildJsonObject {
+                put("to", "09588c02")
+                put("notify_when_idle", true)
+            },
+        )
+        val items = mergeItems(emptyList(), listOf(ChatItem(1, ItemKind.TOOL, tool = tool)))
+        show(baseState().copy(items = items, hasMore = false))
+        compose.onNodeWithText("等「09588c02」空闲").assertIsDisplayed()
+        compose.onNodeWithText("SendMessage").assertDoesNotExist()
+    }
+
     @Test fun scrollingToTheTopLoadsOlderAndKeepsThePlace() {
         var loads = 0
         var state by mutableStateOf(baseState())

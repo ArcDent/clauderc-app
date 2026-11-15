@@ -54,7 +54,8 @@ func TranscriptEnv(path string) []string {
 	return []string{envTrans + "=" + path}
 }
 
-// DeliverEnv picks what a sent message turns into: "user" (the default),
+// DeliverEnv picks what a sent message turns into: "user" (the default,
+// a <bash-input> record for a "!" command as Claude Code writes it),
 // "enqueue" as for a busy session, which like Claude Code leaves out the
 // text of a slash command, "enqueue-bare", an enqueue without text
 // whatever was sent, or "none".
@@ -315,7 +316,12 @@ func (in *input) enter() error {
 	case "enqueue-bare":
 		rec = map[string]any{"type": "queue-operation", "operation": "enqueue"}
 	default:
-		rec = map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}}
+		content := text
+		if line, ok := strings.CutPrefix(text, "!"); ok {
+			// Claude Code runs a "!" command and records it like this.
+			content = "<bash-input>" + strings.TrimSpace(line) + "</bash-input>"
+		}
+		rec = map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": content}}
 	}
 	line, err := json.Marshal(rec)
 	if err != nil {

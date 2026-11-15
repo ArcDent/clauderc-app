@@ -75,16 +75,19 @@ fun settleOutgoing(outgoing: List<Outgoing>, delivered: List<ChatItem>): List<Ou
         // Pictures show up as "[Image #1] " in front of the text, so compare the end.
         val text = when {
             item.kind == ItemKind.USER -> item.text.orEmpty().trim()
-            item.tool != null && isCommand(item.tool) -> item.tool.summary.trim()
+            item.tool != null && isCommand(item.tool) -> squeezeBang(item.tool.summary.trim())
             else -> continue
         }
         val hit = left.firstOrNull { o ->
-            item.seq > o.afterSeq && if (o.text.isEmpty()) !item.images.isNullOrEmpty() else text.endsWith(o.text)
+            item.seq > o.afterSeq && if (o.text.isEmpty()) !item.images.isNullOrEmpty() else text.endsWith(squeezeBang(o.text))
         }
         if (hit != null) left.remove(hit)
     }
     return left
 }
+
+/** A "!" command without the space after the "!": its row says "! ls" whether "!ls" or "! ls" was sent. */
+private fun squeezeBang(text: String): String = if (text.startsWith("!")) "!" + text.drop(1).trimStart() else text
 
 /** What a chat page showed last time, so reopening it draws at once while chat.open catches up. Memory only. */
 class ChatCache(private val capacity: Int = 8) {
@@ -144,7 +147,7 @@ data class ChatUiState(
 )
 
 /** Only the item kinds the phone knows how to draw; anything else (thinking and so on) is dropped. */
-private val shownKinds = setOf(ItemKind.USER, ItemKind.ASSISTANT, ItemKind.TOOL, ItemKind.INTERRUPTED)
+private val shownKinds = setOf(ItemKind.USER, ItemKind.ASSISTANT, ItemKind.TOOL, ItemKind.NOTICE, ItemKind.INTERRUPTED)
 
 /** Merges items by seq: a later item with the same seq replaces the earlier one, and a removed one deletes it. */
 fun mergeItems(old: List<ChatItem>, new: List<ChatItem>): List<ChatItem> {
