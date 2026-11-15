@@ -97,6 +97,8 @@ type record struct {
 	Message   *message        `json:"message"`
 	Content   json.RawMessage `json:"content"`
 	Operation string          `json:"operation"`
+	// Reason is why a queue-operation removed a message.
+	Reason string `json:"reason"`
 	// PermissionMode is set on permission-mode records.
 	PermissionMode string      `json:"permissionMode"`
 	Attachment     *attachment `json:"attachment"`
@@ -175,16 +177,18 @@ func (t *Transcript) feed(line []byte) []int {
 	case "queue-operation":
 		var s string
 		_ = json.Unmarshal(r.Content, &s)
-		return t.queueOperation(r.Operation, userText(s))
+		return t.queueOperation(r.Operation, r.Reason, userText(s))
 	}
 	return nil
 }
 
 // queueOperation follows Claude Code's input queue. A message enqueued
 // while the session is busy shows as queued until its user record
-// arrives; popAll, on interrupt, puts every queued message back into the
-// input box and remove drops one, so those items are removed.
-func (t *Transcript) queueOperation(op, text string) []int {
+// arrives, or until a remove with reason absorbed_mid_turn says the
+// running turn took it in; popAll, on interrupt, puts every queued
+// message back into the input box and any other remove drops one, so
+// those items are removed.
+func (t *Transcript) queueOperation(op, reason, text string) []int {
 	switch op {
 	case "enqueue":
 		if text == "" {
@@ -206,7 +210,13 @@ func (t *Transcript) queueOperation(op, text string) []int {
 		for k, i := range t.queued {
 			if t.items[i].Text == text {
 				t.queued = append(t.queued[:k:k], t.queued[k+1:]...)
-				t.remove(i)
+				if reason == "absorbed_mid_turn" {
+					// Delivered within the turn as a queued_command
+					// attachment; no user record follows.
+					t.items[i].Queued = false
+				} else {
+					t.remove(i)
+				}
 				return []int{i}
 			}
 		}

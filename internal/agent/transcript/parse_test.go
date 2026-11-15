@@ -224,6 +224,43 @@ func TestParseQueueRemoved(t *testing.T) {
 	}
 }
 
+// Messages queued while a tool runs can be taken in by the running turn:
+// Claude Code writes a remove with reason absorbed_mid_turn and hands them
+// over as queued_command attachments, with no user record. Their items
+// stay under the same seq and are no longer queued.
+func TestParseQueueAbsorbed(t *testing.T) {
+	lines := []string{
+		`{"type":"user","message":{"role":"user","content":"1"}}`,
+		`{"type":"queue-operation","operation":"enqueue","content":"111"}`,
+		`{"type":"queue-operation","operation":"enqueue","content":"1"}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}`,
+		`{"type":"queue-operation","operation":"remove","content":"111","reason":"absorbed_mid_turn"}`,
+		`{"type":"queue-operation","operation":"remove","content":"1","reason":"absorbed_mid_turn"}`,
+		`{"type":"attachment","attachment":{"type":"queued_command","prompt":"111","commandMode":"prompt"}}`,
+		`{"type":"attachment","attachment":{"type":"queued_command","prompt":"1","commandMode":"prompt"}}`,
+	}
+	tr, err := transcript.Parse(strings.NewReader(strings.Join(lines, "\n") + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, it := range tr.Items() {
+		if it.Kind == protocol.ItemTool {
+			continue
+		}
+		s := fmt.Sprintf("%d %s %s", it.Seq, it.Kind, it.Text)
+		if it.Queued {
+			s += " queued"
+		}
+		got = append(got, s)
+	}
+	want := []string{"1 user 1", "2 user 111", "3 user 1"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("items\n%q\nwant\n%q", got, want)
+	}
+}
+
 // A skill run as a slash command is written with <command-message> first
 // and its body as an isMeta record; a local command with <command-name>
 // first and its output, colored with terminal escapes, in a later record.
