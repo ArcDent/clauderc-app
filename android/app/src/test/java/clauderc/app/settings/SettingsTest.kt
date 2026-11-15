@@ -110,7 +110,8 @@ class SettingsTest {
         assertEquals("card light background", CardLightColors.bg.toArgb(), backgroundPixel())
 
         pick("深色")
-        assertEquals("card dark background", CardDarkColors.bg.toArgb(), backgroundPixel())
+        // The pick is written to DataStore on a background thread, which waitForIdle does not wait for.
+        compose.waitUntil("card dark background", 5_000) { backgroundPixel() == CardDarkColors.bg.toArgb() }
     }
 
     @Config(sdk = [30])
