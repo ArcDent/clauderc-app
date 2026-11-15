@@ -771,6 +771,14 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 }
 /* ---------- 待选方案（这一轮挑完就收敛成一种） ---------- */
 .knob h3 { margin: 6px 0 0; font-size: 13px; font-weight: 500; color: var(--desk-fg); }
+/* 新动效：会话状态图标交叉淡入淡出，旧的 durS 淡出，新的 durM 淡入 */
+.glyph-x { flex: none; width: 10px; height: 10px; display: inline-block; position: relative; }
+.glyph-x > .glyph { position: absolute; inset: 0; }
+.row > .glyph-x { margin-top: 6px; }
+.glyph-x > .out { animation: glyph-out var(--dur-s) var(--ease-emph-in) forwards; }
+.glyph-x > .in { animation: glyph-in var(--dur-m) var(--ease-emph) both; }
+@keyframes glyph-out { to { opacity: 0; } }
+@keyframes glyph-in { from { opacity: 0; } }
 /* 扫码：光带从上往下扫，到底淡出再从头来 */
 .vf .band { position: absolute; left: 12px; right: 12px; top: 6px; height: 72px; border-radius: 10px 10px 2px 2px; opacity: 0; pointer-events: none;
   background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--c-on-camera) 16%, transparent));
@@ -873,6 +881,30 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       <label class="check"><input type="checkbox" id="pickExpired">看登录凭证过期时的样子</label>
       <button type="button" class="desk-btn" id="openSessions">打开会话页</button>
       <p class="desk-note" style="margin:0">上下文占用在会话行末尾和会话页顶栏，几种分组都一样。</p>
+      <h3>工具跑完</h3>
+      <div class="seg" data-pick="tooldone" role="group" aria-label="工具跑完">
+        <button type="button" data-v="now">现状 直接换掉</button>
+        <button type="button" data-v="fade">转圈淡出收起</button>
+      </div>
+      <h3>新回复出现</h3>
+      <div class="seg" data-pick="grow" role="group" aria-label="新回复出现">
+        <button type="button" data-v="now">现状 上浮淡入</button>
+        <button type="button" data-v="grow">从零长高</button>
+      </div>
+      <h3>会话状态图标</h3>
+      <div class="seg" data-pick="glyph" role="group" aria-label="会话状态图标">
+        <button type="button" data-v="now">现状 直接换</button>
+        <button type="button" data-v="fade">交叉淡入淡出</button>
+      </div>
+      <h3>轻震</h3>
+      <div class="seg" data-pick="haptic" role="group" aria-label="轻震">
+        <button type="button" data-v="off">现状 不震</button>
+        <button type="button" data-v="on">发送、允许、拒绝时轻震</button>
+      </div>
+      <p class="desk-note" style="margin:0">电脑上感觉不到震动，触发时下面记一行；手机浏览器里会真的震。</p>
+      <p class="desk-note" id="buzzOut" style="margin:0" hidden></p>
+      <button type="button" class="desk-btn" id="playTurn">跑一轮假回复</button>
+      <p class="desk-note" style="margin:0">在打开的会话里跑；停在首页时跑「修复重连」，看会话行的图标怎么换。</p>
       <pre id="pickOut"></pre>
     </section>
 
@@ -1026,8 +1058,9 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   // ---------- 待选方案 ----------
   // 2026-11-14 用户选定：扩散「两头更缓 650ms」、扫码页维持现状（扫描线放慢到 3.6s）、分组「目录行可折叠」、用量「细进度条」，APP 照这些做；
   // 其余方案留着方便以后对比。选择存在这个浏览器里，键名换过一次，之前点过的旧选择不再沿用。
+  // 2026-11-15 加入四项新动效，用户选定：转圈淡出收起、从零长高、交叉淡入淡出、发送允许拒绝时轻震，APP 已照做。
   var PICK_STORE = "clauderc-demo-pick-2";
-  var PICK_BASE = { reveal: "soft", scan: "now", groups: "tree", usage: "bars", expired: false };
+  var PICK_BASE = { reveal: "soft", scan: "now", groups: "tree", usage: "bars", expired: false, tooldone: "fade", grow: "grow", glyph: "fade", haptic: "on" };
   var pick = (function () {
     var p = Object.assign({}, PICK_BASE);
     try {
@@ -1048,7 +1081,11 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     reveal: { now: "现状 350ms", mid: "适中 500ms", slow: "舒展 700ms", soft: "两头更缓 650ms" },
     scan: { now: "现状", band: "光带扫描", breath: "四角呼吸" },
     groups: { now: "现状一级", label: "目录小标题", tree: "目录行可折叠" },
-    usage: { line: "两行文字", bars: "细进度条" }
+    usage: { line: "两行文字", bars: "细进度条" },
+    tooldone: { now: "现状 直接换掉", fade: "转圈淡出收起" },
+    grow: { now: "现状 上浮淡入", grow: "从零长高" },
+    glyph: { now: "现状 直接换", fade: "交叉淡入淡出" },
+    haptic: { off: "现状 不震", on: "发送、允许、拒绝时轻震" }
   };
 
   // ---------- 假数据 ----------
@@ -1742,10 +1779,16 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   }
   function ctxText(s) { return s.ctx == null ? "" : "上下文 " + s.ctx + "%"; }
   // noDir：两级分组时目录已经写在上一层，行里不再重复
+  // 待选「交叉淡入淡出」：状态刚换过时，旧图标淡出、新图标淡入，叠在同一个位置
+  function glyphHtml(s) {
+    var now = '<span class="glyph ' + GLYPH[s.state] + '"></span>';
+    if (pick.glyph !== "fade" || !s.glyphFrom || Date.now() - s.glyphAt > dur("durM")) return now;
+    return '<span class="glyph-x"><span class="glyph out ' + GLYPH[s.glyphFrom] + '"></span><span class="glyph in ' + GLYPH[s.state] + '"></span></span>';
+  }
   function sessionRow(s, noDir) {
     var st = (noDir ? "" : '<span class="mono">' + esc(s.dir) + "</span> · ") + (s.state === "need" ? '<span class="need">' + stateText(s) + "</span>" : stateText(s)) + (s.ctx != null ? " · " + ctxText(s) : "");
     var l3 = s.state === "need" && s.l3 ? '<span class="row-l3 need"' + (s.pending === "question" ? ' style="font-family:var(--font-ui);font-size:13px"' : "") + ">" + esc(s.l3) + "</span>" : "";
-    return '<div class="srow' + (s.state === "stop" ? " dim" : "") + '"><button type="button" class="row" data-act="open-chat" data-id="' + s.id + '"><span class="glyph ' + GLYPH[s.state] + '"></span><span class="row-body"><span class="row-l1"><span class="row-title">' + esc(s.title) + "</span><time>" + esc(s.time) + '</time></span><span class="row-l2">' + st + "</span>" + l3 + "</span></button>" +
+    return '<div class="srow' + (s.state === "stop" ? " dim" : "") + '"><button type="button" class="row" data-act="open-chat" data-id="' + s.id + '">' + glyphHtml(s) + '<span class="row-body"><span class="row-l1"><span class="row-title">' + esc(s.title) + "</span><time>" + esc(s.time) + '</time></span><span class="row-l2">' + st + "</span>" + l3 + "</span></button>" +
       '<button type="button" class="icon-btn sm" data-act="session-menu" data-id="' + s.id + '" aria-label="会话操作"><span class="ms">more_vert</span></button></div>';
   }
   function renderSessions() {
@@ -1996,7 +2039,9 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 
   // ---------- 会话页 ----------
   function toolHtml(it) {
-    var tail = it.spin ? '<span class="spin" style="width:12px;height:12px;color:var(--c-fg-3)"></span>' : it.flag ? '<span class="t-flag">' + esc(it.flag) + "</span>" : it.detail ? '<span class="ms">chevron_right</span>' : "";
+    // 和 APP 一样：跑着的工具行转圈排在箭头前面
+    var tail = (it.spin ? '<span class="spin" style="width:12px;height:12px;color:var(--c-fg-3)"></span>' : "") +
+      (it.flag ? '<span class="t-flag">' + esc(it.flag) + "</span>" : it.detail || it.spin ? '<span class="ms">chevron_right</span>' : "");
     var detail = it.detail ? '<div class="tool-detail">' + it.detail.map(function (d) { return '<span class="k">' + esc(d[0]) + '</span><span class="v">' + esc(d[1]) + "</span>"; }).join("") + "</div>" : "";
     return '<div class="tool"><button type="button" class="tool-row"' + (it.detail ? ' data-act="tool"' : "") + ">" + (it.verb ? '<span class="t-verb">' + esc(it.verb) + "</span>" : "") + '<span class="t-arg">' + esc(it.arg) + "</span>" + tail + "</button>" + detail + "</div>";
   }
@@ -2012,6 +2057,37 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     return n;
   }
   function updateItem(it) { var old = it.el; if (old && old.parentNode) old.replaceWith(itemEl(it)); }
+  // 工具跑完：现状直接换掉；待选「转圈淡出收起」让转圈 durS 淡出并收起它占的宽度，再换成结果
+  function finishTool(tool, detail) {
+    tool.spin = false;
+    tool.detail = detail;
+    var spin = pick.tooldone === "fade" && tool.el && tool.el.querySelector(".spin");
+    if (!spin) { updateItem(tool); return; }
+    spin.animate([
+      { opacity: 1, width: spin.offsetWidth + "px", marginLeft: "0px" },
+      { opacity: 0, width: "0px", marginLeft: "calc(var(--sp-2) * -1)" }
+    ], { duration: dur("durS"), easing: ez("emphIn"), fill: "forwards" }).finished.then(function () { updateItem(tool); }, noop);
+  }
+  // 待选「从零长高」：新回复的气泡从零高度长到原高并淡入，列表跟着贴住底部
+  function grow(n, page) {
+    var cs = getComputedStyle(n), d = dur("durM"), end = performance.now() + d;
+    n.style.overflow = "hidden";
+    n.animate([
+      { height: "0px", paddingTop: "0px", paddingBottom: "0px", opacity: 0 },
+      { height: n.offsetHeight + "px", paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom, opacity: 1 }
+    ], { duration: d, easing: ez("emph") }).finished.then(function () { n.style.overflow = ""; }, noop);
+    (function follow() { page.scroll.scrollTop = page.scroll.scrollHeight; if (performance.now() < end) requestAnimationFrame(follow); })();
+  }
+  // 待选「轻震」：发送、允许、拒绝时震一下；电脑上感觉不到，在侧栏记一行
+  function buzz(what) {
+    if (pick.haptic !== "on") return;
+    try { if (navigator.vibrate) navigator.vibrate(12); } catch (err) { /* 不支持就算了 */ }
+    var out = $("#buzzOut");
+    out.textContent = "轻震 · " + what;
+    out.hidden = false;
+    clearTimeout(buzz.timer);
+    buzz.timer = setTimeout(function () { out.hidden = true; }, 1500);
+  }
   function chatPageOf(s) { for (var i = stack.length - 1; i >= 0; i--) if (stack[i].s === s) return stack[i]; return null; }
   function addMsg(s, it) { ensureMsgs(s).push(it); var p = chatPageOf(s); if (p) p.append(it); }
   function removeMsg(s, it) {
@@ -2020,6 +2096,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     if (it.el && it.el.parentNode) it.el.remove();
   }
   function setState(s, st) {
+    if (st !== s.state) { s.glyphFrom = s.state; s.glyphAt = Date.now(); }
     s.state = st;
     if (st !== "need") s.time = "刚刚";
     var p = chatPageOf(s);
@@ -2033,8 +2110,10 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     clearTurn(s);
     s.turnAt = Date.now();
     setState(s, "work");
+    var tool = { k: "tool", verb: "运行", arg: cmd || "go vet ./...", spin: true };
     s.timers = [
-      setTimeout(function () { addMsg(s, { k: "tool", verb: "运行", arg: cmd || "go vet ./...", detail: [["输出", "没有输出"]] }); }, 1200),
+      setTimeout(function () { addMsg(s, tool); }, 1200),
+      setTimeout(function () { finishTool(tool, [["输出", "没有输出"]]); }, 2000),
       setTimeout(function () { s.timers = null; addMsg(s, { k: "ai", text: text }); setState(s, "idle"); flushQueue(s); }, 2600)
     ];
   }
@@ -2047,6 +2126,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   function send(page) {
     var s = page.s, text = page.ta.value.trim(), imgs = page.att.length;
     if (!text && !imgs) return;
+    buzz("发送");
     page.ta.value = "";
     autosize(page.ta);
     renderSlash(page);
@@ -2151,7 +2231,13 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     page.slash = $(".slash", page.el);
     page.sendBtn = $(".send", page.el);
     s.msgs.forEach(function (it) { page.msgs.appendChild(itemEl(it)); });
-    page.append = function (it) { var n = itemEl(it); page.msgs.appendChild(n); rise(n); page.scroll.scrollTop = page.scroll.scrollHeight; };
+    page.append = function (it) {
+      var n = itemEl(it);
+      page.msgs.appendChild(n);
+      if (it.k === "ai" && pick.grow === "grow") { grow(n, page); return; }
+      rise(n);
+      page.scroll.scrollTop = page.scroll.scrollHeight;
+    };
     page.sync = function (animate) {
       lift(page.working, s.state === "work", 8, false, animate);
       page.ta.placeholder = s.state === "stop" ? "发消息会先唤醒会话" : "发消息";
@@ -2346,17 +2432,19 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       s.turnAt = Date.now();
       setState(s, "work");
       addMsg(s, tool);
-      s.timers = [setTimeout(function () {
-        s.timers = null;
-        tool.spin = false;
-        tool.detail = [["输出", "ok  \tclauderc/internal/protocol\t0.398s"]];
-        updateItem(tool);
-        addMsg(s, { k: "ai", text: "vet 没有报告问题，测试全部通过。" });
-        setState(s, "idle");
-      }, 1400)];
+      buzz("允许");
+      s.timers = [
+        setTimeout(function () { finishTool(tool, [["输出", "ok  \tclauderc/internal/protocol\t0.398s"]]); }, 1400),
+        setTimeout(function () {
+          s.timers = null;
+          addMsg(s, { k: "ai", text: "vet 没有报告问题，测试全部通过。" });
+          setState(s, "idle");
+        }, 1400 + dur("durS"))
+      ];
     },
     deny: function (t) {
       var s = pageOf(t).s;
+      buzz("拒绝");
       addMsg(s, { k: "tool", verb: "运行", arg: s.l3, flag: "已拒绝" });
       addMsg(s, { k: "cap", text: "会话回到空闲" });
       s.pending = null;
@@ -2510,7 +2598,9 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     var rv = REVEAL[pick.reveal];
     $("#pickOut").textContent =
       "扩散：" + PICK_NAME.reveal[pick.reveal] + "，" + (rv ? "cubic-bezier(" + rv.e + ")" : "cubic-bezier(" + cfg.emph + ")") + "\n" +
-      "扫码页：" + PICK_NAME.scan[pick.scan] + "\n会话分组：" + PICK_NAME.groups[pick.groups] + "\n用量：" + PICK_NAME.usage[pick.usage];
+      "扫码页：" + PICK_NAME.scan[pick.scan] + "\n会话分组：" + PICK_NAME.groups[pick.groups] + "\n用量：" + PICK_NAME.usage[pick.usage] + "\n" +
+      "工具跑完：" + PICK_NAME.tooldone[pick.tooldone] + "\n新回复出现：" + PICK_NAME.grow[pick.grow] + "\n" +
+      "会话状态图标：" + PICK_NAME.glyph[pick.glyph] + "\n轻震：" + PICK_NAME.haptic[pick.haptic];
   }
   // 回到首页，不播动画
   function goHome() {
@@ -2533,6 +2623,11 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     });
     $("#openPair").addEventListener("click", function () { goHome(); push({ name: "pair" }); });
     $("#openSessions").addEventListener("click", function () { goHome(); if (S.machineId == null) S.machineId = "m1"; renderSessions(); switchTab("sessions", true); });
+    // 在打开的会话里跑一轮；停在首页时跑「修复重连」，看会话行的图标怎么换
+    $("#playTurn").addEventListener("click", function () {
+      var p = top(), s = p.route.name === "chat" ? p.s : findSession("s2");
+      if (s) turn(s, "改好了，这是 demo 的假回复。", "go test ./...");
+    });
   }
 
   // ---------- 主题 ----------

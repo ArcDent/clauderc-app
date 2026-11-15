@@ -2,10 +2,12 @@ package clauderc.app.chat
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -54,7 +58,10 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -124,12 +131,16 @@ class ChatActions(
 
 private enum class ChatSheet { Attach, Model, Mode }
 
+/** The light tick when a message goes out or a permission is answered. */
+private fun HapticFeedback.tap() = performHapticFeedback(HapticFeedbackType.VirtualKey)
+
 @Composable
 fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = remember { SnackState() }) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     var sheet by remember { mutableStateOf<ChatSheet?>(null) }
     val openModels = { actions.onLoadModels(); sheet = ChatSheet.Model }
+    val haptic = LocalHapticFeedback.current
     val title = state.session?.let(::display) ?: "会话"
 
     Box(Modifier.fillMaxSize().background(c.bg)) {
@@ -172,7 +183,13 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
             ) { pending ->
                 if (pending != null) {
                     Box(Modifier.navigationBarsPadding().testTag("pendingPanel")) {
-                        PendingPanel(pending, enabled = state.online, onAllow = actions.onAllow, onDeny = actions.onDeny, onAnswer = actions.onAnswer)
+                        PendingPanel(
+                            pending,
+                            enabled = state.online,
+                            onAllow = { haptic.tap(); actions.onAllow() },
+                            onDeny = { haptic.tap(); actions.onDeny() },
+                            onAnswer = actions.onAnswer,
+                        )
                     }
                 } else {
                     Composer(state, actions, onAttach = { sheet = ChatSheet.Attach }, onModels = openModels)
@@ -239,6 +256,11 @@ private fun MessageList(state: ChatUiState, onLoadOlder: () -> Unit, modifier: M
     LaunchedEffect(state.items.lastOrNull()?.seq, state.outgoing.lastOrNull()?.id) {
         if (list.firstVisibleItemIndex <= 2) list.animateScrollToItem(0)
     }
+    // Replies that arrive while the page is open grow in; what was already there, older pages and
+    // items scrolling back into view just show. Null until the first items have been drawn.
+    val newest = remember { Newest() }
+    val growAfter = newest.seq
+    SideEffect { state.items.lastOrNull()?.seq?.let { if (it > (newest.seq ?: Long.MIN_VALUE)) newest.seq = it } }
     LazyColumn(
         modifier.fillMaxWidth().testTag("chatList"),
         state = list,
@@ -258,8 +280,9 @@ private fun MessageList(state: ChatUiState, onLoadOlder: () -> Unit, modifier: M
             Box(Modifier.animateItem(fadeInSpec = Motion.enter(), placementSpec = Motion.enter(), fadeOutSpec = Motion.exit())) { OutgoingBubble(out) }
         }
         items(reversed, key = { it.seq }, contentType = { if (it.tool?.let(::isCommand) == true) "command" else it.kind }) { item ->
-            Box(Modifier.animateItem(fadeInSpec = Motion.enter(), placementSpec = Motion.enter(), fadeOutSpec = Motion.exit())) {
-                ChatItemView(item, working = state.state == SessionState.Working)
+            val grow = remember { item.kind == ItemKind.ASSISTANT && growAfter != null && item.seq > growAfter }
+            Box(Modifier.animateItem(fadeInSpec = if (grow) null else Motion.enter(), placementSpec = Motion.enter(), fadeOutSpec = Motion.exit())) {
+                if (grow) GrowIn { ChatItemView(item, working = state.state == SessionState.Working) } else ChatItemView(item, working = state.state == SessionState.Working)
             }
         }
         if (state.hasMore || state.loadingOlder) {
@@ -275,6 +298,16 @@ private fun MessageList(state: ChatUiState, onLoadOlder: () -> Unit, modifier: M
             }
         }
     }
+}
+
+/** The newest seq a chat page has drawn; a plain holder, so updating it redraws nothing. */
+private class Newest { var seq: Long? = null }
+
+/** A new reply grows from nothing to its height and fades in, on the enter rule (durM, emphasized). */
+@Composable
+private fun GrowIn(content: @Composable () -> Unit) {
+    val shown = remember { MutableTransitionState(false).apply { targetState = true } }
+    AnimatedVisibility(shown, enter = expandVertically(Motion.enter(), expandFrom = Alignment.Top) + fadeIn(Motion.enter())) { content() }
 }
 
 @Composable
@@ -388,10 +421,18 @@ private fun ToolRow(tool: ToolCall, working: Boolean) {
     FoldRow(
         tool.toolUseId, verb, arg,
         status = {
+            // When the result comes in, the spinner fades out and gives its room back (durS, leaving curve).
+            AnimatedVisibility(
+                tool.result == null && working,
+                Modifier.testTag("toolSpinner"),
+                enter = fadeIn(Motion.enter()),
+                exit = fadeOut(Motion.exit()) + shrinkHorizontally(Motion.exit()),
+            ) {
+                Spinner(Modifier.padding(start = Clauderc.spacing.sp2), size = 12.dp, color = c.fg3)
+            }
             when {
-                tool.result == null && working -> Spinner(size = 12.dp, color = c.fg3)
-                isRefusal(tool) -> Text("已拒绝", fontSize = Clauderc.fontSizes.caption, color = c.danger)
-                tool.result?.isError == true -> Text("出错", fontSize = Clauderc.fontSizes.caption, color = c.danger)
+                isRefusal(tool) -> Text("已拒绝", Modifier.padding(start = Clauderc.spacing.sp2), fontSize = Clauderc.fontSizes.caption, color = c.danger)
+                tool.result?.isError == true -> Text("出错", Modifier.padding(start = Clauderc.spacing.sp2), fontSize = Clauderc.fontSizes.caption, color = c.danger)
             }
         },
     ) {
@@ -406,9 +447,12 @@ private fun ToolRow(tool: ToolCall, working: Boolean) {
     }
 }
 
-/** A one-line row, a grey [verb] and a mono [arg], that unfolds [detail] under it; [detail] is built only when open. */
+/**
+ * A one-line row, a grey [verb] and a mono [arg], that unfolds [detail] under it; [detail] is built only when open.
+ * [status] sits right after [arg] and brings its own gap, so a part of it that shrinks away leaves none behind.
+ */
 @Composable
-private fun FoldRow(key: String, verb: String?, arg: String, status: @Composable () -> Unit = {}, detail: @Composable () -> AnnotatedString) {
+private fun FoldRow(key: String, verb: String?, arg: String, status: @Composable RowScope.() -> Unit = {}, detail: @Composable () -> AnnotatedString) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     var open by rememberSaveable(key) { mutableStateOf(false) }
@@ -424,8 +468,10 @@ private fun FoldRow(key: String, verb: String?, arg: String, status: @Composable
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (verb != null) Text(verb, fontSize = 13.sp, color = c.fg3)
-            Text(arg, Modifier.weight(1f), fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm, color = c.fg2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            status()
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                Text(arg, Modifier.weight(1f), fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm, color = c.fg2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                status()
+            }
             Icon(Symbols.ChevronRight, contentDescription = null, tint = c.fg3, modifier = Modifier.size(18.dp).rotate(turn))
         }
         AnimatedVisibility(
@@ -456,6 +502,7 @@ private fun FoldRow(key: String, verb: String?, arg: String, status: @Composable
 private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> Unit, onModels: () -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
+    val haptic = LocalHapticFeedback.current
     // The card style floats a card on its grey page and sends with the accent.
     val card = isCardStyle
     // The cursor is kept with the text, so a picked command can put it after itself.
@@ -601,7 +648,10 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                                 field = TextFieldValue()
                                 onModels()
                             }
-                            actions.onSend(text) -> field = TextFieldValue()
+                            actions.onSend(text) -> {
+                                haptic.tap()
+                                field = TextFieldValue()
+                            }
                         }
                     }
                     .semantics { contentDescription = "发送" },

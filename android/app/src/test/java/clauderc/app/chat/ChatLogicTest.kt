@@ -193,6 +193,23 @@ class ChatLogicTest {
         assertFalse(again.state.value.loading)
     }
 
+    @Test fun theWorkingCountGoesOnWhenTheChatIsOpenedAgain() = runTest(dispatcher) {
+        val cache = ChatCache()
+        val store = androidx.lifecycle.ViewModelStore()
+        fun at(millis: Long) = ChatViewModel("m-1", "s-need", relay, Fleet(relay, scope), scope, now = { millis }, compress = { it }, cache = cache, background = dispatcher)
+        val first = androidx.lifecycle.ViewModelProvider(store, object : androidx.lifecycle.ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = at(1_000) as T
+        })[ChatViewModel::class.java]
+        relay.event(Method.CHAT_STATE, "m-1", ChatStateEvent.serializer(), ChatStateEvent("s-need", SessionState.Working, "claude-opus-5-5", "default"))
+        assertEquals(1_000L, first.state.value.workingSinceMillis)
+        store.clear()
+
+        relay.respond(Method.CHAT_OPEN, ChatOpenResponse.serializer(), ChatOpenResponse(items = listOf(text(51)), state = SessionState.Working))
+        val again = at(9_000)
+        assertEquals(1_000L, again.state.value.workingSinceMillis)
+    }
+
     @Test fun opensWithTheLatestPageAndDropsThinking() = runTest(dispatcher) {
         val vm = viewModel()
         val open = relay.sent(Method.CHAT_OPEN).single()
@@ -224,6 +241,20 @@ class ChatLogicTest {
         // Events for another session are ignored.
         relay.event(Method.CHAT_ITEMS, "m-1", ChatItemsEvent.serializer(), ChatItemsEvent("other", listOf(text(500))))
         assertEquals(102L, vm.state.value.items.last().seq)
+    }
+
+    @Test fun newerItemsAreAppendedAndReplacementsStillMerge() {
+        val old = mergeItems(emptyList(), listOf(ChatItem(1, ItemKind.USER, text = "写测试"), ChatItem(2, ItemKind.ASSISTANT, text = "好")))
+        // All newer: appended in order, the shown items kept as the same objects, unknown kinds dropped.
+        val appended = mergeNewer(old, listOf(ChatItem(3, "thinking", text = "想"), ChatItem(4, ItemKind.ASSISTANT, text = "写完了")))
+        assertEquals(listOf(1L, 2L, 4L), appended.map { it.seq })
+        assertTrue(appended[0] === old[0] && appended[1] === old[1])
+        // A later item with a shown seq replaces it in place, and a removal deletes it.
+        val replaced = mergeNewer(appended, listOf(ChatItem(2, ItemKind.ASSISTANT, text = "好的"), ChatItem(5, ItemKind.ASSISTANT, text = "还有")))
+        assertEquals(listOf("写测试", "好的", "写完了", "还有"), replaced.map { it.text })
+        assertEquals(listOf(1L, 2L, 5L), mergeNewer(replaced, listOf(ChatItem(4, ItemKind.REMOVED))).map { it.seq })
+        // The same seq twice in one batch: the later one wins.
+        assertEquals(listOf("二稿"), mergeNewer(old, listOf(ChatItem(7, ItemKind.ASSISTANT, text = "初稿"), ChatItem(7, ItemKind.ASSISTANT, text = "二稿"))).map { it.text }.drop(2))
     }
 
     @Test fun removedItemsDisappearAndInterruptsStay() = runTest(dispatcher) {

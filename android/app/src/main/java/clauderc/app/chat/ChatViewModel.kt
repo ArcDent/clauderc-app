@@ -88,7 +88,15 @@ fun settleOutgoing(outgoing: List<Outgoing>, delivered: List<ChatItem>): List<Ou
 
 /** What a chat page showed last time, so reopening it draws at once while chat.open catches up. Memory only. */
 class ChatCache(private val capacity: Int = 8) {
-    data class Entry(val items: List<ChatItem>, val hasMore: Boolean, val state: SessionState, val model: String, val permissionMode: String)
+    /** [workingSinceMillis] keeps the 「工作中」 count going when the page is opened again. */
+    data class Entry(
+        val items: List<ChatItem>,
+        val hasMore: Boolean,
+        val state: SessionState,
+        val model: String,
+        val permissionMode: String,
+        val workingSinceMillis: Long? = null,
+    )
 
     private val entries = object : LinkedHashMap<String, Entry>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Entry>?) = size > capacity
@@ -150,6 +158,16 @@ fun mergeItems(old: List<ChatItem>, new: List<ChatItem>): List<ChatItem> {
     return bySeq.values.sortedBy { it.seq }
 }
 
+/**
+ * [mergeItems] for an event on top of what the page shows. While a reply streams in, everything new
+ * comes after [shown], which is already merged, so it is appended without re-sorting the transcript.
+ */
+fun mergeNewer(shown: List<ChatItem>, new: List<ChatItem>): List<ChatItem> {
+    val last = shown.lastOrNull()?.seq ?: Long.MIN_VALUE
+    val newer = new.firstOrNull()?.let { it.seq > last } != false && new.zipWithNext().all { (a, b) -> a.seq < b.seq }
+    return if (newer) shown + new.filter { it.kind in shownKinds } else mergeItems(shown, new)
+}
+
 class ChatViewModel(
     private val machineId: String,
     private val sessionId: String,
@@ -167,7 +185,10 @@ class ChatViewModel(
 
     private val _state = MutableStateFlow(
         cache.get(cacheKey)?.let { c ->
-            ChatUiState(loading = false, items = c.items, hasMore = c.hasMore, state = c.state, model = c.model, permissionMode = c.permissionMode)
+            ChatUiState(
+                loading = false, items = c.items, hasMore = c.hasMore, state = c.state, model = c.model, permissionMode = c.permissionMode,
+                workingSinceMillis = c.workingSinceMillis,
+            )
         } ?: ChatUiState(),
     )
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
@@ -211,7 +232,7 @@ class ChatViewModel(
                 .collect { e ->
                     when (e) {
                         is ChatItemsEvent -> _state.update {
-                            it.copy(items = mergeItems(it.items, e.items), notice = null, outgoing = settleOutgoing(it.outgoing, e.items))
+                            it.copy(items = mergeNewer(it.items, e.items), notice = null, outgoing = settleOutgoing(it.outgoing, e.items))
                         }
                         is ChatPendingEvent -> onPending(e.pending)
                         is ChatStateEvent -> _state.update { applyStatus(it, e.state, e.model, e.permissionMode) }
@@ -459,7 +480,7 @@ class ChatViewModel(
         val s = _state.value
         if (s.items.isNotEmpty()) {
             val kept = s.items.takeLast(ChatCache.KEEP)
-            cache.put(cacheKey, ChatCache.Entry(kept, s.hasMore || kept.size < s.items.size, s.state, s.model, s.permissionMode))
+            cache.put(cacheKey, ChatCache.Entry(kept, s.hasMore || kept.size < s.items.size, s.state, s.model, s.permissionMode, s.workingSinceMillis))
         }
         appScope.launch {
             runCatching { relay.call(Method.CHAT_CLOSE, machineId, SessionIdRequest(sessionId), SessionIdRequest.serializer(), Empty.serializer()) }

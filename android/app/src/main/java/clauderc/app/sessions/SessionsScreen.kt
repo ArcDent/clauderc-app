@@ -1,11 +1,13 @@
 package clauderc.app.sessions
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -452,7 +454,13 @@ private fun SessionRow(s: Session, enabled: Boolean, onOpen: () -> Unit, onMenu:
                 .padding(start = rowStart + DirIndent, top = 14.dp, bottom = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(sp.sp4),
         ) {
-            StatusGlyph(glyphOf(s.state), Modifier.padding(top = 6.dp))
+            // A change of state crossfades: the old symbol leaves in durS while the new one comes in over durM.
+            AnimatedContent(
+                glyphOf(s.state),
+                Modifier.padding(top = 6.dp),
+                transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit()) using null },
+                label = "glyph",
+            ) { StatusGlyph(it) }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(sp.sp3), verticalAlignment = Alignment.Bottom) {
                     Text(
