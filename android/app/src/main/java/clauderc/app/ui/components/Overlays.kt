@@ -236,7 +236,7 @@ fun SnackHost(state: SnackState, modifier: Modifier = Modifier, bottom: Dp = Cla
                 .padding(start = sp.sp3, end = sp.sp3, bottom = bottom)
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
-                .clip(RoundedCornerShape(4.dp))
+                .clip(RoundedCornerShape(if (isCardStyle) 14.dp else 4.dp))
                 .background(c.inverse)
                 .padding(horizontal = sp.sp4, vertical = sp.sp3),
             contentAlignment = Alignment.CenterStart,

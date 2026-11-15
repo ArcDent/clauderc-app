@@ -11,12 +11,14 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
@@ -34,6 +36,7 @@ import clauderc.app.ui.components.FieldLabel
 import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.UnderlineField
+import clauderc.app.ui.components.isCardStyle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Lift
 import clauderc.app.ui.theme.MonoFamily
@@ -61,9 +64,16 @@ fun CreateSessionScreen(
             title = { BarTitle("新建会话") },
             actions = { TextAction(if (state.submitting) "正在启动" else "启动", onClick = onSubmit, enabled = state.canSubmit) },
         )
+        val card = isCardStyle
+        // The card style puts each field on its own card, closer together.
+        val field = if (card) {
+            Modifier.clip(RoundedCornerShape(Clauderc.radii.card)).background(c.card).padding(start = sp.sp4, end = sp.sp4, top = sp.sp3, bottom = sp.sp2)
+        } else {
+            Modifier
+        }
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = sp.page, end = sp.page, bottom = sp.sp8),
-            verticalArrangement = Arrangement.spacedBy(sp.sp6),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = if (card) sp.sp4 else sp.page, end = if (card) sp.sp4 else sp.page, bottom = sp.sp8),
+            verticalArrangement = Arrangement.spacedBy(if (card) sp.sp3 else sp.sp6),
         ) {
             Text(
                 buildAnnotatedString {
@@ -75,6 +85,7 @@ fun CreateSessionScreen(
                     append("\n")
                     append(state.templateName?.let { "沿用「$it」的启动参数" } ?: "沿用这个档位最近一次的启动参数")
                 },
+                modifier = if (card) Modifier.padding(start = sp.sp2, end = sp.sp2, top = sp.sp1, bottom = sp.sp2) else Modifier,
                 fontSize = Clauderc.fontSizes.label,
                 color = c.fg2,
                 lineHeight = 1.6.em,
@@ -82,7 +93,7 @@ fun CreateSessionScreen(
             if (!state.canCreate) {
                 FieldError("「其他」档位读不到启动参数，不能新建会话")
             }
-            Column(verticalArrangement = Arrangement.spacedBy(sp.sp2)) {
+            Column(field.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(sp.sp2)) {
                 FieldLabel("工作目录")
                 UnderlineField(state.dir, onDir, mono = true, error = state.dirError != null, placeholder = "/path/to/project")
                 state.dirError?.let { FieldError(it) }
@@ -105,11 +116,11 @@ fun CreateSessionScreen(
                     }
                 }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(sp.sp2)) {
+            Column(field.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(sp.sp2)) {
                 FieldLabel("会话名，可不填")
                 UnderlineField(state.name, onName)
             }
-            Column(verticalArrangement = Arrangement.spacedBy(sp.sp2)) {
+            Column(field.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(sp.sp2)) {
                 FieldLabel("第一句话，可不填")
                 UnderlineField(state.prompt, onPrompt, singleLine = false, minLines = 2, placeholder = "不填就只启动会话")
             }

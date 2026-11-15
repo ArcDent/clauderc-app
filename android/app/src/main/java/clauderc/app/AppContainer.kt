@@ -8,6 +8,7 @@ import clauderc.app.data.CredentialStore
 import clauderc.app.data.Fleet
 import clauderc.app.data.KeystoreCipher
 import clauderc.app.data.ProfileNameStore
+import clauderc.app.data.ThemeStore
 import clauderc.app.net.RelayAddress
 import clauderc.app.net.RelayConnection
 import clauderc.app.net.RelayHub
@@ -28,9 +29,9 @@ import okhttp3.OkHttpClient
 private val Context.credentialData by preferencesDataStore("credential")
 private val Context.settingsData by preferencesDataStore("settings")
 
-enum class MainTab { Machines, Sessions, Git }
+enum class MainTab { Machines, Sessions, Git, Settings }
 
-/** What the three top-level tabs share: the open tab, the chosen machine and each machine's git directory. */
+/** What the top-level tabs share: the open tab, the chosen machine and each machine's git directory. */
 class Selection {
     val tab = MutableStateFlow(MainTab.Machines)
     val machineId = MutableStateFlow<String?>(null)
@@ -66,6 +67,7 @@ class AppContainer(context: Context) {
         }
     }
     val profileNames = ProfileNameStore(context.settingsData)
+    val theme = ThemeStore(context.settingsData)
     val pairing: PairingApi = OkHttpPairingApi(http)
     val fleet = Fleet(connection, scope)
     val selection = Selection()

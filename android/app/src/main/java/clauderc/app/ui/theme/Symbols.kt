@@ -23,6 +23,7 @@ object Symbols {
     val CloudOff by lazy { symbol("cloud_off", SymbolPaths.cloudOff) }
     val Computer by lazy { symbol("computer", SymbolPaths.computer) }
     val ComputerFilled by lazy { symbol("computer_filled", SymbolPaths.computerFilled) }
+    val Contrast by lazy { symbol("contrast", SymbolPaths.contrast) }
     val Delete by lazy { symbol("delete", SymbolPaths.delete) }
     val Description by lazy { symbol("description", SymbolPaths.description) }
     val Dns by lazy { symbol("dns", SymbolPaths.dns) }
@@ -35,12 +36,17 @@ object Symbols {
     val ForumFilled by lazy { symbol("forum_filled", SymbolPaths.forumFilled) }
     val Image by lazy { symbol("image", SymbolPaths.image) }
     val MoreVert by lazy { symbol("more_vert", SymbolPaths.moreVert) }
+    val Palette by lazy { symbol("palette", SymbolPaths.palette) }
     val PhotoCamera by lazy { symbol("photo_camera", SymbolPaths.photoCamera) }
     val PowerSettingsNew by lazy { symbol("power_settings_new", SymbolPaths.powerSettingsNew) }
     val RadioChecked by lazy { symbol("radio_button_checked", SymbolPaths.radioButtonChecked) }
     val RadioUnchecked by lazy { symbol("radio_button_unchecked", SymbolPaths.radioButtonUnchecked) }
     val Refresh by lazy { symbol("refresh", SymbolPaths.refresh) }
+    val Settings by lazy { symbol("settings", SymbolPaths.settings) }
+    val SettingsFilled by lazy { symbol("settings_filled", SymbolPaths.settingsFilled) }
+    val Style by lazy { symbol("style", SymbolPaths.style) }
     val Upload by lazy { symbol("upload", SymbolPaths.upload) }
+    val Wallpaper by lazy { symbol("wallpaper", SymbolPaths.wallpaper) }
     val Warning by lazy { symbol("warning", SymbolPaths.warning) }
 }
 

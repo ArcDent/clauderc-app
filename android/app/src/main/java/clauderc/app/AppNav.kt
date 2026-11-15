@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color as AndroidColor
+import android.os.Build
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
@@ -28,6 +29,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -43,6 +45,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import androidx.navigationevent.NavigationEventTransitionState
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import clauderc.app.chat.ChatActions
 import clauderc.app.chat.ChatScreen
 import clauderc.app.chat.ChatViewModel
@@ -68,7 +72,11 @@ import clauderc.app.sessions.SessionsViewModel
 import clauderc.app.ui.components.GlassNavBar
 import clauderc.app.ui.components.NavTab
 import clauderc.app.ui.components.SnackState
+import clauderc.app.settings.SettingsScreen
 import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.LocalAppearance
+import clauderc.app.ui.theme.LocalThemeReveal
+import clauderc.app.ui.theme.accentColor
 import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.Symbols
 import dev.chrisbanes.haze.HazeState
@@ -164,11 +172,15 @@ private fun ClaudercPages(container: AppContainer, nav: NavHostController, haze:
 
 /**
  * The app's NavHost: a deeper page slides in from the right over the current one, and back
- * slides it off to the right again (Motion rule 2). The system back gesture scrubs a linear
- * copy of that slide, so the page follows the finger.
+ * slides it off to the right again (Motion rule 2). The system back gesture scrubs a copy of
+ * that slide that follows the finger and decelerates the rest of the way once it lets go.
  */
 @Composable
 fun ClaudercNavHost(nav: NavHostController, startDestination: Any, builder: NavGraphBuilder.() -> Unit) {
+    val events = LocalNavigationEventDispatcherOwner.current?.navigationEventDispatcher
+    val gesture = remember(events) {
+        Motion.gestureEasing { events?.transitionState?.value is NavigationEventTransitionState.InProgress }
+    }
     NavHost(
         navController = nav,
         startDestination = startDestination,
@@ -178,8 +190,8 @@ fun ClaudercNavHost(nav: NavHostController, startDestination: Any, builder: NavG
         popEnterTransition = { Motion.popIn },
         popExitTransition = { Motion.popOut },
         // Without these NavHost scales the leaving page down to 0.7 during the back gesture.
-        predictivePopEnterTransition = { Motion.gestureIn },
-        predictivePopExitTransition = { Motion.gestureOut },
+        predictivePopEnterTransition = { Motion.gestureIn(gesture) },
+        predictivePopExitTransition = { Motion.gestureOut(gesture) },
         builder = builder,
     )
 }
@@ -188,9 +200,10 @@ fun ClaudercNavHost(nav: NavHostController, startDestination: Any, builder: NavG
 @Composable
 private fun LightSystemBars() {
     val activity = LocalContext.current as? ComponentActivity ?: return
+    val dark = Clauderc.colors.isDark
     DisposableEffect(activity) {
         activity.enableEdgeToEdge(SystemBarStyle.dark(AndroidColor.TRANSPARENT), SystemBarStyle.dark(AndroidColor.TRANSPARENT))
-        onDispose { activity.enableEdgeToEdge() }
+        onDispose { activity.themedSystemBars(dark) }
     }
 }
 
@@ -232,6 +245,7 @@ private fun HomeScreen(container: AppContainer, nav: NavHostController, haze: Ha
                 } else {
                     GitTab(container, machineId, nav)
                 }
+                MainTab.Settings -> SettingsTab(container)
             }
         }
     }
@@ -256,12 +270,35 @@ private fun HomeNavBar(container: AppContainer, nav: NavHostController, haze: Ha
                 NavTab("目标机", Symbols.Computer, Symbols.ComputerFilled),
                 NavTab("会话", Symbols.Forum, Symbols.ForumFilled, dot = pendingSomewhere),
                 NavTab("git", Symbols.AccountTree, Symbols.AccountTreeFilled),
+                NavTab("设置", Symbols.Settings, Symbols.SettingsFilled),
             ),
             selected = tab.ordinal,
             onSelect = { container.selection.tab.value = MainTab.entries[it] },
             hazeState = haze,
         )
     }
+}
+
+/** 设置: the pick is saved on this phone and the whole app retints from it. */
+@Composable
+private fun SettingsTab(container: AppContainer) {
+    val look = LocalAppearance.current
+    val store = container.theme
+    val reveal = LocalThemeReveal.current
+    // The new look spreads out from the tapped option; picking what is already set does nothing.
+    fun pick(changed: Boolean, at: Offset, save: suspend () -> Unit) {
+        if (!changed) return
+        val change = { container.scope.launch { save() }; Unit }
+        if (reveal != null) reveal.start(at, change) else change()
+    }
+    SettingsScreen(
+        look = look,
+        cardAccent = accentColor(look.accent, Clauderc.colors.isDark),
+        wallpaperAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
+        onStyle = { style, at -> pick(style != look.style, at) { store.setStyle(style) } },
+        onMode = { mode, at -> pick(mode != look.mode, at) { store.setMode(mode) } },
+        onAccent = { accent, at -> pick(accent != look.accent, at) { store.setAccent(accent) } },
+    )
 }
 
 @Composable

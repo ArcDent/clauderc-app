@@ -3,13 +3,14 @@ package clauderc.app.chat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -89,10 +90,11 @@ import clauderc.app.ui.components.StatusGlyph
 import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.TextTone
+import clauderc.app.ui.components.isCardStyle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Lift
-import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.MonoFamily
+import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
@@ -141,7 +143,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
             )
             Lift(visible = !state.online, fromTop = true) {
                 Row(
-                    Modifier.fillMaxWidth().background(c.surface).padding(horizontal = sp.page, vertical = sp.sp3).testTag("offlineLine"),
+                    Modifier.fillMaxWidth().background(if (isCardStyle) c.card else c.surface).padding(horizontal = sp.page, vertical = sp.sp3).testTag("offlineLine"),
                     horizontalArrangement = Arrangement.spacedBy(sp.sp3),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -307,6 +309,8 @@ private fun OutgoingBubble(out: Outgoing) {
 @Composable
 private fun UserBubbleLayout(text: String, pictures: Int, faded: Boolean, picture: @Composable (Int) -> Unit) {
     val c = Clauderc.colors
+    // The card style speaks in its accent; the minimal one in black on white.
+    val card = isCardStyle
     Box(Modifier.fillMaxWidth().padding(top = Clauderc.spacing.sp2).alpha(if (faded) 0.5f else 1f), contentAlignment = Alignment.CenterEnd) {
         Column(Modifier.fillMaxWidth(0.82f), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (pictures > 0) {
@@ -315,8 +319,8 @@ private fun UserBubbleLayout(text: String, pictures: Int, faded: Boolean, pictur
             if (text.isNotEmpty()) {
                 Text(
                     text,
-                    modifier = Modifier.clip(RoundedCornerShape(22.dp)).background(c.fg).padding(horizontal = 16.dp, vertical = 10.dp),
-                    color = c.bg,
+                    modifier = Modifier.clip(RoundedCornerShape(if (card) 20.dp else 22.dp)).background(if (card) c.accent else c.fg).padding(horizontal = 16.dp, vertical = 10.dp),
+                    color = if (card) c.onAccent else c.bg,
                     fontSize = 15.sp,
                     lineHeight = 1.55.em,
                 )
@@ -336,10 +340,11 @@ private fun ChatPicture(bitmap: ImageBitmap?) {
 @Composable
 private fun AssistantBubble(text: String) {
     val c = Clauderc.colors
+    val card = isCardStyle
     Box(Modifier.fillMaxWidth(0.82f)) {
         Text(
             richText(text, c.fg),
-            modifier = Modifier.clip(RoundedCornerShape(22.dp)).background(c.surface).padding(horizontal = 16.dp, vertical = 10.dp),
+            modifier = Modifier.clip(RoundedCornerShape(if (card) 20.dp else 22.dp)).background(if (card) c.card else c.surface).padding(horizontal = 16.dp, vertical = 10.dp),
             color = c.fg,
             fontSize = 15.sp,
             lineHeight = 1.55.em,
@@ -391,7 +396,7 @@ private fun ToolRow(tool: ToolCall, working: Boolean) {
                     .padding(start = sp.sp2, end = sp.sp2, top = 2.dp, bottom = sp.sp2)
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(Clauderc.radii.sm))
-                    .background(c.surface)
+                    .background(if (isCardStyle) c.card else c.surface)
                     .heightIn(max = 360.dp)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = sp.sp4, vertical = sp.sp3),
@@ -408,6 +413,8 @@ private fun ToolRow(tool: ToolCall, working: Boolean) {
 private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
+    // The card style floats a card on its grey page and sends with the accent.
+    val card = isCardStyle
     var text by rememberSaveable { mutableStateOf("") }
     // A failed send hands its text back, unless something new was typed meanwhile.
     LaunchedEffect(state.restore) { state.restore?.let { if (text.isBlank()) text = it.text } }
@@ -460,7 +467,7 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                             .pressShrink(press)
                             .size(60.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(c.surface)
+                            .background(if (card) c.card else c.surface)
                             .clickable(press, PressIndication(c.fg2), role = Role.Button, onClickLabel = "再添加图片", onClick = onAttach),
                         contentAlignment = Alignment.Center,
                     ) { Icon(Symbols.Add, contentDescription = "再添加图片", tint = c.fg2) }
@@ -475,7 +482,12 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
             Text(shownError, Modifier.padding(horizontal = sp.sp2), fontSize = Clauderc.fontSizes.caption, color = c.danger, lineHeight = 1.5.em)
         }
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(c.surface).padding(4.dp),
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(28.dp))
+                .background(if (card) c.card else c.surface)
+                .then(if (card) Modifier.border(0.5.dp, c.line, RoundedCornerShape(28.dp)) else Modifier)
+                .padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(sp.sp1),
             verticalAlignment = Alignment.Bottom,
         ) {
@@ -520,12 +532,19 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                     .pressShrink(sendPress)
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(if (canSend) c.fg else c.surface2)
-                    .clickable(sendPress, PressIndication(c.bg), enabled = canSend, role = Role.Button, onClickLabel = "发送") { if (actions.onSend(text)) text = "" }
+                    .background(
+                        when {
+                            canSend && card -> c.accent
+                            canSend -> c.fg
+                            card -> c.surface
+                            else -> c.surface2
+                        },
+                    )
+                    .clickable(sendPress, PressIndication(if (card) c.onAccent else c.bg), enabled = canSend, role = Role.Button, onClickLabel = "发送") { if (actions.onSend(text)) text = "" }
                     .semantics { contentDescription = "发送" },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Symbols.ArrowUpward, contentDescription = null, tint = if (canSend) c.bg else c.fg3, modifier = Modifier.size(22.dp))
+                Icon(Symbols.ArrowUpward, contentDescription = null, tint = if (!canSend) c.fg3 else if (card) c.onAccent else c.bg, modifier = Modifier.size(22.dp))
             }
         }
     }

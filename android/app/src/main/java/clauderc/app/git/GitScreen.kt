@@ -10,8 +10,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -92,6 +93,9 @@ import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.TextTone
 import clauderc.app.ui.components.UnderlineField
+import clauderc.app.ui.components.cardItem
+import clauderc.app.ui.components.isCardStyle
+import clauderc.app.ui.components.rowStart
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
@@ -269,50 +273,66 @@ private fun Empty(title: String, path: String?, button: String, onClick: () -> U
 @Composable
 private fun Tabs(state: GitUiState, onTab: (GitTab) -> Unit) {
     val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    val card = isCardStyle
     val count = state.status?.let { it.staged.size + it.unstaged.size }
-    // Left edge and width of each tab, for the one underline that slides between them.
+    // Left edge and width of each tab, for the one indicator that slides between them: an underline,
+    // or in the card style the filled pill of a segmented control.
     val spans = remember { mutableStateMapOf<GitTab, Pair<Int, Int>>() }
+    val track = if (card) {
+        Modifier.padding(start = sp.sp4, end = sp.sp4, top = sp.sp1).clip(CircleShape).background(c.card).padding(4.dp)
+    } else {
+        Modifier.padding(horizontal = sp.page)
+    }
     Column {
-        Box(Modifier.padding(horizontal = Clauderc.spacing.page)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp8)) {
+        Box(track) {
+            val indicator: @Composable (Modifier) -> Unit = { place ->
+                spans[state.tab]?.let { (left, width) ->
+                    val x by animateIntAsState(left, Motion.enter(), label = "underlineX")
+                    val w by animateIntAsState(width, Motion.enter(), label = "underlineWidth")
+                    val at = place.offset { IntOffset(x, 0) }.width(with(LocalDensity.current) { w.toDp() })
+                    if (card) {
+                        Box(at.fillMaxHeight().clip(CircleShape).background(c.accent).testTag("tabUnderline"))
+                    } else {
+                        Box(at.height(2.dp).background(c.fg).testTag("tabUnderline"))
+                    }
+                }
+            }
+            // The pill sits under the labels; the underline is drawn over their bottom edge.
+            if (card) Box(Modifier.matchParentSize()) { indicator(Modifier) }
+            Row(if (card) Modifier.fillMaxWidth() else Modifier, horizontalArrangement = Arrangement.spacedBy(if (card) 4.dp else sp.sp8)) {
                 listOf(GitTab.Log to "时间线", GitTab.Status to "改动").forEach { (tab, label) ->
                     val on = state.tab == tab
                     Column(
                         Modifier
-                            .width(IntrinsicSize.Max)
+                            .then(if (card) Modifier.weight(1f).clip(CircleShape) else Modifier.width(IntrinsicSize.Max))
                             .onPlaced { spans[tab] = it.positionInParent().x.roundToInt() to it.size.width }
                             .clickable(role = Role.Tab) { onTab(tab) }
                             .semantics { selected = on },
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Text(
                             buildAnnotatedString {
                                 append(label)
                                 if (tab == GitTab.Status && count != null && count > 0) append("($count)")
                             },
-                            modifier = Modifier.padding(top = 12.dp, bottom = 12.dp),
+                            modifier = Modifier.padding(vertical = if (card) 9.dp else 12.dp),
                             fontSize = Clauderc.fontSizes.label,
                             fontWeight = FontWeight.Medium,
-                            color = if (on) c.fg else c.fg3,
+                            color = when {
+                                on && card -> c.onAccent
+                                on -> c.fg
+                                card -> c.fg2
+                                else -> c.fg3
+                            },
                         )
-                        Spacer(Modifier.height(2.dp))
+                        if (!card) Spacer(Modifier.height(2.dp))
                     }
                 }
             }
-            spans[state.tab]?.let { (left, width) ->
-                val x by animateIntAsState(left, Motion.enter(), label = "underlineX")
-                val w by animateIntAsState(width, Motion.enter(), label = "underlineWidth")
-                Box(
-                    Modifier
-                        .align(Alignment.BottomStart)
-                        .offset { IntOffset(x, 0) }
-                        .width(with(LocalDensity.current) { w.toDp() })
-                        .height(2.dp)
-                        .background(c.fg)
-                        .testTag("tabUnderline"),
-                )
-            }
+            if (!card) indicator(Modifier.align(Alignment.BottomStart))
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+        if (!card) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
     }
 }
 
@@ -358,7 +378,10 @@ private fun Timeline(state: GitUiState, actions: GitActions) {
     }
     LazyColumn(Modifier.fillMaxSize().testTag("timeline"), state = list, contentPadding = PaddingValues(bottom = NavClearance)) {
         itemsIndexed(state.commits, key = { _, it -> it.hash }) { i, commit ->
-            geometry.getOrNull(i)?.let { CommitRow(commit, it, textStart, state.status?.branch) { actions.onOpenCommit(commit.hash) } }
+            // One card for the whole graph in the card style; dividers would cut its lanes.
+            Box(Modifier.cardItem(first = i == 0, last = i == state.commits.lastIndex, divider = false)) {
+                geometry.getOrNull(i)?.let { CommitRow(commit, it, textStart, state.status?.branch) { actions.onOpenCommit(commit.hash) } }
+            }
         }
         if (state.hasMore || state.loadingMore) {
             item(key = "more") {
@@ -457,31 +480,50 @@ private fun StatusPage(state: GitUiState, actions: GitActions, onBranches: () ->
                 Text("「$name」正在这个目录工作", fontSize = Clauderc.fontSizes.caption, color = c.fg2)
             }
         }
-        Row(Modifier.padding(start = sp.page, end = sp.page, bottom = sp.sp4), horizontalArrangement = Arrangement.spacedBy(sp.sp2)) {
+        val card = isCardStyle
+        Row(
+            Modifier.padding(start = if (card) sp.sp4 else sp.page, end = if (card) sp.sp4 else sp.page, bottom = if (card) sp.sp3 else sp.sp4),
+            horizontalArrangement = Arrangement.spacedBy(sp.sp2),
+        ) {
             PillButton("拉取", onClick = { actions.onRequest(GitOp.Pull) }, style = PillStyle.Tonal, icon = Symbols.Download, height = 40.dp, enabled = !state.running, modifier = Modifier.weight(1f))
             PillButton("推送", onClick = { actions.onRequest(GitOp.Push()) }, style = PillStyle.Tonal, icon = Symbols.Upload, height = 40.dp, enabled = !state.running, modifier = Modifier.weight(1f))
             PillButton("切换", onClick = onBranches, style = PillStyle.Tonal, icon = Symbols.AltRoute, height = 40.dp, enabled = !state.running, modifier = Modifier.weight(1f))
         }
         LazyColumn(Modifier.weight(1f).testTag("changes")) {
             item { SectionHeading("已暂存") }
-            if (st?.staged.isNullOrEmpty()) item { Hint("没有已暂存的文件") }
-            st?.staged.orEmpty().forEach { f ->
-                item(key = "s:" + f.path) { FileRow(f, "取消暂存", { actions.onOpenDiff(f.path, true) }) { actions.onRequest(GitOp.Unstage(f.path)) } }
+            if (st?.staged.isNullOrEmpty()) item { Hint("没有已暂存的文件", Modifier.cardItem(first = true, last = true)) }
+            val staged = st?.staged.orEmpty()
+            staged.forEachIndexed { i, f ->
+                item(key = "s:" + f.path) {
+                    FileRow(f, "取消暂存", { actions.onOpenDiff(f.path, true) }, Modifier.cardItem(i == 0, i == staged.lastIndex)) { actions.onRequest(GitOp.Unstage(f.path)) }
+                }
             }
             item { SectionHeading("未暂存") }
-            if (st?.unstaged.isNullOrEmpty()) item { Hint("工作目录是干净的") }
-            st?.unstaged.orEmpty().forEach { f ->
-                item(key = "u:" + f.path) { FileRow(f, "暂存", { actions.onOpenDiff(f.path, false) }) { actions.onRequest(GitOp.Stage(f.path)) } }
+            if (st?.unstaged.isNullOrEmpty()) item { Hint("工作目录是干净的", Modifier.cardItem(first = true, last = true)) }
+            val unstaged = st?.unstaged.orEmpty()
+            unstaged.forEachIndexed { i, f ->
+                item(key = "u:" + f.path) {
+                    FileRow(f, "暂存", { actions.onOpenDiff(f.path, false) }, Modifier.cardItem(i == 0, i == unstaged.lastIndex)) { actions.onRequest(GitOp.Stage(f.path)) }
+                }
             }
         }
-        Column(
+        // The card style lifts the commit box onto its own card above the nav bar.
+        val box = if (card) {
             Modifier
                 .fillMaxWidth()
                 .background(c.bg)
-                .padding(start = sp.page, end = sp.page, top = sp.sp3, bottom = NavClearance),
-            verticalArrangement = Arrangement.spacedBy(sp.sp3),
-        ) {
-            Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+                .padding(start = sp.sp4, end = sp.sp4, top = sp.sp2, bottom = 88.dp)
+                .clip(RoundedCornerShape(Clauderc.radii.card))
+                .background(c.card)
+                .padding(start = sp.sp4, end = sp.sp4, top = sp.sp3, bottom = sp.sp4)
+        } else {
+            Modifier
+                .fillMaxWidth()
+                .background(c.bg)
+                .padding(start = sp.page, end = sp.page, top = sp.sp3, bottom = NavClearance)
+        }
+        Column(box, verticalArrangement = Arrangement.spacedBy(sp.sp3)) {
+            if (!card) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
             UnderlineField(state.message, actions.onMessage, placeholder = "提交说明", singleLine = false, maxLines = 4)
             PillButton(
                 if (state.running) "正在处理" else "提交",
@@ -494,8 +536,13 @@ private fun StatusPage(state: GitUiState, actions: GitActions, onBranches: () ->
 }
 
 @Composable
-private fun Hint(text: String) {
-    Text(text, Modifier.padding(horizontal = Clauderc.spacing.page, vertical = Clauderc.spacing.sp2), fontSize = Clauderc.fontSizes.label, color = Clauderc.colors.fg3)
+private fun Hint(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        modifier.fillMaxWidth().padding(horizontal = rowStart, vertical = if (isCardStyle) Clauderc.spacing.sp4 else Clauderc.spacing.sp2),
+        fontSize = Clauderc.fontSizes.label,
+        color = Clauderc.colors.fg3,
+    )
 }
 
 fun changeLetter(change: FileChange) = when (change) {
@@ -507,12 +554,12 @@ fun changeLetter(change: FileChange) = when (change) {
 }
 
 @Composable
-private fun FileRow(f: FileStatus, action: String, onOpen: () -> Unit, onAction: () -> Unit) {
+private fun FileRow(f: FileStatus, action: String, onOpen: () -> Unit, modifier: Modifier = Modifier, onAction: () -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
-    Row(Modifier.fillMaxWidth().padding(end = sp.sp2).semantics { isTraversalGroup = true }, verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().padding(end = sp.sp2).semantics { isTraversalGroup = true }, verticalAlignment = Alignment.CenterVertically) {
         Row(
-            Modifier.weight(1f).clickable(role = Role.Button, onClick = onOpen).padding(start = sp.page, top = 10.dp, bottom = 10.dp),
+            Modifier.weight(1f).clickable(role = Role.Button, onClick = onOpen).padding(start = rowStart, top = 10.dp, bottom = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(sp.sp4),
             verticalAlignment = Alignment.CenterVertically,
         ) {

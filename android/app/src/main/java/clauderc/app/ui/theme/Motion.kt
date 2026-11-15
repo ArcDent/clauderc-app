@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.InfiniteRepeatableSpec
@@ -60,10 +61,10 @@ object Motion {
     val popIn: EnterTransition = slideInHorizontally(enter()) { -it / 4 }
     val popOut: ExitTransition = slideOutHorizontally(enter()) { it }
 
-    // The back gesture scrubs the pop by finger progress, so it stays linear and the page keeps pace with the finger.
-    private fun <T> track(): FiniteAnimationSpec<T> = tween(t.durM, easing = LinearEasing)
-    val gestureIn: EnterTransition = slideInHorizontally(track()) { -it / 4 }
-    val gestureOut: ExitTransition = slideOutHorizontally(track()) { it }
+    /** The back gesture's slide, on a [GestureEasing] that [dragging] drives. */
+    fun gestureEasing(dragging: () -> Boolean): Easing = GestureEasing(dragging, t.easeEmph)
+    fun gestureIn(easing: Easing): EnterTransition = slideInHorizontally(tween(t.durM, easing = easing)) { -it / 4 }
+    fun gestureOut(easing: Easing): ExitTransition = slideOutHorizontally(tween(t.durM, easing = easing)) { it }
 
     /** Top-level tabs: [dir] is +1 toward the right-hand tab. */
     fun tabIn(px: Int, dir: Int): EnterTransition = slideInHorizontally(enter()) { px * dir } + fadeIn(enter())
@@ -91,6 +92,29 @@ object Motion {
     val spin: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart)
     val beacon: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(2400, easing = LinearEasing))
     val scanLine: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(2600, easing = FastOutSlowInEasing), RepeatMode.Reverse)
+}
+
+/**
+ * The back gesture scrubs the pop by finger progress, so while [dragging] the curve is a straight
+ * line and the page keeps pace with the finger. Once the finger lets go, NavHost plays the rest of
+ * the pop on this same curve, and from the release point on it eases out on [finish]: the remaining
+ * distance takes the remaining share of durM and settles like the mockup's 「减速收尾」. A cancel runs
+ * back below the release point, where the curve is still the line.
+ */
+private class GestureEasing(private val dragging: () -> Boolean, private val finish: Easing) : Easing {
+    private var last = 0f
+    private var release = -1f
+
+    override fun transform(fraction: Float): Float {
+        if (dragging()) {
+            release = -1f
+            last = fraction
+            return fraction
+        }
+        if (release < 0f) release = last
+        if (fraction <= release || release >= 1f) return fraction
+        return release + (1f - release) * finish.transform((fraction - release) / (1f - release))
+    }
 }
 
 /**

@@ -29,9 +29,11 @@ class ThemeTokensTest {
 
     private val light by lazy { block(":root {") }
     private val dark by lazy { block(""":root[data-theme="dark"] {""") }
+    private val cardLight by lazy { block(""":root[data-style="card"] {""") }
+    private val cardDark by lazy { block(""":root[data-style="card"][data-theme="dark"] {""") }
 
     private fun colors(c: ClaudercColors) = mapOf(
-        "--c-bg" to c.bg, "--c-sheet" to c.sheet, "--c-surface" to c.surface, "--c-surface-2" to c.surface2,
+        "--c-bg" to c.bg, "--c-sheet" to c.sheet, "--c-card" to c.card, "--c-surface" to c.surface, "--c-surface-2" to c.surface2,
         "--c-line" to c.line, "--c-fg" to c.fg, "--c-fg-2" to c.fg2, "--c-fg-3" to c.fg3,
         "--c-accent" to c.accent, "--c-on-accent" to c.onAccent, "--c-danger" to c.danger,
         "--c-add-bg" to c.addBg, "--c-add-fg" to c.addFg, "--c-del-bg" to c.delBg, "--c-del-fg" to c.delFg,
@@ -68,6 +70,27 @@ class ThemeTokensTest {
         assertEquals(dark, block(""":root:not([data-theme="light"]) {"""))
     }
 
+    // The card blocks only override some variables; the rest come from the minimal style of the same brightness.
+    @Test fun cardLightColorsMatchMockup() {
+        val tokens = colors(CardLightColors)
+        val css = light.filterKeys { it.startsWith("--c-") } + cardLight.filterKeys { it.startsWith("--c-") }
+        assertEquals(css.keys, tokens.keys)
+        css.forEach { (name, value) -> assertEquals(name, parseColor(value), tokens.getValue(name).toArgb()) }
+    }
+
+    @Test fun cardDarkColorsMatchMockup() {
+        val tokens = colors(CardDarkColors)
+        val css = light.filterKeys { it.startsWith("--c-") } + dark.filterKeys { it.startsWith("--c-") } +
+            cardDark.filterKeys { it.startsWith("--c-") }
+        assertEquals("the card dark block overrides everything the card light block does", cardLight.keys, cardDark.keys)
+        assertEquals(css.keys, tokens.keys)
+        css.forEach { (name, value) -> assertEquals(name, parseColor(value), tokens.getValue(name).toArgb()) }
+    }
+
+    @Test fun systemCardDarkBlockEqualsExplicitCardDarkBlock() {
+        assertEquals(cardDark, block(""":root[data-style="card"]:not([data-theme="light"]) {"""))
+    }
+
     @Test fun fontSizesSpacingAndRadiiMatchMockup() {
         val f = ClaudercFontSizes()
         val s = ClaudercSpacing()
@@ -78,7 +101,7 @@ class ThemeTokensTest {
             "--fs-mono" to f.mono.value, "--fs-mono-sm" to f.monoSm.value,
             "--sp-1" to s.sp1.value, "--sp-2" to s.sp2.value, "--sp-3" to s.sp3.value, "--sp-4" to s.sp4.value,
             "--sp-5" to s.sp5.value, "--sp-6" to s.sp6.value, "--sp-8" to s.sp8.value, "--sp-page" to s.page.value,
-            "--r-sm" to r.sm.value, "--r-md" to r.md.value, "--r-lg" to r.lg.value, "--r-pill" to r.pill.value,
+            "--r-sm" to r.sm.value, "--r-md" to r.md.value, "--r-lg" to r.lg.value, "--r-card" to r.card.value, "--r-pill" to r.pill.value,
         )
         val css = light.filterKeys { it.startsWith("--fs-") || it.startsWith("--sp-") || it.startsWith("--r-") }
         assertEquals(css.keys, tokens.keys)

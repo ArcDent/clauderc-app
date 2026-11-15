@@ -1,5 +1,6 @@
 package clauderc.app.machines
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,7 +14,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -47,6 +50,9 @@ import clauderc.app.ui.components.SnackState
 import clauderc.app.ui.components.Spinner
 import clauderc.app.ui.components.StatusGlyph
 import clauderc.app.ui.components.SymbolButton
+import clauderc.app.ui.components.cardItem
+import clauderc.app.ui.components.isCardStyle
+import clauderc.app.ui.components.rowStart
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Symbols
 import kotlin.math.ceil
@@ -79,8 +85,8 @@ fun MachinesScreen(
                     !paired -> item { EmptyMachines(onAdd) }
                     rows == null -> item { Spinner(Modifier.padding(start = sp.page), size = 16.dp, color = Clauderc.colors.fg3) }
                     else -> {
-                        items(rows, key = { it.machine.id }) { row ->
-                            MachineRowView(row) {
+                        itemsIndexed(rows, key = { _, it -> it.machine.id }) { i, row ->
+                            MachineRowView(row, Modifier.cardItem(first = i == 0, last = i == rows.lastIndex)) {
                                 if (row.machine.online) onOpen(row.machine.id) else snack.show("${row.machine.name} 已离线，联网后才能查看会话")
                             }
                         }
@@ -150,18 +156,26 @@ private fun RelayLine(link: RelayLink) {
 }
 
 @Composable
-private fun MachineRowView(row: MachineRow, onClick: () -> Unit) {
+private fun MachineRowView(row: MachineRow, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val m = row.machine
+    val card = isCardStyle
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(start = sp.page, top = 14.dp, bottom = 14.dp),
+            .padding(start = rowStart, top = 14.dp, bottom = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(sp.sp4),
     ) {
-        Icon(Symbols.Computer, contentDescription = null, tint = if (m.online) c.fg2 else c.fg3)
+        if (card) {
+            // The card style sets the icon in a small rounded tile.
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(c.surface), contentAlignment = Alignment.Center) {
+                Icon(Symbols.Computer, contentDescription = null, tint = if (m.online) c.fg else c.fg3, modifier = Modifier.size(22.dp))
+            }
+        } else {
+            Icon(Symbols.Computer, contentDescription = null, tint = if (m.online) c.fg2 else c.fg3)
+        }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(m.name, fontSize = Clauderc.fontSizes.body, color = if (m.online) c.fg else c.fg3, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(

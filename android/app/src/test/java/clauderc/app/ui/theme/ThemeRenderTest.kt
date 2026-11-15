@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import clauderc.app.data.UiStyle
 import clauderc.app.ui.components.AppBar
 import clauderc.app.ui.components.BarTitle
 import clauderc.app.ui.components.Glyph
@@ -87,4 +89,25 @@ class ThemeRenderTest {
     @Test fun lightThemeRenders() = assertRendered(dark = false)
 
     @Test fun darkThemeRenders() = assertRendered(dark = true)
+
+    /** Colour of the accent pill button's left end, inside the rounded part and away from its label. */
+    private fun accentButtonPixel(style: UiStyle, accent: Color?): Int {
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = style, accent = accent) {
+                PillButton("允许", onClick = {}, modifier = Modifier.testTag("btn"), style = PillStyle.Accent)
+            }
+        }
+        val image = compose.onNodeWithTag("btn").captureToImage()
+        val pixels = IntArray(1)
+        image.readPixels(pixels, startX = 10, startY = image.height / 2, width = 1, height = 1)
+        return pixels[0]
+    }
+
+    @Test fun cardStyleTakesThePickedAccent() {
+        assertEquals(Color(0xFF34C759).toArgb(), accentButtonPixel(UiStyle.Card, Color(0xFF34C759)))
+    }
+
+    @Test fun minimalStyleKeepsItsCobalt() {
+        assertEquals(Color(0xFF2A45E0).toArgb(), accentButtonPixel(UiStyle.Minimal, Color(0xFF34C759)))
+    }
 }
