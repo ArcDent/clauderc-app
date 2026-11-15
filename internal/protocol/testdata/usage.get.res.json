@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-040",
+  "method": "usage.get",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "available": true,
+    "fiveHour": {
+      "utilization": 12.5,
+      "resetsAt": "2026-11-14T22:00:00Z"
+    },
+    "sevenDay": {
+      "utilization": 30,
+      "resetsAt": "2026-11-18T00:00:00Z"
+    },
+    "fetchedAt": "2026-11-14T18:00:05Z"
+  }
+}

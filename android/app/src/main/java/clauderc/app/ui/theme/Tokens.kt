@@ -226,4 +226,7 @@ data class ClaudercMotion(
     val durS: Int = 150,
     val durM: Int = 280,
     val durL: Int = 350,
+    /** The theme circle of 设置: slow at both ends, so it can be seen growing from the tap. */
+    val easeReveal: CubicBezierEasing = CubicBezierEasing(0.65f, 0f, 0.35f, 1f),
+    val durReveal: Int = 650,
 )

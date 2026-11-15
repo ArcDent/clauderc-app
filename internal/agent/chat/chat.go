@@ -274,9 +274,9 @@ func openFollower(claudeDir, sessionID string) *transcript.Follower {
 }
 
 // toProtocol maps transcript items to the wire. The protocol has no
-// command kind or queued flag yet: a command becomes a tool row named
-// after it, with its output as the result, and a queued message a plain
-// user item.
+// command kind yet: a command becomes a tool row named after it, with its
+// output as the result and a tool_use id starting with "command-", which
+// the phone draws as the user's own bubble.
 func toProtocol(items []transcript.Item) []protocol.ChatItem {
 	out := make([]protocol.ChatItem, 0, len(items))
 	for _, it := range items {

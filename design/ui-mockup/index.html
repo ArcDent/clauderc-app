@@ -71,6 +71,9 @@
   --dur-s: 150ms;
   --dur-m: 280ms;
   --dur-l: 350ms;
+  /* 设置里换外观时的圆形扩散：两头慢，看得出圆从点的位置长大 */
+  --ease-reveal: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-reveal: 650ms;
 
   /* 审阅页本身，不属于 APP 主题 */
   --desk-bg: #F4F4F4;
@@ -352,7 +355,7 @@ button { cursor: pointer; }
 .vf .tr { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; border-top-right-radius: 14px; }
 .vf .bl { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; border-bottom-left-radius: 14px; }
 .vf .br { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; border-bottom-right-radius: 14px; }
-.scanline { position: absolute; left: 16px; right: 16px; top: 10px; height: 1px; background: var(--c-on-camera); opacity: 0.55; animation: scan 2.6s ease-in-out infinite alternate; }
+.scanline { position: absolute; left: 16px; right: 16px; top: 10px; height: 1px; background: var(--c-on-camera); opacity: 0.55; animation: scan 3.6s ease-in-out infinite alternate; }
 .icon-btn.cam-back { position: absolute; top: var(--sp-1); left: var(--sp-1); z-index: 2; color: var(--c-on-camera); }
 .cam-fine { margin: var(--sp-6) 0 0; font-size: var(--fs-caption); opacity: 0.5; }
 .cam-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; background: var(--c-sheet); color: var(--c-fg); border-radius: var(--r-lg) var(--r-lg) 0 0; padding: var(--sp-6) var(--sp-page) var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-3); }

@@ -32,12 +32,15 @@ var prog = filepath.Base(os.Args[0])
 // usage is a format string; %[1]s is prog.
 const usage = `用法：
   %[1]s run [--config <agent.toml>]       连接中转服务器，开始服务
+  %[1]s start [--config <agent.toml>]     在后台运行，关掉终端也不停
+  %[1]s stop [--config <agent.toml>]      结束后台运行
   %[1]s pair [--config <agent.toml>]      生成配对二维码
   %[1]s devices [--config <agent.toml>]   列出已配对的手机
   %[1]s revoke [--config <agent.toml>] <id>  吊销一台手机
   %[1]s service install [--config <agent.toml>] [--dry-run]  生成开机自启的服务文件
   %[1]s --version
 默认配置文件：~/.config/clauderc/agent.toml
+后台运行的进程号和日志在配置文件同目录的 agent.pid、agent.log
 `
 
 func main() {
@@ -54,6 +57,13 @@ func main() {
 		return
 	case "run":
 		err = runCmd(ctx, args, nil, os.Stderr)
+	case "start":
+		var exe string
+		if exe, err = os.Executable(); err == nil {
+			err = startCmd(args, exe, os.Stdout)
+		}
+	case "stop":
+		err = stopCmd(args, os.Stdout)
 	case "pair", "devices", "revoke":
 		err = adminCmd(ctx, cmd, args, nil, os.Stdout)
 	case "service":

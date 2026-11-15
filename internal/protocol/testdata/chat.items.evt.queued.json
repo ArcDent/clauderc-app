@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.items",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "items": [
+      {"seq": 256, "kind": "user", "text": "顺便把 README 也改了", "queued": true},
+      {"seq": 257, "kind": "tool", "tool": {"toolUseId": "command-257", "toolName": "/compact", "summary": "/compact", "input": {"args": ""}, "result": {"content": "Compacted (ctrl+o to see full summary)", "isError": false}}}
+    ]
+  }
+}

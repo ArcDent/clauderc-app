@@ -55,7 +55,9 @@ func TranscriptEnv(path string) []string {
 }
 
 // DeliverEnv picks what a sent message turns into: "user" (the default),
-// "enqueue" as for a busy session, or "none".
+// "enqueue" as for a busy session, which like Claude Code leaves out the
+// text of a slash command, "enqueue-bare", an enqueue without text
+// whatever was sent, or "none".
 func DeliverEnv(mode string) string {
 	return envDeliv + "=" + mode
 }
@@ -307,6 +309,11 @@ func (in *input) enter() error {
 		return nil
 	case "enqueue":
 		rec = map[string]any{"type": "queue-operation", "operation": "enqueue", "content": text}
+		if strings.HasPrefix(text, "/") {
+			rec = map[string]any{"type": "queue-operation", "operation": "enqueue"}
+		}
+	case "enqueue-bare":
+		rec = map[string]any{"type": "queue-operation", "operation": "enqueue"}
 	default:
 		rec = map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}}
 	}

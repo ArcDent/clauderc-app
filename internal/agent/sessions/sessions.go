@@ -44,6 +44,8 @@ type Handler struct {
 	closed bool
 	cancel context.CancelFunc // stops the poller; nil while not polling
 	done   chan struct{}      // closed once the poller has returned
+
+	contexts contexts
 }
 
 // New returns a Handler; call Close when done.
@@ -210,17 +212,21 @@ func (h *Handler) poll(ctx context.Context, done chan<- struct{}) {
 	}
 }
 
-// list reads the session list and settles each blocked session against
-// its transcript (design D5, D6).
+// list reads the session list, settles each blocked session against its
+// transcript (design D5, D6) and adds each session's context window use.
 func (h *Handler) list(ctx context.Context) (protocol.SessionList, error) {
 	list, targets, err := h.opts.Source.ListTargets(ctx)
 	if err != nil {
 		return list, err
 	}
+	seen := make(map[string]bool, len(targets))
 	for i, t := range targets {
 		if t.Blocked() {
 			list.Sessions[i].State = t.SessionState(transcript.HasPending(h.opts.Source.ClaudeDir, t.SessionID))
 		}
+		list.Sessions[i].Context = h.contexts.get(h.opts.Source.ClaudeDir, t.SessionID)
+		seen[t.SessionID] = true
 	}
+	h.contexts.keep(seen)
 	return list, nil
 }

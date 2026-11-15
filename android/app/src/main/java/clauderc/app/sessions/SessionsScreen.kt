@@ -18,6 +18,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
+import clauderc.app.protocol.UsageResponse
+import clauderc.app.protocol.UsageStale
+import clauderc.app.ui.contextPercent
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -77,6 +90,9 @@ import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
 
+/** Sessions sit 32dp in under their directory's folder icon. */
+private val DirIndent = 32.dp
+
 fun glyphOf(state: SessionState) = when (state) {
     SessionState.Pending -> Glyph.Need
     SessionState.Working -> Glyph.Work
@@ -103,6 +119,7 @@ fun SessionsScreen(
     onStop: (Session) -> Unit,
     onRemove: (Session) -> Unit,
     onToggle: (SessionGroup) -> Unit = {},
+    onToggleDir: (SessionGroup, DirGroup) -> Unit = { _, _ -> },
     snack: SnackState = remember { SnackState() },
 ) {
     val c = Clauderc.colors
@@ -146,6 +163,9 @@ fun SessionsScreen(
                             if (machine?.claudeVersion?.isNotEmpty() == true) Text("claude ${machine.claudeVersion}")
                         }
                     }
+                    state.usage?.takeIf { it.available }?.let { usage ->
+                        item(key = "usage") { UsageBlock(usage) }
+                    }
                     val groups = state.groups
                     if (groups == null) {
                         item {
@@ -180,9 +200,18 @@ fun SessionsScreen(
                                 item(key = "g:" + group.profile.id) {
                                     Fold(visible = !group.collapsed) {
                                         CardBlock {
-                                            group.sessions.forEachIndexed { i, s ->
-                                                key(s.id) {
-                                                    SessionRow(s, enabled = online, onOpen = { onOpenChat(s) }, onMenu = { overlay = Overlay.Menu(s) }, modifier = Modifier.cardDivider(i > 0))
+                                            group.dirs.forEachIndexed { i, dir ->
+                                                key(dir.cwd) {
+                                                    DirRow(dir, onToggle = { onToggleDir(group, dir) }, modifier = Modifier.cardDivider(i > 0))
+                                                    Fold(visible = !dir.collapsed) {
+                                                        Column {
+                                                            dir.sessions.forEach { s ->
+                                                                key(s.id) {
+                                                                    SessionRow(s, enabled = online, onOpen = { onOpenChat(s) }, onMenu = { overlay = Overlay.Menu(s) }, modifier = Modifier.cardDivider())
+                                                                }
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -323,6 +352,94 @@ private fun GroupHeader(group: SessionGroup, enabled: Boolean, onRename: () -> U
     }
 }
 
+/** A working directory inside a group: its name and counts; tapping folds its sessions. */
+@Composable
+private fun DirRow(dir: DirGroup, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    val turn by animateFloatAsState(if (dir.collapsed) 0f else 180f, Motion.turn(), label = "dirFold")
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClickLabel = if (dir.collapsed) "展开目录" else "折叠目录", onClick = onToggle)
+            .padding(start = rowStart, end = sp.sp4, top = 10.dp, bottom = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(sp.sp3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Symbols.Folder, contentDescription = null, tint = c.fg3, modifier = Modifier.size(20.dp))
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(sp.sp3), verticalAlignment = Alignment.CenterVertically) {
+            Text(dir.title, modifier = Modifier.weight(1f, fill = false), fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.mono, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                buildAnnotatedString {
+                    append("${dir.sessions.size} 个")
+                    if (dir.pending > 0) {
+                        append(" · ")
+                        withStyle(SpanStyle(color = c.accent)) { append("${dir.pending} 个等你") }
+                    }
+                },
+                fontSize = Clauderc.fontSizes.caption,
+                color = c.fg3,
+                maxLines = 1,
+            )
+        }
+        Icon(Symbols.ExpandMore, contentDescription = null, tint = c.fg3, modifier = Modifier.size(20.dp).rotate(turn))
+    }
+}
+
+/**
+ * The plan usage under the machine's name: a thin bar per limit with its share and when it starts
+ * over. Old numbers, kept while the login is expired or the read failed, turn grey under a note.
+ */
+@Composable
+private fun UsageBlock(usage: UsageResponse) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    val stale = usage.stale != null
+    val rows = listOfNotNull(usage.fiveHour?.let { "5 小时" to it }, usage.sevenDay?.let { "每周" to it })
+    val note = when (usage.stale) {
+        null -> null
+        UsageStale.Expired -> usage.fetchedAt?.let { "登录凭证已过期，显示的是 ${TimeText.clock(it)} 的数据" } ?: "登录凭证已过期"
+        UsageStale.Failed -> usage.fetchedAt?.let { "用量读取失败，显示的是 ${TimeText.clock(it)} 的数据" } ?: "用量读取失败"
+    }
+    val resets = rows.map { (_, w) -> w.resetsAt?.let { TimeText.resets(it) }.orEmpty() }
+    val caption = TextStyle(fontSize = Clauderc.fontSizes.caption)
+    val measurer = rememberTextMeasurer()
+    // Every row gives its reset time the room of the widest, so the bars line up.
+    val resetWidth = with(LocalDensity.current) { (resets.maxOfOrNull { measurer.measure(it, caption).size.width } ?: 0).toDp() }
+    val fill = when {
+        stale -> c.fg3
+        isCardStyle -> c.accent
+        else -> c.fg2
+    }
+    CardBlock(Modifier.padding(bottom = sp.sp2), padding = sp.sp4) {
+        Column(
+            Modifier.padding(horizontal = if (isCardStyle) 0.dp else sp.page),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            rows.forEachIndexed { i, (label, w) ->
+                val pct = w.utilization.roundToInt().coerceIn(0, 100)
+                Row(horizontalArrangement = Arrangement.spacedBy(sp.sp3), verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, modifier = Modifier.width(44.dp), fontSize = Clauderc.fontSizes.label, color = if (stale) c.fg3 else c.fg2, maxLines = 1)
+                    Box(Modifier.weight(1f).height(3.dp).clip(RoundedCornerShape(2.dp)).background(c.line)) {
+                        Box(Modifier.fillMaxWidth(pct / 100f).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(fill))
+                    }
+                    Text(
+                        "$pct%",
+                        modifier = Modifier.width(40.dp),
+                        fontSize = Clauderc.fontSizes.label,
+                        fontWeight = FontWeight.Medium,
+                        color = if (stale) c.fg3 else c.fg,
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                    )
+                    Text(resets[i], modifier = Modifier.width(resetWidth), style = caption, color = c.fg3, maxLines = 1)
+                }
+            }
+            if (note != null) Text(note, fontSize = Clauderc.fontSizes.caption, color = c.fg3)
+        }
+    }
+}
+
 @Composable
 private fun SessionRow(s: Session, enabled: Boolean, onOpen: () -> Unit, onMenu: () -> Unit, modifier: Modifier = Modifier) {
     val c = Clauderc.colors
@@ -332,7 +449,7 @@ private fun SessionRow(s: Session, enabled: Boolean, onOpen: () -> Unit, onMenu:
             Modifier
                 .weight(1f)
                 .clickable(enabled = enabled, role = Role.Button, onClick = onOpen)
-                .padding(start = rowStart, top = 14.dp, bottom = 14.dp),
+                .padding(start = rowStart + DirIndent, top = 14.dp, bottom = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(sp.sp4),
         ) {
             StatusGlyph(glyphOf(s.state), Modifier.padding(top = 6.dp))
@@ -348,11 +465,11 @@ private fun SessionRow(s: Session, enabled: Boolean, onOpen: () -> Unit, onMenu:
                     )
                     Text(TimeText.relative(s.lastActiveAt), fontSize = Clauderc.fontSizes.caption, color = c.fg3, maxLines = 1)
                 }
+                // The directory is the row above, so the second line is the state and the context.
                 Text(
                     buildAnnotatedString {
-                        withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm)) { append(baseName(s.cwd)) }
-                        append(" · ")
                         if (s.state == SessionState.Pending) withStyle(SpanStyle(color = c.accent)) { append(stateText(s.state)) } else append(stateText(s.state))
+                        contextPercent(s.context)?.let { append(" · 上下文 $it%") }
                     },
                     fontSize = Clauderc.fontSizes.label,
                     color = c.fg2,

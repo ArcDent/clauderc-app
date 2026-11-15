@@ -110,8 +110,9 @@ class ListScreensTest {
 
     @Test fun stoppingAWorkingSessionWarnsAboutInterruptingIt() {
         sessions()
-        // Rows in 默认: pending, working, idle; open the menu of the working one.
-        compose.onAllNodesWithContentDescription("会话操作")[1].performClick()
+        // Open the menu of the working session, 修复重连.
+        compose.onNodeWithTag("sessionList").performScrollToNode(hasText("修复重连"))
+        compose.onNode(hasContentDescription("会话操作") and hasAnySibling(hasText("修复重连", substring = true))).performClick()
         compose.onNodeWithText("停止").assertIsDisplayed()
         assertEquals(0, compose.onAllNodes(hasText("移出列表")).fetchSemanticsNodes().size)
         compose.onNodeWithText("停止").performClick()

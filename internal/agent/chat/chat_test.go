@@ -274,6 +274,29 @@ func TestOpenLatestPageAndFollow(t *testing.T) {
 	}
 }
 
+// A queued message goes to the phone marked queued; its formal entry then
+// replaces it under the same seq without the mark.
+func TestQueuedItemIsMarkedUntilItsEntry(t *testing.T) {
+	f := newFixture(t, setup{})
+	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
+	next := func() protocol.ChatItem {
+		t.Helper()
+		var ev protocol.ChatItemsEvent
+		if err := json.Unmarshal(f.nextEvent(t, protocol.EventChatItems, 2*time.Second).Body, &ev); err != nil || len(ev.Items) != 1 {
+			t.Fatalf("chat.items = %+v, %v", ev, err)
+		}
+		return ev.Items[0]
+	}
+	f.appendTranscript(t, `{"type":"queue-operation","operation":"enqueue","content":"排队的消息"}`+"\n")
+	if it := next(); it.Seq != 61 || it.Text != "排队的消息" || !it.Queued {
+		t.Fatalf("queued item = %+v", it)
+	}
+	f.appendTranscript(t, userLine("排队的消息"))
+	if it := next(); it.Seq != 61 || it.Text != "排队的消息" || it.Queued {
+		t.Fatalf("formal item = %+v", it)
+	}
+}
+
 func TestOpenUnknownSession(t *testing.T) {
 	f := newFixture(t, setup{})
 	res := f.call(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: "zzz99999"})
@@ -301,6 +324,25 @@ func TestSendWhileBusyIsDeliveredByEnqueue(t *testing.T) {
 	b, _ := os.ReadFile(f.transcript)
 	if !bytes.Contains(b, []byte(`"operation":"enqueue"`)) {
 		t.Fatal("fake did not enqueue")
+	}
+}
+
+// Claude Code queues a slash command with an enqueue record that has no
+// text; for a slash command that counts as delivered, and queued.
+func TestSendCommandWhileBusyIsDeliveredByBareEnqueue(t *testing.T) {
+	f := newFixture(t, setup{status: "busy", state: "working", attachEnv: []string{fakeattach.DeliverEnv("enqueue")}})
+	body := f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "/todolist-workflow 先用这个"})
+	if got, want := string(body), `{"queued":true}`; got != want {
+		t.Fatalf("body = %s, want %s", got, want)
+	}
+}
+
+// An enqueue without text is never taken for a plain message.
+func TestSendTextNotDeliveredByBareEnqueue(t *testing.T) {
+	f := newFixture(t, setup{status: "busy", state: "working", attachEnv: []string{fakeattach.DeliverEnv("enqueue-bare")}})
+	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "你好"})
+	if res.Error == nil || res.Error.Code != protocol.CodeNotDelivered {
+		t.Fatalf("response error = %+v", res.Error)
 	}
 }
 

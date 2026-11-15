@@ -10,12 +10,15 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -191,11 +194,93 @@ class ChatScreenTest {
         compose.onNodeWithText("切换模型").assertIsDisplayed()
         compose.onNodeWithText("编辑记忆文件").assertIsDisplayed()
         compose.onNodeWithText("压缩对话上下文").assertDoesNotExist()
-        compose.onNodeWithTag("composer").performTextReplacement("/mod")
-        compose.onNodeWithText("编辑记忆文件").assertDoesNotExist()
-        compose.onNodeWithText("切换模型").performClick()
-        compose.onNodeWithText("/model ").assertIsDisplayed()
+        compose.onNodeWithTag("composer").performTextReplacement("/mem")
+        compose.onNodeWithText("切换模型").assertDoesNotExist()
+        compose.onNodeWithText("编辑记忆文件").performClick()
+        compose.onNodeWithText("/memory ").assertIsDisplayed()
         compose.onNodeWithTag("slashPopup").assertDoesNotExist()
+    }
+
+    private fun composerText() = compose.onNodeWithTag("composer").fetchSemanticsNode().config[SemanticsProperties.EditableText].text
+
+    @Test fun slashCompletionFollowsTheCursorAndLeavesItAfterTheCommand() {
+        show(baseState().copy(commands = baseState().commands + Command("todolist-workflow", "轻量任务清单")))
+        val composer = compose.onNodeWithTag("composer")
+        composer.performTextInput("先看下 /todo")
+        compose.onNodeWithTag("slashPopup").assertIsDisplayed()
+        compose.onNodeWithText("轻量任务清单").performClick()
+        composer.performTextInput("先用这个")
+        assertEquals("先看下 /todolist-workflow 先用这个", composerText())
+        composer.performTextClearance()
+        composer.performTextInput("/todo")
+        compose.onNodeWithText("轻量任务清单").performClick()
+        composer.performTextInput("先用这个")
+        assertEquals("/todolist-workflow 先用这个", composerText())
+    }
+
+    @Test fun aPathMidMessageShowsNoPopupButALeadingSlashSaysNoMatch() {
+        show(baseState())
+        val composer = compose.onNodeWithTag("composer")
+        composer.performTextInput("看 /usr")
+        compose.onNodeWithTag("slashPopup").assertDoesNotExist()
+        composer.performTextClearance()
+        composer.performTextInput("/zzz")
+        compose.onNodeWithText("没有匹配的命令").assertIsDisplayed()
+    }
+
+    @Test fun modelOpensThePhonesPickerInsteadOfBeingSent() {
+        var loads = 0
+        var sent = 0
+        show(baseState(), ChatActions(onLoadModels = { loads++ }, onSend = { sent++; true }))
+        val composer = compose.onNodeWithTag("composer")
+        composer.performTextInput("/mo")
+        compose.onNodeWithText("切换模型").performClick()
+        compose.onNodeWithText("从下一条回复开始生效").assertIsDisplayed()
+        assertEquals(1, loads)
+        assertEquals(0, sent)
+        assertEquals("", composerText())
+    }
+
+    @Test fun sendingSlashModelOpensThePickerToo() {
+        var loads = 0
+        var sent = 0
+        show(baseState(), ChatActions(onLoadModels = { loads++ }, onSend = { sent++; true }))
+        compose.onNodeWithTag("composer").performTextInput("/model sonnet")
+        compose.onNodeWithContentDescription("发送").performClick()
+        compose.onNodeWithText("从下一条回复开始生效").assertIsDisplayed()
+        assertEquals(1, loads)
+        assertEquals(0, sent)
+    }
+
+    @Test fun slashCommandsAreTheUsersBubbleWithTheOutputFolded() {
+        val compact = ToolCall("command-12", "/compact", "/compact", buildJsonObject { put("args", "") }, ToolResult("Compacted\n摘要已保存"))
+        val skill = ToolCall("command-13", "/todolist-workflow", "/todolist-workflow 先用这个", buildJsonObject { put("args", "先用这个") })
+        show(baseState().copy(items = listOf(ChatItem(12, ItemKind.TOOL, tool = compact), ChatItem(13, ItemKind.TOOL, tool = skill)), hasMore = false))
+        compose.onNodeWithText("/compact").assertIsDisplayed()
+        compose.onNodeWithText("Compacted").assertIsDisplayed()
+        compose.onNodeWithText("/todolist-workflow 先用这个").assertIsDisplayed()
+        // One folded output row, for /compact only.
+        assertEquals(1, compose.onAllNodesWithText("输出").fetchSemanticsNodes().size)
+        compose.onNode(hasText("摘要已保存", substring = true)).assertDoesNotExist()
+        compose.onNodeWithText("Compacted").performClick()
+        compose.onNode(hasText("摘要已保存", substring = true)).assertIsDisplayed()
+    }
+
+    @Test fun queuedMessagesAreMarked() {
+        var state by mutableStateOf(
+            baseState().copy(
+                items = listOf(ChatItem(1, ItemKind.USER, text = "已经发出的"), ChatItem(2, ItemKind.USER, text = "排队的消息", queued = true)),
+                hasMore = false,
+            ),
+        )
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, ChatActions()) } }
+        assertEquals(1, compose.onAllNodesWithText("排队中").fetchSemanticsNodes().size)
+        // The formal entry replaces it under the same seq.
+        state = state.copy(items = listOf(state.items[0], ChatItem(2, ItemKind.USER, text = "排队的消息")))
+        compose.onNodeWithText("排队中").assertDoesNotExist()
+        state = state.copy(outgoing = listOf(Outgoing(1, "/compact", emptyList(), afterSeq = 2, queued = true)))
+        compose.onNodeWithText("/compact").assertIsDisplayed()
+        compose.onNodeWithText("排队中").assertIsDisplayed()
     }
 
     @Test fun oversizedImageErrorIsShown() {

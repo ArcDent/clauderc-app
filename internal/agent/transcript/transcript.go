@@ -22,12 +22,11 @@ import (
 // agent: the protocol has no such kind yet.
 const ItemCommand protocol.ItemKind = "command"
 
-// Item is one chat item plus what the protocol cannot carry yet.
+// Item is one chat item plus what the protocol cannot carry yet. Its
+// Queued marks a message sent while the session was busy that Claude Code
+// still holds in its queue.
 type Item struct {
 	protocol.ChatItem
-	// Queued marks a message sent while the session was busy that Claude
-	// Code still holds in its queue.
-	Queued bool
 	// Command is set for ItemCommand items.
 	Command *Command
 }
@@ -52,7 +51,15 @@ type Transcript struct {
 	command int
 	// lastTool is the index of the latest tool_use item, or -1.
 	lastTool int
-	info     Info
+	// queuedCommands counts enqueue records without text, which is how
+	// Claude Code queues a slash command.
+	queuedCommands int
+	info           Info
+}
+
+// QueuedCommands returns how many slash commands were queued so far.
+func (t *Transcript) QueuedCommands() int {
+	return t.queuedCommands
 }
 
 // Parse reads a whole transcript.
@@ -181,9 +188,11 @@ func (t *Transcript) queueOperation(op, text string) []int {
 	switch op {
 	case "enqueue":
 		if text == "" {
+			// A slash command: the record leaves out its text.
+			t.queuedCommands++
 			return nil
 		}
-		i := t.add(Item{ChatItem: protocol.ChatItem{Kind: protocol.ItemUser, Text: text}, Queued: true})
+		i := t.add(Item{ChatItem: protocol.ChatItem{Kind: protocol.ItemUser, Text: text, Queued: true}})
 		t.queued = append(t.queued, i)
 		return []int{i}
 	case "popAll":
@@ -226,7 +235,9 @@ func (t *Transcript) add(it Item) int {
 func (t *Transcript) user(content json.RawMessage) []int {
 	var s string
 	if json.Unmarshal(content, &s) == nil {
-		if strings.HasPrefix(s, "<command-name>") || strings.HasPrefix(s, "<local-command-") {
+		// A local command starts with <command-name>, a skill or custom
+		// command with <command-message>.
+		if strings.HasPrefix(s, "<command-name>") || strings.HasPrefix(s, "<command-message>") || strings.HasPrefix(s, "<local-command-") {
 			return t.commandText(s)
 		}
 		if text := userText(s); isInterruptMarker(text) {
@@ -296,6 +307,9 @@ var (
 	commandName   = regexp.MustCompile(`(?s)<command-name>(.*?)</command-name>`)
 	commandArgs   = regexp.MustCompile(`(?s)<command-args>(.*?)</command-args>`)
 	commandOutput = regexp.MustCompile(`(?s)<local-command-(?:stdout|stderr)>(.*?)</local-command-(?:stdout|stderr)>`)
+	// terminalEscape matches the color and OSC sequences command output
+	// carries for the terminal, e.g. "\x1b[2m".
+	terminalEscape = regexp.MustCompile("\x1b(?:\\[[0-?]*[ -/]*[@-~]|\\][^\x07\x1b]*(?:\x07|\x1b\\\\))")
 )
 
 // commandText handles the <command-name> and <local-command-stdout> parts
@@ -313,7 +327,7 @@ func (t *Transcript) commandText(s string) []int {
 	if m := commandOutput.FindStringSubmatch(s); m != nil && t.command >= 0 {
 		i := t.command
 		c := *t.items[i].Command
-		c.Output = strings.TrimSpace(m[1])
+		c.Output = strings.TrimSpace(terminalEscape.ReplaceAllString(m[1], ""))
 		t.items[i].Command = &c
 		t.command = -1
 		return []int{i}

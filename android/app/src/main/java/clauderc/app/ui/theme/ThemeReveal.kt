@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
 /**
  * Changes the theme so the new one spreads out in a circle from where the user tapped. [start] takes a
  * picture of the screen first and keeps it on top; once the theme has changed underneath, the circle
- * grows over durL on easeEmph and cuts the old picture away.
+ * grows over durReveal on easeReveal and cuts the old picture away.
  */
 @Stable
 class ThemeReveal internal constructor(private val scope: CoroutineScope, private val layer: GraphicsLayer) {
@@ -103,7 +103,7 @@ fun ThemeRevealHost(key: Any, content: @Composable () -> Unit) {
             return@LaunchedEffect
         }
         reveal.waiting = false
-        reveal.radius.animateTo(reveal.farthest(), tween(motion.durL, easing = motion.easeEmph))
+        reveal.radius.animateTo(reveal.farthest(), tween(motion.durReveal, easing = motion.easeReveal))
         reveal.snapshot = null
     }
     Box(

@@ -38,6 +38,11 @@ import clauderc.app.net.ConnectionState
 import clauderc.app.net.RelayLink
 import clauderc.app.pair.PairScreen
 import clauderc.app.pair.PairUiState
+import java.time.Instant
+import clauderc.app.protocol.UsageWindow
+import clauderc.app.protocol.UsageStale
+import clauderc.app.protocol.UsageResponse
+import clauderc.app.protocol.SessionContext
 import clauderc.app.protocol.ChatItem
 import clauderc.app.protocol.Commit
 import clauderc.app.protocol.CommitFile
@@ -147,8 +152,10 @@ class ScreensTest {
         )
         shot("03-machines", nav = 0) { MachinesScreen(machines, {}, {}) }
         shot("03-machines-dark", isDark = true, nav = 0) { MachinesScreen(machines, {}, {}) }
-        val sessions = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(sampleSessions, mapOf("api.anthropic.com" to "官方")))
+        val sessions = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(sampleSessions, mapOf("api.anthropic.com" to "官方")), usage = sampleUsage())
         shot("04-sessions", nav = 1) { SessionsScreen(sessions, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+        val expired = sessions.copy(usage = sampleUsage().copy(stale = UsageStale.Expired, fetchedAt = Instant.now().minusSeconds(5_400)))
+        shot("04-sessions-usage-expired", nav = 1) { SessionsScreen(expired, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
         shot("04-sessions-dark", isDark = true, nav = 1) { SessionsScreen(sessions, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
         val folded = sessions.copy(groups = sessions.groups!!.map { it.copy(collapsed = it.profile.id == "api.anthropic.com") })
         shot("04-sessions-folded", nav = 1) { SessionsScreen(folded, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
@@ -163,7 +170,7 @@ class ScreensTest {
             ChatItem(7, ItemKind.ASSISTANT, text = "改完了，我跑一下检查。"),
         )
         val chat = ChatUiState(
-            session = session("s", "clauderc 协议", SessionState.Pending, "default"), loading = false, items = items,
+            session = session("s", "clauderc 协议", SessionState.Pending, "default", context = SessionContext(254_185, 1_000_000)), loading = false, items = items,
             model = "claude-opus-5-5", permissionMode = "default",
         )
         shot("05-chat") { ChatScreen(chat, ChatActions()) }
@@ -199,7 +206,7 @@ class ScreensTest {
                 MachineRow(machine("m-3", "dev-linux", online = false, lastSeen = T0.minusSeconds(36_000)), null, 0),
             ),
         )
-        val sessions = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(sampleSessions, mapOf("api.anthropic.com" to "官方")))
+        val sessions = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(sampleSessions, mapOf("api.anthropic.com" to "官方")), usage = sampleUsage())
         val items = listOf(
             ChatItem(1, ItemKind.USER, text = "给 internal/protocol 加上消息信封的编解码，版本号不是 1 时返回错误。"),
             ChatItem(2, ItemKind.ASSISTANT, text = "好的。我先看一下模块路径和现有目录。"),
@@ -209,7 +216,7 @@ class ScreensTest {
             ChatItem(7, ItemKind.ASSISTANT, text = "改完了，我跑一下检查。"),
         )
         val chat = ChatUiState(
-            session = session("s", "clauderc 协议", SessionState.Pending, "default"), loading = false, items = items,
+            session = session("s", "clauderc 协议", SessionState.Pending, "default", context = SessionContext(254_185, 1_000_000)), loading = false, items = items,
             model = "claude-opus-5-5", permissionMode = "default",
             pending = Pending("t3", PendingKind.PERMISSION, "Bash", buildJsonObject { put("command", "go vet ./... && go test ./internal/protocol/...") }),
         )
@@ -246,4 +253,12 @@ class ScreensTest {
             }
         }
     }
+
+    /** The machine's plan usage: 60% of the 5 hours, starting over in 3 hours, and 70% of the week. */
+    private fun sampleUsage() = UsageResponse(
+        available = true,
+        fiveHour = UsageWindow(60.0, Instant.now().plusSeconds(3 * 3_600)),
+        sevenDay = UsageWindow(70.0, Instant.now().plusSeconds(4 * 86_400)),
+        fetchedAt = Instant.now(),
+    )
 }

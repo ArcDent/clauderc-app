@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.map
 
 /**
  * What the user set for profile groups on this phone, per machine id and profile id
- * (design D10): custom names, and which groups are folded on the session page.
+ * (design D10): custom names, and which groups and directories are folded on the session page.
  */
 class ProfileNameStore(private val store: DataStore<Preferences>) {
     private fun key(machineId: String, profileId: String) = stringPreferencesKey("profileName|$machineId|$profileId")
@@ -32,6 +32,24 @@ class ProfileNameStore(private val store: DataStore<Preferences>) {
         store.edit { prefs ->
             val k = foldKey(machineId)
             val next = prefs[k].orEmpty().let { if (collapsed) it + profileId else it - profileId }
+            if (next.isEmpty()) prefs.remove(k) else prefs[k] = next
+        }
+    }
+
+    private fun dirFoldPrefix(machineId: String) = "collapsedDirs|$machineId|"
+
+    /** Profile id to the working directories folded inside its group on this machine's session page. */
+    fun collapsedDirs(machineId: String): Flow<Map<String, Set<String>>> = store.data.map { prefs ->
+        val prefix = dirFoldPrefix(machineId)
+        prefs.asMap().entries
+            .filter { it.key.name.startsWith(prefix) }
+            .associate { e -> e.key.name.removePrefix(prefix) to (e.value as Set<*>).filterIsInstance<String>().toSet() }
+    }
+
+    suspend fun setDirCollapsed(machineId: String, profileId: String, cwd: String, collapsed: Boolean) {
+        store.edit { prefs ->
+            val k = stringSetPreferencesKey(dirFoldPrefix(machineId) + profileId)
+            val next = prefs[k].orEmpty().let { if (collapsed) it + cwd else it - cwd }
             if (next.isEmpty()) prefs.remove(k) else prefs[k] = next
         }
     }

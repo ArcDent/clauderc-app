@@ -100,6 +100,13 @@ func (f *Follower) Pending(blocked bool) *protocol.Pending {
 	return f.t.Pending(blocked)
 }
 
+// QueuedCommands is Transcript.QueuedCommands on the current state.
+func (f *Follower) QueuedCommands() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.t.QueuedCommands()
+}
+
 // Info is Transcript.Info on the current state.
 func (f *Follower) Info() Info {
 	f.mu.Lock()

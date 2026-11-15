@@ -10,6 +10,7 @@ import clauderc.app.protocol.ChatOpenRequest
 import clauderc.app.protocol.ChatOpenResponse
 import clauderc.app.protocol.ChatPendingEvent
 import clauderc.app.protocol.ChatSendRequest
+import clauderc.app.protocol.ChatSendResponse
 import clauderc.app.protocol.ChatSetModelRequest
 import clauderc.app.protocol.ChatSetPermissionModeRequest
 import clauderc.app.protocol.ChatStateEvent
@@ -109,6 +110,31 @@ class ChatLogicTest {
         assertEquals(102L, vm.state.value.items.last().seq)
         gate.complete(Unit)
         assertFalse(vm.state.value.sending)
+    }
+
+    @Test fun aSlashCommandGivesWayToItsCommandRow() {
+        val out = listOf(Outgoing(1, "/compact", emptyList(), afterSeq = 101), Outgoing(2, "/todolist-workflow 先用这个", emptyList(), afterSeq = 101))
+        val compact = ToolCall("command-102", "/compact", "/compact", buildJsonObject { put("args", "") })
+        // An ordinary tool row with the same text is not the command.
+        val lookalike = ToolCall("toolu_09", "Bash", "/todolist-workflow 先用这个", buildJsonObject { })
+        val left = settleOutgoing(out, listOf(ChatItem(102, ItemKind.TOOL, tool = compact), ChatItem(103, ItemKind.TOOL, tool = lookalike)))
+        assertEquals(listOf("/todolist-workflow 先用这个"), left.map { it.text })
+    }
+
+    @Test fun aQueuedCommandIsMarkedUntilItRuns() = runTest(dispatcher) {
+        val vm = viewModel()
+        relay.respond(Method.CHAT_SEND, ChatSendResponse.serializer(), ChatSendResponse(queued = true))
+        assertTrue(vm.send("/todolist-workflow 先用这个"))
+        assertEquals(listOf(true), vm.state.value.outgoing.map { it.queued })
+        val run = ToolCall("command-102", "/todolist-workflow", "/todolist-workflow 先用这个", buildJsonObject { put("args", "先用这个") })
+        relay.event(Method.CHAT_ITEMS, "m-1", ChatItemsEvent.serializer(), ChatItemsEvent("s-need", listOf(ChatItem(102, ItemKind.TOOL, tool = run))))
+        assertTrue(vm.state.value.outgoing.isEmpty())
+    }
+
+    @Test fun anUnqueuedSendStaysFaded() = runTest(dispatcher) {
+        val vm = viewModel()
+        assertTrue(vm.send("你好"))
+        assertEquals(listOf(false), vm.state.value.outgoing.map { it.queued })
     }
 
     @Test fun aFailedSendTakesTheBubbleBackAndReturnsTheText() = runTest(dispatcher) {

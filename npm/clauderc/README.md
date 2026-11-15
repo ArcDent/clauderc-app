@@ -20,10 +20,14 @@ enroll_key_file = "/Users/me/.config/clauderc/enroll.key"
 
 ```sh
 clauderc run               # 前台试跑，确认能连上中转服务器
+clauderc start             # 在后台运行，关掉终端也不停
+clauderc stop              # 结束后台运行
 clauderc service install   # 写开机自启的服务文件，按打印的命令启用
 clauderc pair              # 显示配对二维码，用 APP 扫码
 clauderc devices           # 列出已配对的手机
 clauderc revoke <id>       # 吊销一台手机
 ```
+
+后台运行的进程号和日志写在配置文件同目录的 `agent.pid`、`agent.log`。开机自启的服务和 `clauderc start` 选一种用，不要同时开。
 
 服务文件里写的是当前 Node.js 版本的 npm 全局目录下的程序路径。用 nvm 换了 Node.js 版本并在新版本下重装这个包后，要再执行一次 `clauderc service install`，否则服务还在跑旧目录里的程序。

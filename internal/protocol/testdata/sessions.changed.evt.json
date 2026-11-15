@@ -6,7 +6,7 @@
   "client": "c-12",
   "body": {
     "sessions": [
-      {"id": "a1b2c3", "name": "fix reconnect", "cwd": "/Users/me/code/clauderc", "state": "working", "profileId": "api.anthropic.com", "lastActiveAt": "2026-11-12T09:30:20Z"}
+      {"id": "a1b2c3", "name": "fix reconnect", "cwd": "/Users/me/code/clauderc", "state": "working", "profileId": "api.anthropic.com", "lastActiveAt": "2026-11-12T09:30:20Z", "context": {"usedTokens": 86420, "windowTokens": 200000}}
     ],
     "profiles": [
       {"id": "default", "kind": "default"},

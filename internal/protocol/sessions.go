@@ -42,6 +42,18 @@ type Session struct {
 	// ProfileID references Profile.ID.
 	ProfileID    string    `json:"profileId"`
 	LastActiveAt time.Time `json:"lastActiveAt"`
+	// Context is how full the context window was after the last reply;
+	// absent before the first reply.
+	Context *SessionContext `json:"context,omitempty"`
+}
+
+// SessionContext is the context window use of a session.
+type SessionContext struct {
+	// UsedTokens is the prompt size of the last reply: input plus cache
+	// reads and writes.
+	UsedTokens int `json:"usedTokens"`
+	// WindowTokens is the model's context window.
+	WindowTokens int `json:"windowTokens"`
 }
 
 // SessionList answers sessions.subscribe and is the body of sessions.changed.

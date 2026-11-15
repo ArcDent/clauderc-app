@@ -1,0 +1,21 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-041",
+  "method": "usage.get",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "available": true,
+    "fiveHour": {
+      "utilization": 64,
+      "resetsAt": "2026-11-14T22:00:00Z"
+    },
+    "sevenDay": {
+      "utilization": 41,
+      "resetsAt": "2026-11-18T00:00:00Z"
+    },
+    "fetchedAt": "2026-11-14T15:12:40Z",
+    "stale": "expired"
+  }
+}

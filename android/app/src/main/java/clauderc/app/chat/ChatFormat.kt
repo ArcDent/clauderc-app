@@ -4,7 +4,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.em
 import clauderc.app.protocol.Command
@@ -54,18 +56,47 @@ fun splitSummary(tool: ToolCall): Pair<String?, String> {
     return if (rest.isNotEmpty() && first.any { it.code > 0x2E7F }) first to rest else null to summary
 }
 
+/** Whether a tool row is a slash command the user ran; the agent sends those as tool rows named after the command. */
+fun isCommand(tool: ToolCall): Boolean = tool.toolUseId.startsWith("command-")
+
 /** Whether a failed tool result is the user's refusal rather than an error. */
 fun isRefusal(tool: ToolCall): Boolean {
     val r = tool.result ?: return false
     return r.isError && (r.content.contains("doesn't want to proceed") || r.content.contains("rejected"))
 }
 
-/** The popup list for the composer, or null when the popup should be hidden. */
-fun filterCommands(commands: List<Command>, input: String): List<Command>? {
-    if (!input.startsWith("/") || input.any { it.isWhitespace() }) return null
-    val q = input.drop(1).lowercase()
-    return commands.filter { it.name.lowercase().contains(q) }
+/** The word the cursor is in when it starts with a slash, e.g. "/to" in "先看下 /to": its range in the text and what follows the slash. */
+data class SlashWord(val start: Int, val end: Int, val query: String)
+
+/** The slash word around [cursor], or null; a second slash, as in a path, means it is not a command. */
+fun slashWord(text: String, cursor: Int): SlashWord? {
+    if (cursor !in 1..text.length) return null
+    var start = cursor
+    while (start > 0 && !text[start - 1].isWhitespace()) start--
+    var end = cursor
+    while (end < text.length && !text[end].isWhitespace()) end++
+    if (start == cursor || text[start] != '/' || text.indexOf('/', start + 1) in start + 1 until end) return null
+    return SlashWord(start, end, text.substring(start + 1, end))
 }
+
+/** The popup list for [word], or null to hide the popup; a slash word mid-message that matches nothing hides it too. */
+fun filterCommands(commands: List<Command>, word: SlashWord?): List<Command>? {
+    word ?: return null
+    val q = word.query.lowercase()
+    val hits = commands.filter { it.name.lowercase().contains(q) }
+    return if (hits.isEmpty() && word.start > 0) null else hits
+}
+
+/** [value] with [word] replaced by "/[name] " and the cursor after the space. */
+fun pickCommand(value: TextFieldValue, word: SlashWord, name: String): TextFieldValue {
+    val before = value.text.substring(0, word.start) + "/$name "
+    val rest = value.text.substring(word.end).let { if (it.firstOrNull()?.isWhitespace() == true) it.drop(1) else it }
+    return TextFieldValue(before + rest, TextRange(before.length))
+}
+
+/** Whether a typed message runs /model, which the phone answers with its own model picker; the agent refuses it anyway. */
+fun isModelCommand(text: String): Boolean =
+    text.trim().split(Regex("\\s+")).first().equals("/model", ignoreCase = true)
 
 fun JsonElement?.stringField(name: String): String? =
     ((this as? JsonObject)?.get(name) as? JsonPrimitive)?.contentOrNull
@@ -104,7 +135,6 @@ fun toolDetail(tool: ToolCall): List<Pair<String, String>> {
  * blocks. Anything else stays as written.
  */
 fun richText(text: String, codeColor: Color): AnnotatedString = buildAnnotatedString {
-    val fence = Regex("```[^\\n]*\\n([\\s\\S]*?)```")
     var at = 0
     for (m in fence.findAll(text)) {
         inline(text.substring(at, m.range.first), codeColor)
@@ -114,8 +144,11 @@ fun richText(text: String, codeColor: Color): AnnotatedString = buildAnnotatedSt
     inline(text.substring(at), codeColor)
 }
 
+// Compiled once: richText runs for every reply that scrolls into view.
+private val fence = Regex("```[^\\n]*\\n([\\s\\S]*?)```")
+private val token = Regex("`([^`\\n]+)`|\\*\\*([^*\\n]+)\\*\\*")
+
 private fun AnnotatedString.Builder.inline(s: String, codeColor: Color) {
-    val token = Regex("`([^`\\n]+)`|\\*\\*([^*\\n]+)\\*\\*")
     var at = 0
     for (m in token.findAll(s)) {
         append(s.substring(at, m.range.first))

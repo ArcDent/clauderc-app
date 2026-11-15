@@ -7,6 +7,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.double
+import kotlinx.serialization.json.doubleOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -34,7 +37,7 @@ class ProtocolSamplesTest {
         "chat.close.req" to SessionIdRequest.serializer(),
         "chat.close.res" to Empty.serializer(),
         "chat.send.req" to ChatSendRequest.serializer(),
-        "chat.send.res" to Empty.serializer(),
+        "chat.send.res" to ChatSendResponse.serializer(),
         "chat.answer.req" to ChatAnswerRequest.serializer(),
         "chat.answer.res" to Empty.serializer(),
         "chat.interrupt.req" to SessionIdRequest.serializer(),
@@ -58,6 +61,8 @@ class ProtocolSamplesTest {
         "session.remove.res" to Empty.serializer(),
         "dirs.recent.req" to Empty.serializer(),
         "dirs.recent.res" to DirsRecentResponse.serializer(),
+        "usage.get.req" to Empty.serializer(),
+        "usage.get.res" to UsageResponse.serializer(),
         "git.status.req" to DirRequest.serializer(),
         "git.status.res" to GitStatusResponse.serializer(),
         "git.log.req" to GitLogRequest.serializer(),
@@ -152,9 +157,11 @@ class ProtocolSamplesTest {
         assertEquals(label, dropNulls(expected), dropNulls(actual))
     }
 
+    /** Also writes whole numbers one way, since Kotlin encodes the Double 30 as 30.0. */
     private fun dropNulls(e: JsonElement): JsonElement = when (e) {
         is JsonObject -> JsonObject(e.filterValues { it !is JsonNull }.mapValues { dropNulls(it.value) })
         is JsonArray -> JsonArray(e.map(::dropNulls))
+        is JsonPrimitive -> if (!e.isString && e.doubleOrNull?.let { it % 1.0 == 0.0 } == true) JsonPrimitive(e.double.toLong()) else e
         else -> e
     }
 }

@@ -81,10 +81,11 @@ func (h *Handler) send(ctx context.Context, req protocol.Envelope) protocol.Enve
 	if err != nil {
 		return failWith(req, err)
 	}
-	if !w.wait(ctx, body.Text, h.opts.DeliveryTimeout) {
+	ok, queued := w.wait(ctx, body.Text, h.opts.DeliveryTimeout)
+	if !ok {
 		return agent.Fail(req, protocol.CodeNotDelivered, fmt.Sprintf("消息发出后 %g 秒内没有出现在会话里，可能没有送达", h.opts.DeliveryTimeout.Seconds()))
 	}
-	return agent.Reply(req, struct{}{})
+	return agent.Reply(req, protocol.ChatSendResponse{Queued: queued})
 }
 
 // checkMessage validates a chat.send body and returns why it is refused.
@@ -198,9 +199,16 @@ type watch struct {
 }
 
 // wait reports whether text showed up within timeout, as a user item,
-// queued or not, or for a slash command as a command item.
-func (w *watch) wait(ctx context.Context, text string, timeout time.Duration) bool {
+// queued or not, or for a slash command as a command item or as an
+// enqueue record without text, which is how Claude Code queues one; and
+// whether it waits in the queue.
+func (w *watch) wait(ctx context.Context, text string, timeout time.Duration) (ok, queued bool) {
 	deadline := time.Now().Add(timeout)
+	command := strings.HasPrefix(strings.TrimSpace(text), "/")
+	commands := 0
+	if w.f != nil {
+		commands = w.f.QueuedCommands()
+	}
 	for {
 		var items []transcript.Item
 		if w.f == nil {
@@ -213,15 +221,18 @@ func (w *watch) wait(ctx context.Context, text string, timeout time.Duration) bo
 		}
 		for _, it := range items {
 			if delivered(it, text) {
-				return true
+				return true, it.Queued
 			}
 		}
+		if command && w.f != nil && w.f.QueuedCommands() > commands {
+			return true, true
+		}
 		if time.Now().After(deadline) {
-			return false
+			return false, false
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			return false, false
 		case <-time.After(100 * time.Millisecond):
 		}
 	}

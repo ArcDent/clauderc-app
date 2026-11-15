@@ -110,8 +110,8 @@ class ThemeTokensTest {
 
     @Test fun motionMatchesMockup() {
         val m = ClaudercMotion()
-        val easings = mapOf("--ease-emph" to m.easeEmph, "--ease-emph-in" to m.easeEmphIn, "--ease-spring" to m.easeSpring)
-        val durations = mapOf("--dur-s" to m.durS, "--dur-m" to m.durM, "--dur-l" to m.durL)
+        val easings = mapOf("--ease-emph" to m.easeEmph, "--ease-emph-in" to m.easeEmphIn, "--ease-spring" to m.easeSpring, "--ease-reveal" to m.easeReveal)
+        val durations = mapOf("--dur-s" to m.durS, "--dur-m" to m.durM, "--dur-l" to m.durL, "--dur-reveal" to m.durReveal)
         assertEquals(light.keys.filter { it.startsWith("--ease-") }.toSet(), easings.keys)
         assertEquals(light.keys.filter { it.startsWith("--dur-") }.toSet(), durations.keys)
         easings.forEach { (name, easing) ->

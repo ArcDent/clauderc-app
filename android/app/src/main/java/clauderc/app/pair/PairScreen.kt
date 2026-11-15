@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -72,6 +74,7 @@ import com.google.zxing.client.android.Intents
 import com.journeyapps.barcodescanner.BarcodeView
 import com.journeyapps.barcodescanner.DecoderFactory
 import com.journeyapps.barcodescanner.DefaultDecoderFactory
+import kotlinx.coroutines.delay
 
 /** The scan page from the mockup: black, a 240dp viewfinder, and a sheet for every failure. */
 @Composable
@@ -85,6 +88,13 @@ fun PairScreen(
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val failed = state !is PairUiState.Scanning && state !is PairUiState.Pairing && state !is PairUiState.Paired && state !is PairUiState.Known
+    // The camera opens once the page has slid in: opening it during the slide made the page stutter.
+    var cameraReady by remember { mutableStateOf(false) }
+    val cameraDelay = Clauderc.motion.durM.toLong()
+    LaunchedEffect(Unit) {
+        delay(cameraDelay)
+        cameraReady = true
+    }
     Box(Modifier.fillMaxSize().background(c.camera)) {
         Column(
             Modifier.fillMaxSize().statusBarsPadding().padding(start = sp.page, end = sp.page, top = sp.sp8, bottom = sp.sp6),
@@ -99,7 +109,7 @@ fun PairScreen(
                 letterSpacing = (-0.01).em,
             )
             Viewfinder(Modifier.padding(top = sp.sp6 + sp.sp6), scanning = state is PairUiState.Scanning) { m ->
-                if (state is PairUiState.Scanning || state is PairUiState.Pairing) scanner(m, onScanned)
+                if (cameraReady && (state is PairUiState.Scanning || state is PairUiState.Pairing)) scanner(m, onScanned)
             }
             Row(
                 Modifier.padding(top = sp.sp6 + sp.sp6).alpha(0.5f),
@@ -176,13 +186,13 @@ private fun FailureSheet(state: PairUiState, onRescan: () -> Unit) {
     }
 }
 
-/** .vf: four 28dp corner brackets and a scan line moving down 220dp and back. */
+/** .vf: four 28dp corner brackets and a scan line moving down 220dp and back, 3.6s each way. */
 @Composable
 private fun Viewfinder(modifier: Modifier, scanning: Boolean, preview: @Composable (Modifier) -> Unit) {
     val c = Clauderc.colors
     val t = rememberInfiniteTransition(label = "scan")
     val y by t.animateFloat(0f, 220f, Motion.scanLine, label = "y")
-    Box(modifier.size(240.dp)) {
+    Box(modifier.size(240.dp).testTag("viewfinder")) {
         preview(Modifier.fillMaxSize().padding(6.dp).clip(RoundedCornerShape(10.dp)))
         Canvas(Modifier.fillMaxSize()) {
             val arm = 28.dp.toPx()

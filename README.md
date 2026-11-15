@@ -25,7 +25,8 @@
 ## 能做什么
 
 - 看对话、发消息，回答 claude 的权限请求和提问
-- 新建和停止会话，会话按启动档位分组，档位就是会话启动时用的接口地址
+- 新建和停止会话，会话先按启动档位分组，档位里再按工作目录分组，档位就是会话启动时用的接口地址
+- 看电脑上登录的 Claude 账号用了多少 5 小时额度和每周额度，以及每个会话的上下文占了多少
 - 看 git 提交历史，暂存、提交、拉取和推送
 - 在设置里切换极简或卡片样式、浅色或深色，卡片样式还能换主题色或跟随壁纸取色
 
@@ -42,7 +43,7 @@
 APK、各平台的二进制和 `compose.yaml` 都在 [Releases](../../releases/latest) 页面下载，中转服务器的镜像是 `ghcr.io/arcdent/clauderc-relay`。
 
 1. 在服务器上用 Docker 拉起中转服务器，再让反向代理转到它
-2. 每台电脑运行 `npm i -g @arcdent/clauderc`，写好 `agent.toml`，运行 `clauderc run`
+2. 每台电脑运行 `npm i -g @arcdent/clauderc`，写好 `agent.toml`，运行 `clauderc start` 在后台运行
 3. 手机装上 Releases 里的 APK，扫 `clauderc pair` 显示的二维码
 
 <details>
@@ -143,10 +144,17 @@ claude_path = "/Users/me/.nvm/versions/node/v22.23.2/bin/claude"
 enroll_key_file = "/Users/me/.config/clauderc/enroll.key"
 ```
 
-先在前台试跑，确认能连上，再装成开机自启的服务：
+先在前台试跑，确认能连上，再放到后台运行：
 
 ```sh
-clauderc run
+clauderc run     # 前台运行，Ctrl+C 结束
+clauderc start   # 在后台运行，关掉终端也不停
+clauderc stop    # 结束后台运行
+```
+
+后台运行的进程号和日志写在配置文件同目录的 `agent.pid`、`agent.log`。想开机自动运行，就装成服务，不要和 `clauderc start` 同时用：
+
+```sh
 clauderc service install            # 写服务文件并打印启用命令
 clauderc service install --dry-run  # 只打印，不写文件
 ```
@@ -220,10 +228,13 @@ clauderc revoke <id>     # 吊销一台手机，它的连接会立即断开
 
 注册密钥也可以用环境变量 `CLAUDERC_ENROLL_KEY` 提供，设置后优先于 `enroll_key_file`。
 
-目标机程序会在 `agent.toml` 所在目录生成两个文件，都不需要手动改：
+目标机程序会在 `agent.toml` 所在目录生成下面这些文件，都不需要手动改：
 
 - `machine-id` 是这台目标机的标识，首次运行时生成
 - `profiles.json` 记着每个启动档位最近一次的启动参数，权限 600
+- `agent.pid` 和 `agent.log` 是 `clauderc start` 在后台运行时的进程号和日志
+
+5 小时和每周用量是目标机程序拿 Claude Code 的登录凭证向 `api.anthropic.com` 查的。凭证在 macOS 上从钥匙串里的 `Claude Code-credentials` 读，其他情况读 `~/.claude/.credentials.json`。电脑上没有登录官方账号时，APP 不显示用量。
 
 </details>
 
