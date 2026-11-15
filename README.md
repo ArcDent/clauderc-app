@@ -27,6 +27,7 @@
 - 看对话、发消息，回答 claude 的权限请求和提问
 - 新建和停止会话，会话按启动档位分组，档位就是会话启动时用的接口地址
 - 看 git 提交历史，暂存、提交、拉取和推送
+- 在设置里切换极简或卡片样式、浅色或深色，卡片样式还能换主题色或跟随壁纸取色
 
 ## 快速开始
 
@@ -43,8 +44,6 @@ APK、各平台的二进制和 `compose.yaml` 都在 [Releases](../../releases/l
 1. 在服务器上用 Docker 拉起中转服务器，再让反向代理转到它
 2. 每台电脑运行 `npm i -g @arcdent/clauderc`，写好 `agent.toml`，运行 `clauderc run`
 3. 手机装上 Releases 里的 APK，扫 `clauderc pair` 显示的二维码
-
-每一步的完整做法在下面展开。
 
 <details>
 <summary><b>1. 部署中转服务器</b></summary>
@@ -66,13 +65,15 @@ PUBLIC_URL=wss://relay.example.com
 
 然后在这个目录里运行 `docker compose up -d`，以后升级运行 `docker compose pull && docker compose up -d`。
 
-本机有这个仓库时，部署脚本经 ssh 替你做完 Compose 这几步，等健康检查通过后打印接下来要做的事，再运行一次就是升级。服务器要有 Compose v2，ssh 登录用户要能直接执行 docker：
+本机有这个仓库时，部署脚本可以经 ssh 替你做完 Compose 这几步。它等健康检查通过后打印接下来要做的事，再运行一次就是升级。服务器要有 Compose v2，ssh 登录用户要能直接执行 docker：
 
 ```sh
 scripts/deploy-relay.sh <ssh 主机> wss://relay.example.com
 ```
 
-首次启动时，容器自动生成注册密钥，和配对数据一起存在 Docker 卷里
+首次启动时，容器自动生成注册密钥，目标机凭它连接中转服务器。密钥和配对数据一起存在 Docker 卷里。
+
+`.env` 和部署脚本可调的设置：
 
 | 设置 | 默认 | 说明 |
 |---|---|---|
@@ -108,7 +109,10 @@ location / {
 `curl https://relay.example.com/healthz` 返回 200 说明服务正常。
 
 不用 Docker 时，也可以直接运行 Releases 里的 `relay-linux-<架构>`：
-- 用 `openssl rand -hex 32` 生成注册密钥，存成 600 权限的文件，按[配置](#配置)一节写 `relay.toml`，再运行 `relay serve --config <relay.toml 的路径>`
+
+1. 用 `openssl rand -hex 32` 生成注册密钥，存成 600 权限的文件
+2. 按[配置](#配置)一节写 `relay.toml`
+3. 运行 `relay serve --config <relay.toml 的路径>`
 
 </details>
 
@@ -122,7 +126,7 @@ npm i -g @arcdent/clauderc
 clauderc --version
 ```
 
-npm 只装本机系统和架构对应的程序包，支持 macOS、Linux 的 x64 和 arm64。不用 npm 时，用 Releases 里的 `agent-<系统>-<架构>`，把下面命令里的 `clauderc` 换成它的文件名即可
+npm 只装本机系统和架构对应的程序包，支持 macOS、Linux 的 x64 和 arm64。不用 npm 时，用 Releases 里的 `agent-<系统>-<架构>`，把下面命令里的 `clauderc` 换成它的文件名即可。
 
 下面这条对应 Compose 部署在 `/opt/clauderc-relay`，用 `docker run` 部署时，把引号里的命令换成 `docker exec clauderc-relay cat /data/enroll.key`：
 
@@ -161,7 +165,7 @@ Linux 上想在没登录时也运行，再执行一次 `loginctl enable-linger $
 - 服务文件里写的是当前 Node.js 版本的 npm 全局目录下的程序路径。用 nvm 换了 Node.js 版本并在新版本下重装后，要再执行一次 `clauderc service install`，否则服务还在跑旧目录里的程序。
 - 服务的 PATH 里通常找不到 nvm 装的 claude，所以 `claude_path` 要写绝对路径。
 - `claude_path` 要指向 claude 本身，不能是会自动补参数的包装脚本。唤醒已停止的会话时，命令只能是 `claude --bg --resume <会话 id>`，多一个参数，Claude Code 就会另起一个新会话。
-- 新建和唤醒会话时，用的是目标机程序自己的环境变量，加上该档位最近一个会话记下的模型设置。某个档位如果靠 `ANTHROPIC_BASE_URL` 这类环境变量指定接口，要把这些变量配进服务的运行环境：macOS 写在 plist 的 `EnvironmentVariables` 里，Linux 写在单元文件的 `Environment=` 里。用 `--settings` 指定接口的档位不受影响。
+- 某个档位如果靠 `ANTHROPIC_BASE_URL` 这类环境变量指定接口，要把这些变量配进服务的运行环境。因为新建和唤醒会话时，用的是目标机程序自己的环境变量，加上该档位最近一个会话记下的模型设置。macOS 写在 plist 的 `EnvironmentVariables` 里，Linux 写在单元文件的 `Environment=` 里。用 `--settings` 指定接口的档位不受影响。
 
 </details>
 
@@ -212,16 +216,18 @@ clauderc revoke <id>     # 吊销一台手机，它的连接会立即断开
 | `name` | 否 | 手机上显示的名字，默认是主机名 |
 | `claude_path` | 否 | claude 可执行文件，默认按 PATH 查找 `claude`；不能是会补参数的包装脚本 |
 | `enroll_key_file` | 二选一 | 注册密钥文件，权限必须是 600 或更严 |
-| `claude_dir` | 否 | Claude Code 的数据目录，默认 `~/.claude`，只读不写 |
+| `claude_dir` | 否 | Claude Code 的数据目录，默认 `~/.claude` |
 
 注册密钥也可以用环境变量 `CLAUDERC_ENROLL_KEY` 提供，设置后优先于 `enroll_key_file`。
 
-- 目标机程序会在 `agent.toml` 所在目录生成两个文件，都不需要手动改：`machine-id` 是这台目标机的标识，首次运行时生成
-- `profiles.json` 记着每个启动档位最近一次的启动参数，权限 600，不会对外暴露
+目标机程序会在 `agent.toml` 所在目录生成两个文件，都不需要手动改：
+
+- `machine-id` 是这台目标机的标识，首次运行时生成
+- `profiles.json` 记着每个启动档位最近一次的启动参数，权限 600
 
 </details>
 
-APP 没有配置文件。中转服务器地址和凭证都从配对二维码里得到，凭证加密保存在手机上。档位名在 APP 里改，只保存在这台手机上。
+APP 没有配置文件。中转服务器地址和凭证都从配对二维码里得到。档位名和外观在 APP 里改，只保存在这台手机上。
 
 ## 开发
 
