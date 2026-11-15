@@ -12,7 +12,9 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -102,6 +104,8 @@ fun ClaudercTheme(
             inverseSurface = c.inverse, inverseOnSurface = c.onInverse,
         )
     }
+    val loops = remember { LoopClock() }
+    LaunchedEffect(loops) { loops.run() }
     CompositionLocalProvider(
         LocalColors provides c,
         LocalFontSizes provides sizes,
@@ -109,6 +113,7 @@ fun ClaudercTheme(
         LocalRadii provides ClaudercRadii(),
         LocalMotion provides ClaudercMotion(),
         LocalUiStyle provides style,
+        LocalLoopClock provides loops,
     ) {
         MaterialTheme(colorScheme = scheme) {
             CompositionLocalProvider(

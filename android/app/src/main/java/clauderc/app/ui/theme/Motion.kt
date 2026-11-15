@@ -9,10 +9,10 @@ import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.InfiniteRepeatableSpec
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -22,11 +22,21 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 
 /**
  * Every animation of the app, built from the mockup's --dur-* and --ease-* (design/ui-mockup,
@@ -88,12 +98,47 @@ object Motion {
     fun <T> pressIn(): FiniteAnimationSpec<T> = tween(90, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f))
     fun <T> pressOut(): FiniteAnimationSpec<T> = tween(t.durS, easing = t.easeSpring)
 
-    // Loops.
-    val spin: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart)
-    val beacon: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(2400, easing = LinearEasing))
+    // Loops: one turn of the spinner and one pulse of the pending beacon, both read off [LoopClock].
+    const val SPIN_MILLIS = 900
+    const val BEACON_MILLIS = 2400
     /** The scan line crosses the viewfinder in 3.6s each way. */
     val scanLine: InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(3600, easing = FastOutSlowInEasing), RepeatMode.Reverse)
 }
+
+/** Loops move on at most this often, about 30 times a second; a small spinner needs no more. */
+const val LOOP_FRAME_MILLIS = 33L
+
+/**
+ * One clock for every loop on screen. It moves on at most every [LOOP_FRAME_MILLIS] and only while a
+ * loop is shown, and all loops read it, so two spinners never ask for frames of their own.
+ */
+@Stable
+class LoopClock {
+    var millis by mutableLongStateOf(0L)
+        private set
+    private var users by mutableIntStateOf(0)
+
+    /** Keeps the clock going while the calling composable is shown. */
+    @Composable
+    fun Use() {
+        DisposableEffect(this) {
+            users++
+            onDispose { users-- }
+        }
+    }
+
+    suspend fun run() {
+        snapshotFlow { users > 0 }.collectLatest { active ->
+            while (active) {
+                millis = withInfiniteAnimationFrameMillis { it }
+                delay(LOOP_FRAME_MILLIS)
+            }
+        }
+    }
+}
+
+/** Provided by [ClaudercTheme]; the default never moves, so a loop outside the theme stands still. */
+val LocalLoopClock = staticCompositionLocalOf { LoopClock() }
 
 /**
  * The back gesture scrubs the pop by finger progress, so while [dragging] the curve is a straight
