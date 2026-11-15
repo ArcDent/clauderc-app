@@ -337,6 +337,15 @@ func TestSendCommandWhileBusyIsDeliveredByBareEnqueue(t *testing.T) {
 	}
 }
 
+// A "!" command shows up as a command item, not as the text sent.
+func TestSendBashCommandIsDelivered(t *testing.T) {
+	f := newFixture(t, setup{})
+	body := f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "!ls"})
+	if got, want := string(body), `{}`; got != want {
+		t.Fatalf("body = %s, want %s", got, want)
+	}
+}
+
 // An enqueue without text is never taken for a plain message.
 func TestSendTextNotDeliveredByBareEnqueue(t *testing.T) {
 	f := newFixture(t, setup{status: "busy", state: "working", attachEnv: []string{fakeattach.DeliverEnv("enqueue-bare")}})

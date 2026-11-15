@@ -433,6 +433,10 @@ textarea.input { resize: none; line-height: 1.5; }
 .bubble.sending { opacity: 0.5; }
 .cap-r { align-self: flex-end; font-size: var(--fs-caption); color: var(--c-fg-3); padding-right: var(--sp-2); }
 .cap-c { align-self: center; font-size: var(--fs-caption); color: var(--c-fg-3); padding: var(--sp-2) 0; display: inline-flex; align-items: center; gap: var(--sp-2); }
+/* 跨会话消息：标题照 .cap-c 居中小字三级灰；正文和气泡同字号行高、左右内边距，左边对齐 claude 回复的文字，二级灰，全文显示；两种样式都不加底色和边框 */
+.peer { align-self: stretch; display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) 0; }
+.peer-t { align-self: center; font-size: var(--fs-caption); color: var(--c-fg-3); }
+.peer-b { padding: 0 16px; font-size: 15px; line-height: 1.55; color: var(--c-fg-2); white-space: pre-line; overflow-wrap: anywhere; }
 .tool { align-self: stretch; }
 .tool-row { width: 100%; border: 0; background: none; display: flex; align-items: center; gap: var(--sp-2); padding: 6px var(--sp-2); border-radius: var(--r-sm); text-align: left; font-size: 13px; }
 .t-verb { color: var(--c-fg-3); flex: none; }

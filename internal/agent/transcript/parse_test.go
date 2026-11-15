@@ -292,3 +292,371 @@ func TestParseSkillAndLocalCommand(t *testing.T) {
 		t.Fatalf("items\n%q\nwant\n%q", got, want)
 	}
 }
+
+func parseLines(t *testing.T, lines ...string) *transcript.Transcript {
+	t.Helper()
+	tr, err := transcript.Parse(strings.NewReader(strings.Join(lines, "\n") + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tr
+}
+
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+// notices returns "title|text" for every notice item.
+func notices(tr *transcript.Transcript) []string {
+	var out []string
+	for _, it := range tr.Items() {
+		if it.Kind == protocol.ItemNotice {
+			out = append(out, it.Title+"|"+it.Text)
+		}
+	}
+	return out
+}
+
+func userTexts(tr *transcript.Transcript) []string {
+	var out []string
+	for _, it := range tr.Items() {
+		if it.Kind == protocol.ItemUser {
+			out = append(out, it.Text)
+		}
+	}
+	return out
+}
+
+// A background task notification is a grey line, never a user bubble,
+// whether it arrives as a user record, or by being taken into a running
+// turn as a queue remove and a queued_command attachment.
+func TestParseTaskNotification(t *testing.T) {
+	const tn = `<task-notification>
+<task-id>b1</task-id>
+<status>completed</status>
+<summary>Background command "等 CI 跑完" completed (exit code 0)</summary>
+</task-notification>`
+	const want = `Background command "等 CI 跑完" completed (exit code 0)`
+	content := jsonString(tn)
+	formal := fmt.Sprintf(`{"type":"user","origin":{"kind":"task-notification"},"promptSource":"system","message":{"role":"user","content":%s}}`, content)
+	enqueue := fmt.Sprintf(`{"type":"queue-operation","operation":"enqueue","content":%s}`, content)
+	removeAbsorbed := fmt.Sprintf(`{"type":"queue-operation","operation":"remove","reason":"absorbed_mid_turn","content":%s}`, content)
+	removeOther := fmt.Sprintf(`{"type":"queue-operation","operation":"remove","content":%s}`, content)
+	attachment := fmt.Sprintf(`{"type":"attachment","attachment":{"type":"queued_command","prompt":%s,"commandMode":"task-notification","origin":{"kind":"task-notification"}}}`, content)
+
+	cases := []struct {
+		name  string
+		lines []string
+		want  int
+	}{
+		{"user record", []string{formal}, 1},
+		{"enqueue only", []string{enqueue}, 0},
+		{"enqueue absorbed", []string{enqueue, removeAbsorbed, attachment}, 1},
+		{"attachment then remove", []string{attachment, removeAbsorbed}, 1},
+		{"remove only", []string{removeAbsorbed}, 1},
+		{"attachment only", []string{attachment}, 1},
+		{"removed then user record", []string{enqueue, removeOther, formal}, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tr := parseLines(t, c.lines...)
+			got := notices(tr)
+			if len(got) != c.want {
+				t.Fatalf("notices %q, want %d", got, c.want)
+			}
+			for _, n := range got {
+				if n != "|"+want {
+					t.Errorf("notice %q, want %q", n, want)
+				}
+			}
+			if users := userTexts(tr); len(users) != 0 {
+				t.Errorf("user items %q, want none", users)
+			}
+		})
+	}
+
+	t.Run("event first line", func(t *testing.T) {
+		body := `<task-notification>
+<task-id>b2</task-id>
+<summary>Monitor event: "html"</summary>
+<event>
+html settled at 10:00
+more detail
+</event>
+</task-notification>`
+		line := fmt.Sprintf(`{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":%s}}`, jsonString(body))
+		got := notices(parseLines(t, line))
+		want := `Monitor event: "html"：html settled at 10:00`
+		if len(got) != 1 || got[0] != "|"+want {
+			t.Fatalf("notices %q, want %q", got, want)
+		}
+	})
+
+	t.Run("no summary", func(t *testing.T) {
+		line := `{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\n<fork-source>x</fork-source>\n</task-notification>"}}`
+		got := notices(parseLines(t, line))
+		if len(got) != 1 || got[0] != "|后台任务通知" {
+			t.Fatalf("notices %q, want 后台任务通知", got)
+		}
+	})
+}
+
+// A message from another session is a notice titled "<name> 发来", from
+// the idle user record or from the queue remove and attachment of a busy
+// turn; both sides of the pair together make one notice.
+func TestParsePeerMessage(t *testing.T) {
+	const name = "clauderc远端升级"
+	const body = "脚本已经跑完，结果在 dist/ 下。"
+	tag := `<cross-session-message from="uds:/tmp/cc-socks/1.sock" from-name="` + name + `" from-mode="bypass">` + "\n" + body + "\n" + `</cross-session-message>`
+	want := name + " 发来|" + body
+
+	idle := fmt.Sprintf(`{"type":"user","isMeta":true,"origin":{"kind":"peer","from":"uds:/tmp/cc-socks/1.sock","name":%s,"body":%s},"message":{"role":"user","content":%s}}`,
+		jsonString(name), jsonString(body), jsonString("Another Claude session sent a message:\n"+tag+"\n\nThis came from another Claude session — …"))
+	remove := fmt.Sprintf(`{"type":"queue-operation","operation":"remove","reason":"absorbed_mid_turn","content":%s}`, jsonString(tag))
+	attachment := fmt.Sprintf(`{"type":"attachment","attachment":{"type":"queued_command","prompt":%s,"commandMode":"prompt","origin":{"kind":"peer","name":%s,"body":%s}}}`,
+		jsonString(tag), jsonString(name), jsonString(body))
+
+	cases := []struct {
+		name  string
+		lines []string
+	}{
+		{"idle record", []string{idle}},
+		{"remove only", []string{remove}},
+		{"attachment only", []string{attachment}},
+		{"remove then attachment", []string{remove, attachment}},
+		{"attachment then remove", []string{attachment, remove}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tr := parseLines(t, c.lines...)
+			got := notices(tr)
+			if len(got) != 1 || got[0] != want {
+				t.Fatalf("notices %q, want %q", got, want)
+			}
+			if users := userTexts(tr); len(users) != 0 {
+				t.Errorf("user items %q, want none", users)
+			}
+		})
+	}
+
+	t.Run("repeated from one side", func(t *testing.T) {
+		got := notices(parseLines(t, remove, remove))
+		if len(got) != 2 {
+			t.Fatalf("notices %q, want 2", got)
+		}
+	})
+
+	t.Run("empty origin body", func(t *testing.T) {
+		line := fmt.Sprintf(`{"type":"user","isMeta":true,"origin":{"kind":"peer","name":%s},"message":{"role":"user","content":%s}}`,
+			jsonString(name), jsonString("Another Claude session sent a message:\n"+tag+"\n\nThis came from another Claude session — …"))
+		got := notices(parseLines(t, line))
+		if len(got) != 1 || got[0] != want {
+			t.Fatalf("notices %q, want %q", got, want)
+		}
+	})
+
+	t.Run("subagent report skipped", func(t *testing.T) {
+		line := fmt.Sprintf(`{"type":"user","isMeta":true,"origin":{"kind":"peer","name":%s,"body":%s,"senderTaskId":"t1"},"message":{"role":"user","content":%s}}`,
+			jsonString(name), jsonString(body), jsonString("An agent sent a message:\n"+tag))
+		if got := notices(parseLines(t, line)); len(got) != 0 {
+			t.Fatalf("notices %q, want none", got)
+		}
+	})
+
+	t.Run("idle and delivery notices", func(t *testing.T) {
+		idleLine := `{"type":"user","isMeta":true,"message":{"role":"user","content":"[Cross-session idle notice] \"clauderc远端升级\", which you asked to be notified about, is idle now — it finished a turn at 10:57. More."}}`
+		unnamedIdle := `{"type":"user","isMeta":true,"message":{"role":"user","content":"[Cross-session idle notice] \"uds:/tmp/cc-socks/2.sock\", which you asked to be notified about, is idle now — it finished a turn at 11:02."}}`
+		deliveryLine := `{"type":"user","isMeta":true,"message":{"role":"user","content":"[Cross-session delivery notice] 2 of your messages to another session were held by that session (recipients: uds:/tmp/cc-socks/1.sock)."}}`
+		otherMeta := `{"type":"user","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /x"}]}}`
+		got := notices(parseLines(t, idleLine, unnamedIdle, deliveryLine, otherMeta))
+		want := []string{"|「clauderc远端升级」空闲了", "|另一个会话空闲了", "|有 2 条消息被对方暂扣，没送到"}
+		if strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Fatalf("notices %q, want %q", got, want)
+		}
+	})
+
+	// The desktop client names the sender with a name attribute and
+	// leaves origin without a name or body.
+	t.Run("desktop wrapper", func(t *testing.T) {
+		line := fmt.Sprintf(`{"type":"user","isMeta":true,"origin":{"kind":"peer","from":"local_x","hostInjected":true},"message":{"role":"user","content":%s}}`,
+			jsonString(`<cross-session-message from="local_x" name="主页设计">`+"\n第二步\n</cross-session-message>"))
+		got := notices(parseLines(t, line))
+		if len(got) != 1 || got[0] != "主页设计 发来|第二步" {
+			t.Fatalf("notices %q, want 主页设计 发来|第二步", got)
+		}
+		// Or as a plain user record without origin, after a reminder.
+		line = fmt.Sprintf(`{"type":"user","message":{"role":"user","content":%s}}`,
+			jsonString("<system-reminder>\nrule\n</system-reminder>\n"+`<cross-session-message from="local_x" name="主页设计">`+"\n第二步\n</cross-session-message>"))
+		tr := parseLines(t, line)
+		if got := notices(tr); len(got) != 1 || got[0] != "主页设计 发来|第二步" {
+			t.Fatalf("notices %q, want 主页设计 发来|第二步", got)
+		}
+		if users := userTexts(tr); len(users) != 0 {
+			t.Errorf("user items %q, want none", users)
+		}
+	})
+
+	t.Run("no sender name", func(t *testing.T) {
+		line := fmt.Sprintf(`{"type":"queue-operation","operation":"remove","reason":"absorbed_mid_turn","content":%s}`,
+			jsonString(`<cross-session-message from="uds:/tmp/cc-socks/3.sock">`+"\n"+body+"\n</cross-session-message>"))
+		got := notices(parseLines(t, line))
+		if len(got) != 1 || got[0] != "另一个会话发来|"+body {
+			t.Fatalf("notices %q, want 另一个会话发来|%s", got, body)
+		}
+	})
+
+	// Two deliveries of the same text, as a burst writes them: both
+	// removes first, then both attachments.
+	t.Run("same text twice", func(t *testing.T) {
+		for _, lines := range [][]string{{remove, remove, attachment, attachment}, {remove, attachment, remove, attachment}} {
+			if got := notices(parseLines(t, lines...)); len(got) != 2 {
+				t.Fatalf("notices %q, want 2", got)
+			}
+		}
+	})
+
+	// A delivery seen only as an attachment does not swallow a later
+	// delivery of the same text.
+	t.Run("one side then a later delivery", func(t *testing.T) {
+		lines := []string{attachment}
+		for range 10 {
+			lines = append(lines, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"在做"}]}}`)
+		}
+		lines = append(lines, remove, attachment)
+		if got := notices(parseLines(t, lines...)); len(got) != 2 {
+			t.Fatalf("notices %q, want 2", got)
+		}
+	})
+
+	t.Run("trailing newline on both sides", func(t *testing.T) {
+		r := fmt.Sprintf(`{"type":"queue-operation","operation":"remove","reason":"absorbed_mid_turn","content":%s}`, jsonString(tag+"\n"))
+		a := fmt.Sprintf(`{"type":"attachment","attachment":{"type":"queued_command","prompt":%s,"commandMode":"prompt","origin":{"kind":"peer","name":%s,"body":%s}}}`,
+			jsonString(tag+"\n"), jsonString(name), jsonString(body))
+		if got := notices(parseLines(t, r, a)); len(got) != 1 {
+			t.Fatalf("notices %q, want 1", got)
+		}
+	})
+
+	// The user's own message holding a wrapper, sent while busy, stays
+	// the user's message: enqueue, remove absorbed_mid_turn, then the
+	// queued_command attachment with origin human.
+	t.Run("user message with a wrapper", func(t *testing.T) {
+		for _, text := range []string{"帮我看下这段：" + tag, tag} {
+			enq := fmt.Sprintf(`{"type":"queue-operation","operation":"enqueue","content":%s}`, jsonString(text))
+			rem := fmt.Sprintf(`{"type":"queue-operation","operation":"remove","reason":"absorbed_mid_turn","content":%s}`, jsonString(text))
+			att := fmt.Sprintf(`{"type":"attachment","attachment":{"type":"queued_command","prompt":%s,"commandMode":"prompt","origin":{"kind":"human"}}}`, jsonString(text))
+			tr := parseLines(t, enq, rem, att)
+			if got := notices(tr); len(got) != 0 {
+				t.Fatalf("notices %q, want none", got)
+			}
+			items := tr.Items()
+			if len(items) != 1 || items[0].Kind != protocol.ItemUser || items[0].Text != text || items[0].Queued {
+				t.Fatalf("items %+v, want the delivered user message", items)
+			}
+		}
+	})
+}
+
+// A "!" command written as <bash-input> and <bash-stdout> records becomes
+// one command item with the output folded into it.
+func TestParseBashCommand(t *testing.T) {
+	lines := []string{
+		`{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"<bash-input>git status</bash-input>"}}`,
+		`{"type":"user","message":{"role":"user","content":"<bash-stdout>\u001b[2mOn branch main\u001b[22m</bash-stdout><bash-stderr></bash-stderr>"}}`,
+	}
+	tr := parseLines(t, lines...)
+	items := tr.Items()
+	if len(items) != 1 {
+		t.Fatalf("got %d items, want 1", len(items))
+	}
+	it := items[0]
+	if it.Kind != transcript.ItemCommand || it.Command == nil {
+		t.Fatalf("item %+v, want command", it)
+	}
+	if it.Command.Name != "!" || it.Command.Args != "git status" || it.Command.Output != "On branch main" {
+		t.Fatalf("command %+v, want ! git status with output", it.Command)
+	}
+	if users := userTexts(tr); len(users) != 0 {
+		t.Errorf("user items %q, want none", users)
+	}
+
+	t.Run("one record", func(t *testing.T) {
+		line := `{"type":"user","message":{"role":"user","content":"<bash-input>ls</bash-input><bash-stdout>a.txt</bash-stdout>"}}`
+		tr := parseLines(t, line)
+		items := tr.Items()
+		if len(items) != 1 || items[0].Command == nil || items[0].Command.Args != "ls" || items[0].Command.Output != "a.txt" {
+			t.Fatalf("items %+v, want one command ls with output", items)
+		}
+	})
+
+	// Typed while busy, the command runs at once and waits in the queue
+	// with its output; the user record after the dequeue repeats it.
+	t.Run("queued", func(t *testing.T) {
+		const content = `"<bash-input>pwd</bash-input><bash-stdout>/tmp</bash-stdout><bash-stderr></bash-stderr>"`
+		enqueue := `{"type":"queue-operation","operation":"enqueue","content":` + content + `}`
+		tr := parseLines(t, enqueue)
+		items := tr.Items()
+		if len(items) != 1 || items[0].Kind != transcript.ItemCommand || items[0].Command == nil || items[0].Command.Args != "pwd" || items[0].Command.Output != "/tmp" || !items[0].Queued {
+			t.Fatalf("items %+v, want one queued command pwd with output", items)
+		}
+		tr = parseLines(t, enqueue,
+			`{"type":"queue-operation","operation":"dequeue"}`,
+			`{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":`+content+`}}`)
+		items = tr.Items()
+		if len(items) != 1 || items[0].Command == nil || items[0].Command.Args != "pwd" || items[0].Queued {
+			t.Fatalf("items %+v, want the one command, no longer queued", items)
+		}
+	})
+
+	// A command without output stops waiting for it, so a later stray
+	// output does not land on it.
+	t.Run("no output", func(t *testing.T) {
+		tr := parseLines(t,
+			`{"type":"user","message":{"role":"user","content":"<bash-input>true</bash-input>"}}`,
+			`{"type":"user","message":{"role":"user","content":"<bash-stdout></bash-stdout><bash-stderr></bash-stderr>"}}`,
+			`{"type":"user","message":{"role":"user","content":"<local-command-stdout>stale</local-command-stdout>"}}`)
+		items := tr.Items()
+		if len(items) != 1 || items[0].Command == nil || items[0].Command.Args != "true" || items[0].Command.Output != "" {
+			t.Fatalf("items %+v, want ! true without output", items)
+		}
+	})
+}
+
+// After /compact the transcript starts with the summary Claude Code writes
+// in place of the conversation; it shows as one grey line.
+func TestParseCompactSummary(t *testing.T) {
+	line := `{"type":"user","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context. The summary is long."}}`
+	tr := parseLines(t, line)
+	got := notices(tr)
+	if len(got) != 1 || got[0] != "|上下文已压缩" {
+		t.Fatalf("notices %q, want 上下文已压缩", got)
+	}
+	if users := userTexts(tr); len(users) != 0 {
+		t.Errorf("user items %q, want none", users)
+	}
+}
+
+// <system-reminder> and <artifact-view-context> blocks are desktop-client
+// wrappers put before the text: the text after them stays, the wrappers
+// do not.
+func TestParseSystemReminder(t *testing.T) {
+	lines := []string{
+		`{"type":"user","isMeta":true,"message":{"role":"user","content":"<system-reminder>rules</system-reminder>"}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"<system-reminder>\nrule\n</system-reminder>"},{"type":"text","text":"正文"}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"<system-reminder>only</system-reminder>"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"<artifact-view-context>ctx</artifact-view-context>"}}`,
+		`{"type":"user","message":{"role":"user","content":"正文里提到 <system-reminder> 也算正文"}}`,
+		`{"type":"queue-operation","operation":"enqueue","content":"<system-reminder>\nrules\n</system-reminder>"}`,
+		// The task a forked session starts with.
+		`{"type":"user","message":{"role":"user","content":"<system-reminder>\nrule\n</system-reminder>\nTask (from the session that started this one): 做这件事"}}`,
+		`{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"<artifact-view-context artifact=\"5ac9\">\n{\"context\":{}}\n</artifact-view-context>\n\nD吧"}}`,
+		`{"type":"user","message":{"role":"user","content":"<system-reminder>\nrule\n</system-reminder>\n<side-sessions-event>\n{\"event\":\"done\"}\n</side-sessions-event>"}}`,
+	}
+	tr := parseLines(t, lines...)
+	got := userTexts(tr)
+	want := []string{"正文", "正文里提到 <system-reminder> 也算正文", "Task (from the session that started this one): 做这件事", "D吧"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("user items %q, want %q", got, want)
+	}
+}

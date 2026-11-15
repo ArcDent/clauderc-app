@@ -174,6 +174,21 @@ class ScreensTest {
             model = "claude-opus-5-5", permissionMode = "default",
         )
         shot("05-chat") { ChatScreen(chat, ChatActions()) }
+        // Grey text as in the demo's 「clauderc 协议」 session (design/ui-mockup/demo.html).
+        val notices = chat.copy(
+            items = items.take(5) + listOf(
+                ChatItem(8, ItemKind.NOTICE, text = "Background command \"等 CI 跑完\" completed (exit code 0)"),
+                ChatItem(9, ItemKind.NOTICE, title = "协议文档 发来", text = "我在改 design.md 的错误码那一节，名字照你这边来。envelope.go 先别提交，等我对完一遍。"),
+                ChatItem(10, ItemKind.NOTICE, text = "「协议文档」空闲了"),
+                ChatItem(11, ItemKind.TOOL, tool = ToolCall(
+                    "toolu_d1", "SendMessage", "SendMessage",
+                    buildJsonObject { put("to", "09588c02"); put("message", "灰字块已经画好了，你那边可以接着做文档了。") },
+                )),
+                ChatItem(12, ItemKind.USER, text = "先别提交\n把错误码也一起定义了\n然后跑一遍 go vet"),
+            ),
+        )
+        shot("05b-chat-notices") { ChatScreen(notices, ChatActions()) }
+        shot("05b-chat-notices-dark", isDark = true) { ChatScreen(notices, ChatActions()) }
         val permission = chat.copy(pending = Pending("t3", PendingKind.PERMISSION, "Bash", buildJsonObject { put("command", "go vet ./... && go test ./internal/protocol/...") }))
         shot("06-chat-permission") { ChatScreen(permission, ChatActions()) }
         shot("06-chat-permission-dark", isDark = true) { ChatScreen(permission, ChatActions()) }

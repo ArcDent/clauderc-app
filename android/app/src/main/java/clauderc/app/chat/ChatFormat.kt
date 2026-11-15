@@ -59,6 +59,9 @@ fun splitSummary(tool: ToolCall): Pair<String?, String> {
 /** Whether a tool row is a slash command the user ran; the agent sends those as tool rows named after the command. */
 fun isCommand(tool: ToolCall): Boolean = tool.toolUseId.startsWith("command-")
 
+/** Whether a tool row is a message this session sent to another one; the agent sends it as a tool row named SendMessage. */
+fun isSendMessage(tool: ToolCall): Boolean = tool.toolName == "SendMessage"
+
 /** Whether a failed tool result is the user's refusal rather than an error. */
 fun isRefusal(tool: ToolCall): Boolean {
     val r = tool.result ?: return false

@@ -20,6 +20,11 @@ const (
 	ItemUser      ItemKind = "user"
 	ItemAssistant ItemKind = "assistant"
 	ItemTool      ItemKind = "tool"
+	// ItemNotice is a line of grey text that is not a bubble, such as a
+	// background task notification. Text is the line; a notice with a
+	// Title, only sent by another session, shows the title above the full
+	// Text instead.
+	ItemNotice ItemKind = "notice"
 	// ItemInterrupted marks where the user interrupted a turn, the
 	// "Interrupted" line Claude Code draws; it has no text.
 	ItemInterrupted ItemKind = "interrupted"
@@ -41,8 +46,12 @@ type Image struct {
 type ChatItem struct {
 	Seq  int64    `json:"seq"`
 	Kind ItemKind `json:"kind"`
-	// Text is set for user and assistant items.
+	// Text is set for user and assistant items, and for the body of a
+	// notice.
 	Text string `json:"text,omitempty"`
+	// Title is set for a notice from another session, e.g.
+	// "clauderc 发来"; the phone shows it as a grey line above Text.
+	Title string `json:"title,omitempty"`
 	// Images is set for user items with pictures.
 	Images []Image `json:"images,omitempty"`
 	// Tool is set for tool items.

@@ -72,6 +72,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -315,7 +316,18 @@ private fun ChatItemView(item: ChatItem, working: Boolean) {
     when (item.kind) {
         ItemKind.USER -> UserBubble(item)
         ItemKind.ASSISTANT -> AssistantBubble(item.text.orEmpty())
-        ItemKind.TOOL -> item.tool?.let { if (isCommand(it)) CommandView(it) else ToolRow(it, working) }
+        ItemKind.TOOL -> item.tool?.let {
+            when {
+                isSendMessage(it) -> {
+                    val to = it.input.stringField("to").orEmpty()
+                    val message = it.input.stringField("message").orEmpty()
+                    if (message.isEmpty()) Note("等「$to」空闲") else PeerNote("发给 $to", message)
+                }
+                isCommand(it) -> CommandView(it)
+                else -> ToolRow(it, working)
+            }
+        }
+        ItemKind.NOTICE -> item.title.let { if (it.isNullOrEmpty()) Note(item.text.orEmpty()) else PeerNote(it, item.text.orEmpty()) }
         ItemKind.INTERRUPTED -> Note("已中断")
     }
 }
@@ -326,7 +338,21 @@ private fun Note(text: String, spinner: Boolean = false) {
     val sp = Clauderc.spacing
     Row(Modifier.fillMaxWidth().padding(vertical = sp.sp2), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
         if (spinner) Spinner(size = 12.dp, color = Clauderc.colors.fg3)
-        Text(text, Modifier.padding(start = if (spinner) sp.sp2 else 0.dp), fontSize = Clauderc.fontSizes.caption, color = Clauderc.colors.fg3)
+        Text(text, Modifier.padding(start = if (spinner) sp.sp2 else 0.dp), fontSize = Clauderc.fontSizes.caption, color = Clauderc.colors.fg3, textAlign = TextAlign.Center)
+    }
+}
+
+/**
+ * A message from another session: its title as a [Note], the message in full under it in grey,
+ * set like a reply so its left edge lines up with Claude's text. No background or border.
+ */
+@Composable
+private fun PeerNote(title: String, body: String) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    Column(Modifier.fillMaxWidth().padding(vertical = sp.sp2), verticalArrangement = Arrangement.spacedBy(sp.sp1)) {
+        Text(title, Modifier.fillMaxWidth(), fontSize = Clauderc.fontSizes.caption, color = c.fg3, textAlign = TextAlign.Center)
+        Text(body, Modifier.padding(horizontal = 16.dp), color = c.fg2, fontSize = 15.sp, lineHeight = 1.55.em)
     }
 }
 

@@ -244,8 +244,14 @@ func delivered(it transcript.Item, text string) bool {
 	case protocol.ItemUser:
 		return strings.HasSuffix(strings.TrimSpace(it.Text), text)
 	case transcript.ItemCommand:
+		if it.Command == nil {
+			return false
+		}
+		if line, ok := strings.CutPrefix(text, "!"); ok {
+			return it.Command.Name == "!" && it.Command.Args == strings.TrimSpace(line)
+		}
 		name, _, _ := strings.Cut(text, " ")
-		return strings.HasPrefix(text, "/") && it.Command != nil && it.Command.Name == name
+		return strings.HasPrefix(text, "/") && it.Command.Name == name
 	}
 	return false
 }

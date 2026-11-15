@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.items",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "items": [
+      {"seq": 258, "kind": "notice", "text": "上下文已压缩"},
+      {"seq": 259, "kind": "notice", "title": "clauderc远端升级 发来", "text": "脚本已经跑完，结果放在 dist/ 下。"}
+    ]
+  }
+}
