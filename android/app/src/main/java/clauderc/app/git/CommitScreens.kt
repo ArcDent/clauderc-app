@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,7 +29,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -48,11 +55,15 @@ import clauderc.app.protocol.GitShowResponse
 import clauderc.app.protocol.Method
 import clauderc.app.ui.components.AppBar
 import clauderc.app.ui.components.BarTitle
+import clauderc.app.ui.components.CardBlock
 import clauderc.app.ui.components.PillButton
 import clauderc.app.ui.components.PillStyle
 import clauderc.app.ui.components.SectionHeading
 import clauderc.app.ui.components.Spinner
 import clauderc.app.ui.components.SymbolButton
+import clauderc.app.ui.components.cardItem
+import clauderc.app.ui.components.isCardStyle
+import clauderc.app.ui.components.rowStart
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercColors
 import clauderc.app.ui.theme.MonoFamily
@@ -100,6 +111,7 @@ private val commitTime = DateTimeFormatter.ofPattern("M 月 d 日 HH:mm")
 fun CommitScreen(hash: String, state: Loadable<GitShowResponse>, onBack: () -> Unit, onOpenFile: (CommitFile) -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
+    val card = isCardStyle
     Column(Modifier.fillMaxSize().background(c.bg)) {
         AppBar(navigation = { SymbolButton(Symbols.ArrowBack, "返回", onClick = onBack) }, title = { BarTitle(hash.take(7), mono = true) })
         val show = state.value
@@ -110,16 +122,30 @@ fun CommitScreen(hash: String, state: Loadable<GitShowResponse>, onBack: () -> U
                 item {
                     val subject = show.message.substringBefore('\n')
                     val body = show.message.substringAfter('\n', "").trim()
-                    Column(Modifier.padding(start = sp.page, end = sp.page, top = sp.sp2, bottom = sp.sp5)) {
-                        Text(subject, fontSize = Clauderc.fontSizes.headline, fontWeight = FontWeight.Light, lineHeight = 1.35.em, letterSpacing = (-0.01).em)
-                        if (body.isNotEmpty()) Text(body, Modifier.padding(top = sp.sp3), fontSize = Clauderc.fontSizes.label, color = c.fg2, lineHeight = 1.75.em)
+                    // The card style puts the message and the details on cards of their own.
+                    CardBlock(Modifier.padding(top = sp.sp2, bottom = if (card) sp.sp3 else sp.sp5), padding = sp.sp5) {
+                        Column(if (card) Modifier else Modifier.padding(horizontal = sp.page)) {
+                            Text(
+                                subject,
+                                fontSize = if (card) Clauderc.fontSizes.title else Clauderc.fontSizes.headline,
+                                fontWeight = if (card) FontWeight.SemiBold else FontWeight.Light,
+                                lineHeight = 1.35.em,
+                                letterSpacing = (-0.01).em,
+                            )
+                            if (body.isNotEmpty()) Text(body, Modifier.padding(top = sp.sp3), fontSize = Clauderc.fontSizes.label, color = c.fg2, lineHeight = 1.75.em)
+                        }
                     }
                 }
                 item {
-                    Column(Modifier.padding(start = sp.page, end = sp.page, bottom = sp.sp2), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Meta("作者", show.author)
-                        Meta("时间", commitTime.format(show.time.atZone(ZoneId.systemDefault())))
-                        if (show.parents.isNotEmpty()) Meta("父提交", show.parents.joinToString(" ") { it.take(7) }, mono = true)
+                    CardBlock(Modifier.padding(bottom = sp.sp2)) {
+                        Column(
+                            Modifier.padding(start = if (card) sp.sp5 else sp.page, end = if (card) sp.sp5 else sp.page, top = if (card) sp.sp4 else 0.dp, bottom = if (card) sp.sp4 else 0.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Meta("作者", show.author)
+                            Meta("时间", commitTime.format(show.time.atZone(ZoneId.systemDefault())))
+                            if (show.parents.isNotEmpty()) Meta("父提交", show.parents.joinToString(" ") { it.take(7) }, mono = true)
+                        }
                     }
                 }
                 item {
@@ -127,7 +153,9 @@ fun CommitScreen(hash: String, state: Loadable<GitShowResponse>, onBack: () -> U
                         Counts(show.files.sumOf { it.added }, show.files.sumOf { it.deleted })
                     }
                 }
-                items(show.files, key = { it.path }) { f -> CommitFileRow(f) { onOpenFile(f) } }
+                itemsIndexed(show.files, key = { _, it -> it.path }) { i, f ->
+                    CommitFileRow(f, Modifier.cardItem(i == 0, i == show.files.lastIndex)) { onOpenFile(f) }
+                }
             }
         }
     }
@@ -152,14 +180,14 @@ fun Counts(added: Int, deleted: Int) {
 }
 
 @Composable
-private fun CommitFileRow(f: CommitFile, onClick: () -> Unit) {
+private fun CommitFileRow(f: CommitFile, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .clickable(enabled = !f.binary, role = Role.Button, onClick = onClick)
-            .padding(start = sp.page, end = sp.sp4 + sp.sp2, top = 10.dp, bottom = 10.dp),
+            .padding(start = rowStart, end = if (isCardStyle) sp.sp4 else sp.sp4 + sp.sp2, top = 10.dp, bottom = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(sp.sp4),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -192,6 +220,7 @@ fun diffLineColors(kind: DiffKind, c: ClaudercColors): Pair<Color, Color> = when
 fun DiffScreen(path: String, subtitle: String, state: Loadable<GitDiffResponse>, onBack: () -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
+    val card = isCardStyle
     val diff = state.value
     val lines = remember(diff?.patch) { parsePatch(diff?.patch.orEmpty()) }
     var expanded by remember { mutableStateOf(false) }
@@ -214,21 +243,47 @@ fun DiffScreen(path: String, subtitle: String, state: Loadable<GitDiffResponse>,
             state.error != null -> Text(state.error, Modifier.padding(sp.page), color = c.danger, fontSize = Clauderc.fontSizes.label)
             diff == null -> Box(Modifier.fillMaxWidth().padding(sp.sp8), contentAlignment = Alignment.Center) { Spinner(color = c.fg3) }
             diff.binary -> Text("二进制文件已更改，不显示内容", Modifier.padding(sp.page), fontSize = Clauderc.fontSizes.label, color = c.fg2)
-            (diff.collapsed || changed > GitLimits.DIFF_COLLAPSE_LINES) && !expanded -> Column(
-                Modifier.padding(horizontal = sp.page, vertical = sp.sp6),
-                verticalArrangement = Arrangement.spacedBy(sp.sp2),
-            ) {
-                Text("%,d 行差异，已折叠".format(changed), fontSize = Clauderc.fontSizes.title, fontWeight = FontWeight.Light)
-                Text("超过 1000 行的差异默认不展开。", fontSize = Clauderc.fontSizes.label, color = c.fg2, lineHeight = 1.6.em)
-                PillButton("展开", onClick = { expanded = true }, style = PillStyle.Tonal, modifier = Modifier.padding(top = sp.sp3))
+            (diff.collapsed || changed > GitLimits.DIFF_COLLAPSE_LINES) && !expanded -> CardBlock(Modifier.padding(top = if (card) sp.sp4 else 0.dp), padding = sp.sp5) {
+                Column(
+                    if (card) Modifier else Modifier.padding(horizontal = sp.page, vertical = sp.sp6),
+                    verticalArrangement = Arrangement.spacedBy(sp.sp2),
+                ) {
+                    Text("%,d 行差异，已折叠".format(changed), fontSize = Clauderc.fontSizes.title, fontWeight = if (card) FontWeight.SemiBold else FontWeight.Light)
+                    Text("超过 1000 行的差异默认不展开。", fontSize = Clauderc.fontSizes.label, color = c.fg2, lineHeight = 1.6.em)
+                    PillButton("展开", onClick = { expanded = true }, style = PillStyle.Tonal, modifier = Modifier.padding(top = sp.sp3))
+                }
             }
             lines.isEmpty() -> Text("没有差异", Modifier.padding(sp.page), fontSize = Clauderc.fontSizes.label, color = c.fg3)
             else -> {
                 // A long diff opened with 展开 only fades in: growing a thousand lines in height would stutter.
                 val shown = remember { MutableTransitionState(!expanded) }.apply { targetState = true }
+                val list = rememberLazyListState()
+                val cardColor = c.card
+                val radius = Clauderc.radii.card
+                // The card style's card ends where the lines do, or runs off the bottom when they fill the screen.
+                val onCard = if (card) {
+                    Modifier
+                        .padding(start = sp.sp4, end = sp.sp4, top = sp.sp2)
+                        .drawWithContent {
+                            val info = list.layoutInfo
+                            val last = info.visibleItemsInfo.lastOrNull()
+                            val end = if (last == null) 0f else (last.offset + last.size + info.afterContentPadding).toFloat()
+                            val outline = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, minOf(size.height, end), CornerRadius(radius.toPx()))) }
+                            clipPath(outline) {
+                                drawRect(cardColor)
+                                this@drawWithContent.drawContent()
+                            }
+                        }
+                } else {
+                    Modifier
+                }
                 AnimatedVisibility(shown, enter = fadeIn(Motion.enter())) {
-                    Box(Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) {
-                        LazyColumn(Modifier.fillMaxSize().navigationBarsPadding().testTag("diff"), contentPadding = PaddingValues(bottom = sp.sp6)) {
+                    Box(onCard.fillMaxSize().horizontalScroll(rememberScrollState())) {
+                        LazyColumn(
+                            Modifier.fillMaxSize().navigationBarsPadding().testTag("diff"),
+                            state = list,
+                            contentPadding = PaddingValues(bottom = if (card) sp.sp2 else sp.sp6),
+                        ) {
                             items(lines) { l -> DiffRow(l) }
                         }
                     }

@@ -1,5 +1,8 @@
 package clauderc.app.ui
 
+import androidx.activity.BackEventCompat
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
@@ -94,6 +97,56 @@ class MotionTest {
         assertTrue("the list comes back from the left: x=$listMid", listMid < 0)
 
         compose.mainClock.advanceTimeBy(enter)
+        compose.onNodeWithTag("chat").assertDoesNotExist()
+        assertTrue(compose.onNodeWithTag("list").fetchSemanticsNode().positionInRoot.x == 0f)
+    }
+
+    @Test fun backGestureFollowsTheFingerAndDeceleratesAfterRelease() {
+        lateinit var nav: NavHostController
+        lateinit var back: OnBackPressedDispatcher
+        compose.setContent {
+            back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            ClaudercTheme(darkTheme = false) {
+                nav = rememberNavController()
+                ClaudercNavHost(nav, startDestination = ListPage) {
+                    composable<ListPage> { Box(Modifier.fillMaxSize().testTag("list")) }
+                    composable<ChatPage> { Box(Modifier.fillMaxSize().testTag("chat")) }
+                }
+            }
+        }
+        compose.runOnUiThread { nav.navigate(ChatPage) }
+        compose.waitForIdle()
+        val width = compose.onNodeWithTag("chat").fetchSemanticsNode().size.width.toFloat()
+        fun chatX() = compose.onNodeWithTag("chat", useUnmergedTree = true).fetchSemanticsNode().positionInRoot.x
+        fun dragTo(progress: Float) {
+            compose.runOnUiThread { back.dispatchOnBackStarted(BackEventCompat(0f, 400f, 0f, BackEventCompat.EDGE_LEFT)) }
+            compose.runOnUiThread { back.dispatchOnBackProgressed(BackEventCompat(progress * width, 400f, progress, BackEventCompat.EDGE_LEFT)) }
+            compose.waitForIdle()
+        }
+
+        // While the finger is down the page keeps pace with it; a cancel brings it back.
+        dragTo(0.4f)
+        assertEquals("the chat follows the finger", 0.4f * width, chatX(), 1f)
+        compose.runOnUiThread { back.dispatchOnBackCancelled() }
+        compose.waitForIdle()
+        assertEquals(0f, chatX(), 0f)
+        compose.onNodeWithTag("list").assertDoesNotExist()
+
+        // After the release the rest of the way (60% of durM) decelerates: a quarter of that time in, the
+        // emphasized curve has covered about 69% of the remaining distance, a linear finish only 25%.
+        dragTo(0.4f)
+        val rest = (enter * 0.6).toLong()
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread { back.onBackPressed() }
+        // NavHost takes two frames to start the finish: one pops the entry, the next starts the animation at play time 0.
+        repeat(2) { compose.mainClock.advanceTimeByFrame() }
+        assertEquals("the finish has not moved yet", 0.4f * width, chatX(), 1f)
+        // Frames come every 16ms, so the first one at or after a quarter (42ms) is 48ms in.
+        compose.mainClock.advanceTimeBy(rest / 4)
+        val x = chatX()
+        assertTrue("a quarter into the finish the chat is past 75%: x=$x of $width (linear ≈ 57%)", x > 0.75f * width)
+
+        compose.mainClock.advanceTimeBy(rest)
         compose.onNodeWithTag("chat").assertDoesNotExist()
         assertTrue(compose.onNodeWithTag("list").fetchSemanticsNode().positionInRoot.x == 0f)
     }

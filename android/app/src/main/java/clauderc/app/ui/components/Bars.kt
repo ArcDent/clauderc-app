@@ -116,12 +116,14 @@ fun Hero(
     subtitle: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val sp = Clauderc.spacing
-    Column(modifier.fillMaxWidth().padding(start = sp.page, end = sp.page, top = sp.sp2, bottom = bottom)) {
+    val card = isCardStyle
+    // The card style's titles are heavy and a little smaller, like its cards' bold numbers.
+    Column(modifier.fillMaxWidth().padding(start = sp.page, end = sp.page, top = sp.sp2, bottom = if (card) minOf(bottom, sp.sp4) else bottom)) {
         Text(
             title,
-            fontSize = Clauderc.fontSizes.display,
-            fontWeight = FontWeight.Light,
-            letterSpacing = (-0.02).em,
+            fontSize = if (card) 30.sp else Clauderc.fontSizes.display,
+            fontWeight = if (card) FontWeight.Bold else FontWeight.Light,
+            letterSpacing = if (card) (-0.01).em else (-0.02).em,
             lineHeight = 1.2.em,
             modifier = Modifier.semantics { heading() },
         )
@@ -147,7 +149,7 @@ fun Hero(
 fun SectionHeading(text: String, modifier: Modifier = Modifier, trailing: (@Composable () -> Unit)? = null) {
     val sp = Clauderc.spacing
     Row(
-        modifier.fillMaxWidth().padding(start = sp.page, end = sp.page, top = sp.sp5, bottom = sp.sp1),
+        modifier.fillMaxWidth().padding(start = sp.page, end = sp.page, top = sp.sp5, bottom = if (isCardStyle) sp.sp2 else sp.sp1),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(text, fontSize = Clauderc.fontSizes.caption, fontWeight = FontWeight.Medium, color = Clauderc.colors.fg3)

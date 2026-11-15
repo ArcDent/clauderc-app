@@ -28,7 +28,7 @@ clauderc-app/
 └── scripts/e2e-claude/     第 4 组的 Python 实测脚本和结果，已由 test/e2e/claude 取代
 ```
 
-Android 工程只有一个 `app` 模块，包名 `clauderc.app`，按页面分包：`pair`、`machines`、`sessions`、`chat`、`git`，另有 `protocol`（对应 `internal/protocol`）、`net`（WebSocket 连接）、`data`（凭证、档位名、目标机和会话状态）、`ui`（主题和通用组件）。
+Android 工程只有一个 `app` 模块，包名 `clauderc.app`，按页面分包：`pair`、`machines`、`sessions`、`chat`、`git`、`settings`，另有 `protocol`（对应 `internal/protocol`）、`net`（WebSocket 连接）、`data`（凭证、档位名、外观选择、目标机和会话状态）、`ui`（主题和通用组件）。
 
 ## 构建和运行
 

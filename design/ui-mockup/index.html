@@ -12,6 +12,7 @@
   /* APP 主题：--c- --fs- --sp- --r- --font- 开头的变量与 Compose 主题一一对应，Android 实现照抄取值。 */
   --c-bg: #FFFFFF;
   --c-sheet: #FFFFFF;
+  --c-card: #FFFFFF;
   --c-surface: #F3F3F3;
   --c-surface-2: #E7E7E7;
   --c-line: #ECECEC;
@@ -62,6 +63,7 @@
   --r-sm: 8px;
   --r-md: 16px;
   --r-lg: 28px;
+  --r-card: 20px;
   --r-pill: 999px;
   --ease-emph: cubic-bezier(0.25, 1, 0.5, 1);
   --ease-emph-in: cubic-bezier(0.3, 0, 1, 1);
@@ -82,6 +84,7 @@
   :root:not([data-theme="light"]) {
     --c-bg: #000000;
     --c-sheet: #161616;
+    --c-card: #000000;
     --c-surface: #171717;
     --c-surface-2: #262626;
     --c-line: #1F1F1F;
@@ -120,6 +123,7 @@
 :root[data-theme="dark"] {
   --c-bg: #000000;
   --c-sheet: #161616;
+  --c-card: #000000;
   --c-surface: #171717;
   --c-surface-2: #262626;
   --c-line: #1F1F1F;
@@ -153,6 +157,79 @@
   --desk-line: #222222;
   --bezel: #2A2A2A;
   color-scheme: dark;
+}
+/* 卡片样式：浅灰底上铺大圆角卡片，只有一种强调色。--c-accent 是默认的蓝色，APP 里换成「设置」选的主题色，
+   --c-lane-2 跟着一起换。没列出的变量沿用上面极简样式的值。 */
+:root[data-style="card"] {
+  --c-bg: #F2F2F6;
+  --c-sheet: #FFFFFF;
+  --c-card: #FFFFFF;
+  --c-surface: #EBEBF0;
+  --c-surface-2: #DCDCE2;
+  --c-line: #E8E8ED;
+  --c-fg: #111114;
+  --c-fg-2: #67676E;
+  --c-fg-3: #A2A2A9;
+  --c-accent: #007AFF;
+  --c-on-accent: #FFFFFF;
+  --c-danger: #E5352B;
+  --c-add-bg: #E7F6EA;
+  --c-add-fg: #1B7A33;
+  --c-del-bg: #FDECEB;
+  --c-del-fg: #C4271E;
+  --c-inverse: #2C2C2E;
+  --c-on-inverse: #F5F5F7;
+  --c-lane-1: #111114;
+  --c-lane-2: #007AFF;
+  --c-lane-3: #B4B4BB;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-style="card"]:not([data-theme="light"]) {
+    --c-bg: #0B0B0D;
+    --c-sheet: #1C1C1F;
+    --c-card: #1C1C1F;
+    --c-surface: #2A2A2E;
+    --c-surface-2: #3A3A3F;
+    --c-line: #2A2A2E;
+    --c-fg: #F3F3F6;
+    --c-fg-2: #A0A0A8;
+    --c-fg-3: #66666E;
+    --c-accent: #007AFF;
+    --c-on-accent: #FFFFFF;
+    --c-danger: #FF6B61;
+    --c-add-bg: #0E2414;
+    --c-add-fg: #7FD48F;
+    --c-del-bg: #2A1210;
+    --c-del-fg: #FF8A80;
+    --c-inverse: #E8E8ED;
+    --c-on-inverse: #111114;
+    --c-lane-1: #F3F3F6;
+    --c-lane-2: #007AFF;
+    --c-lane-3: #6E6E76;
+  }
+}
+:root[data-style="card"][data-theme="dark"] {
+  --c-bg: #0B0B0D;
+  --c-sheet: #1C1C1F;
+  --c-card: #1C1C1F;
+  --c-surface: #2A2A2E;
+  --c-surface-2: #3A3A3F;
+  --c-line: #2A2A2E;
+  --c-fg: #F3F3F6;
+  --c-fg-2: #A0A0A8;
+  --c-fg-3: #66666E;
+  --c-accent: #007AFF;
+  --c-on-accent: #FFFFFF;
+  --c-danger: #FF6B61;
+  --c-add-bg: #0E2414;
+  --c-add-fg: #7FD48F;
+  --c-del-bg: #2A1210;
+  --c-del-fg: #FF8A80;
+  --c-inverse: #E8E8ED;
+  --c-on-inverse: #111114;
+  --c-lane-1: #F3F3F6;
+  --c-lane-2: #007AFF;
+  --c-lane-3: #6E6E76;
 }
 
 * { box-sizing: border-box; }

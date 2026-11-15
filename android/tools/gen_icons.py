@@ -7,10 +7,10 @@ OUT = sys.argv[1]
 BASE = "https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsoutlined/{name}/{style}/24px.svg"
 
 OUTLINE = """account_tree add alt_route arrow_back arrow_upward check check_box check_box_outline_blank
-chevron_right close cloud_off computer delete description dns download edit error expand_more folder
-forum image more_vert photo_camera power_settings_new radio_button_checked radio_button_unchecked
-refresh upload warning""".split()
-FILLED = ["computer", "forum", "account_tree"]
+chevron_right close cloud_off computer contrast delete description dns download edit error expand_more folder
+forum image more_vert palette photo_camera power_settings_new radio_button_checked radio_button_unchecked
+refresh settings style upload wallpaper warning""".split()
+FILLED = ["computer", "forum", "account_tree", "settings"]
 
 
 def camel(name: str) -> str:

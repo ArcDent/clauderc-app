@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.pressShrink
@@ -43,10 +44,15 @@ fun PillButton(
     height: Dp = 48.dp,
 ) {
     val c = Clauderc.colors
+    val card = Clauderc.style == UiStyle.Card
     val (bg, fg) = when {
         !enabled -> c.surface to c.fg3
         style == PillStyle.Accent -> c.accent to c.onAccent
+        // The card style has one accent and no black buttons.
+        style == PillStyle.Ink && card -> c.accent to c.onAccent
         style == PillStyle.Ink -> c.fg to c.bg
+        // On the card style's grey page a tonal button is a card; inside a card it goes back to the surface.
+        style == PillStyle.Tonal && card && !LocalOnCard.current -> c.card to c.fg
         style == PillStyle.Tonal -> c.surface to c.fg
         else -> Color.Transparent to c.fg
     }

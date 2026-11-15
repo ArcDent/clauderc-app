@@ -17,6 +17,7 @@ import kotlin.math.roundToInt
 data class ClaudercColors(
     val bg: Color,
     val sheet: Color,
+    val card: Color,
     val surface: Color,
     val surface2: Color,
     val line: Color,
@@ -61,6 +62,7 @@ private fun rgba(r: Int, g: Int, b: Int, a: Float) = Color(r, g, b, (a * 255).ro
 val LightColors = ClaudercColors(
     bg = hex(0xFFFFFF),
     sheet = hex(0xFFFFFF),
+    card = hex(0xFFFFFF),
     surface = hex(0xF3F3F3),
     surface2 = hex(0xE7E7E7),
     line = hex(0xECECEC),
@@ -95,6 +97,7 @@ val LightColors = ClaudercColors(
 val DarkColors = ClaudercColors(
     bg = hex(0x000000),
     sheet = hex(0x161616),
+    card = hex(0x000000),
     surface = hex(0x171717),
     surface2 = hex(0x262626),
     line = hex(0x1F1F1F),
@@ -124,6 +127,57 @@ val DarkColors = ClaudercColors(
     glassSheen = rgba(255, 255, 255, 0.07f),
     glassShadow = rgba(0, 0, 0, 0.7f),
     isDark = true,
+)
+
+// The card style (:root[data-style="card"]): a light grey page with large rounded cards and a single
+// accent. accent and lane2 are the default blue; the theme swaps in the colour picked in 设置.
+// Variables the card blocks leave out keep the minimal style's value, so glass, scrim and camera are shared.
+val CardLightColors = LightColors.copy(
+    bg = hex(0xF2F2F6),
+    sheet = hex(0xFFFFFF),
+    card = hex(0xFFFFFF),
+    surface = hex(0xEBEBF0),
+    surface2 = hex(0xDCDCE2),
+    line = hex(0xE8E8ED),
+    fg = hex(0x111114),
+    fg2 = hex(0x67676E),
+    fg3 = hex(0xA2A2A9),
+    accent = hex(0x007AFF),
+    onAccent = hex(0xFFFFFF),
+    danger = hex(0xE5352B),
+    addBg = hex(0xE7F6EA),
+    addFg = hex(0x1B7A33),
+    delBg = hex(0xFDECEB),
+    delFg = hex(0xC4271E),
+    inverse = hex(0x2C2C2E),
+    onInverse = hex(0xF5F5F7),
+    lane1 = hex(0x111114),
+    lane2 = hex(0x007AFF),
+    lane3 = hex(0xB4B4BB),
+)
+
+val CardDarkColors = DarkColors.copy(
+    bg = hex(0x0B0B0D),
+    sheet = hex(0x1C1C1F),
+    card = hex(0x1C1C1F),
+    surface = hex(0x2A2A2E),
+    surface2 = hex(0x3A3A3F),
+    line = hex(0x2A2A2E),
+    fg = hex(0xF3F3F6),
+    fg2 = hex(0xA0A0A8),
+    fg3 = hex(0x66666E),
+    accent = hex(0x007AFF),
+    onAccent = hex(0xFFFFFF),
+    danger = hex(0xFF6B61),
+    addBg = hex(0x0E2414),
+    addFg = hex(0x7FD48F),
+    delBg = hex(0x2A1210),
+    delFg = hex(0xFF8A80),
+    inverse = hex(0xE8E8ED),
+    onInverse = hex(0x111114),
+    lane1 = hex(0xF3F3F6),
+    lane2 = hex(0x007AFF),
+    lane3 = hex(0x6E6E76),
 )
 
 /** --fs-* */
@@ -158,6 +212,8 @@ data class ClaudercRadii(
     val sm: Dp = 8.dp,
     val md: Dp = 16.dp,
     val lg: Dp = 28.dp,
+    /** Cards of the card style. */
+    val card: Dp = 20.dp,
     val pill: Dp = 999.dp,
 )
 

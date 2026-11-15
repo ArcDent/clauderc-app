@@ -5,7 +5,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;700&display=swap">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300..500,0..1,0&icon_names=account_tree,add,alt_route,arrow_back,arrow_upward,battery_full,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,delete,description,dns,download,edit,error,expand_more,folder,forum,image,lock,more_vert,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,signal_cellular_alt,stop,terminal,upload,warning,wifi&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300..500,0..1,0&icon_names=account_tree,add,alt_route,arrow_back,arrow_upward,battery_full,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,contrast,delete,description,dns,download,edit,error,expand_more,folder,forum,image,lock,more_vert,palette,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,settings,signal_cellular_alt,stop,style,terminal,upload,wallpaper,warning,wifi&display=block">
 <style>
 /* 下面这段从 index.html 原样复制：APP 主题变量、通用样式和各页面样式。改设计稿时两边一起改。 */
 :root {
@@ -13,6 +13,7 @@
   /* APP 主题：--c- --fs- --sp- --r- --font- 开头的变量与 Compose 主题一一对应，Android 实现照抄取值。 */
   --c-bg: #FFFFFF;
   --c-sheet: #FFFFFF;
+  --c-card: #FFFFFF;
   --c-surface: #F3F3F3;
   --c-surface-2: #E7E7E7;
   --c-line: #ECECEC;
@@ -63,6 +64,7 @@
   --r-sm: 8px;
   --r-md: 16px;
   --r-lg: 28px;
+  --r-card: 20px;
   --r-pill: 999px;
   --ease-emph: cubic-bezier(0.25, 1, 0.5, 1);
   --ease-emph-in: cubic-bezier(0.3, 0, 1, 1);
@@ -83,6 +85,7 @@
   :root:not([data-theme="light"]) {
     --c-bg: #000000;
     --c-sheet: #161616;
+    --c-card: #000000;
     --c-surface: #171717;
     --c-surface-2: #262626;
     --c-line: #1F1F1F;
@@ -121,6 +124,7 @@
 :root[data-theme="dark"] {
   --c-bg: #000000;
   --c-sheet: #161616;
+  --c-card: #000000;
   --c-surface: #171717;
   --c-surface-2: #262626;
   --c-line: #1F1F1F;
@@ -154,6 +158,79 @@
   --desk-line: #222222;
   --bezel: #2A2A2A;
   color-scheme: dark;
+}
+/* 卡片样式：浅灰底上铺大圆角卡片，只有一种强调色。--c-accent 是默认的蓝色，APP 里换成「设置」选的主题色，
+   --c-lane-2 跟着一起换。没列出的变量沿用上面极简样式的值。 */
+:root[data-style="card"] {
+  --c-bg: #F2F2F6;
+  --c-sheet: #FFFFFF;
+  --c-card: #FFFFFF;
+  --c-surface: #EBEBF0;
+  --c-surface-2: #DCDCE2;
+  --c-line: #E8E8ED;
+  --c-fg: #111114;
+  --c-fg-2: #67676E;
+  --c-fg-3: #A2A2A9;
+  --c-accent: #007AFF;
+  --c-on-accent: #FFFFFF;
+  --c-danger: #E5352B;
+  --c-add-bg: #E7F6EA;
+  --c-add-fg: #1B7A33;
+  --c-del-bg: #FDECEB;
+  --c-del-fg: #C4271E;
+  --c-inverse: #2C2C2E;
+  --c-on-inverse: #F5F5F7;
+  --c-lane-1: #111114;
+  --c-lane-2: #007AFF;
+  --c-lane-3: #B4B4BB;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-style="card"]:not([data-theme="light"]) {
+    --c-bg: #0B0B0D;
+    --c-sheet: #1C1C1F;
+    --c-card: #1C1C1F;
+    --c-surface: #2A2A2E;
+    --c-surface-2: #3A3A3F;
+    --c-line: #2A2A2E;
+    --c-fg: #F3F3F6;
+    --c-fg-2: #A0A0A8;
+    --c-fg-3: #66666E;
+    --c-accent: #007AFF;
+    --c-on-accent: #FFFFFF;
+    --c-danger: #FF6B61;
+    --c-add-bg: #0E2414;
+    --c-add-fg: #7FD48F;
+    --c-del-bg: #2A1210;
+    --c-del-fg: #FF8A80;
+    --c-inverse: #E8E8ED;
+    --c-on-inverse: #111114;
+    --c-lane-1: #F3F3F6;
+    --c-lane-2: #007AFF;
+    --c-lane-3: #6E6E76;
+  }
+}
+:root[data-style="card"][data-theme="dark"] {
+  --c-bg: #0B0B0D;
+  --c-sheet: #1C1C1F;
+  --c-card: #1C1C1F;
+  --c-surface: #2A2A2E;
+  --c-surface-2: #3A3A3F;
+  --c-line: #2A2A2E;
+  --c-fg: #F3F3F6;
+  --c-fg-2: #A0A0A8;
+  --c-fg-3: #66666E;
+  --c-accent: #007AFF;
+  --c-on-accent: #FFFFFF;
+  --c-danger: #FF6B61;
+  --c-add-bg: #0E2414;
+  --c-add-fg: #7FD48F;
+  --c-del-bg: #2A1210;
+  --c-del-fg: #FF8A80;
+  --c-inverse: #E8E8ED;
+  --c-on-inverse: #111114;
+  --c-lane-1: #F3F3F6;
+  --c-lane-2: #007AFF;
+  --c-lane-3: #6E6E76;
 }
 
 * { box-sizing: border-box; }
@@ -572,6 +649,115 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 .press-clip { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; pointer-events: none; }
 .press-layer { position: absolute; inset: 0; background: currentColor; opacity: 0; }
 
+/* 第四个标签「设置」：两套样式都有 */
+.navbar { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* ---------- 设置 ---------- */
+/* 每组一个标题；样式和深浅色用迷你手机缩略图预览，主题色是一排圆点。两套样式共用这份结构。 */
+.set-group { display: flex; flex-direction: column; }
+.set-h { margin: 0; padding: var(--sp-6) var(--sp-page) var(--sp-4); display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-label); font-weight: 500; color: var(--c-fg); }
+.set-h .ms { font-size: 20px; color: var(--c-fg-2); }
+.opts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); padding: 0 var(--sp-page); justify-items: center; }
+.opt { position: relative; border: 0; background: none; padding: var(--sp-1); border-radius: var(--r-md); display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); font-size: var(--fs-label); color: var(--c-fg-2); }
+.opt[aria-checked="true"] { color: var(--c-fg); font-weight: 500; }
+.mini { position: relative; display: flex; flex-direction: column; gap: 5px; width: 84px; height: 116px; padding: 13px 9px 0; border-radius: 14px; background: var(--m-bg); overflow: hidden; box-shadow: 0 0 0 1px var(--c-line); transition: box-shadow var(--dur-s) var(--ease-emph); }
+.mini i { display: block; flex: none; position: relative; }
+.mini .m-t { width: 52%; height: 7px; border-radius: 4px; background: var(--m-fg); margin-bottom: 5px; opacity: 0.8; }
+.mini .m-r { height: 15px; box-shadow: inset 0 -1px 0 var(--m-line); }
+.mini .m-r:nth-child(2)::after { content: ""; position: absolute; left: 3px; top: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--m-acc); }
+.mini.card .m-t { width: 46%; height: 8px; opacity: 1; }
+.mini.card .m-r { height: 17px; border-radius: 6px; background: var(--m-card); box-shadow: none; }
+.mini.card .m-r:nth-child(2)::after { left: 6px; top: 5.5px; }
+.mini .m-n { position: absolute; left: 12%; right: 12%; bottom: 7px; height: 14px; border-radius: 7px; background: var(--m-card); box-shadow: 0 0 0 0.5px var(--m-line); }
+.mini .m-n b { position: absolute; left: 3px; top: 3px; bottom: 3px; width: 30%; border-radius: 5px; background: var(--m-fg); opacity: 0.1; }
+.mini.card .m-n b { background: var(--m-acc); opacity: 0.22; }
+.mini-split { position: relative; display: block; }
+.mini-split .mini + .mini { position: absolute; inset: 0; clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+.opt[aria-checked="true"] .mini { box-shadow: 0 0 0 2px var(--c-accent); }
+.swatches { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-4) var(--sp-2); padding: 0 var(--sp-page); justify-items: center; }
+.sw { position: relative; width: 44px; height: 44px; border: 0; padding: 0; border-radius: 50%; background: var(--sw); color: var(--sw-on); display: grid; place-items: center; }
+.sw::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; box-shadow: 0 0 0 2px var(--sw); opacity: 0; transform: scale(0.9); transition: opacity var(--dur-s) var(--ease-emph), transform var(--dur-s) var(--ease-emph); }
+.sw[aria-checked="true"]::after { opacity: 1; transform: none; }
+.sw .ms { font-size: 20px; }
+.sw:not(.wall) .ms { opacity: 0; transition: opacity var(--dur-s) var(--ease-emph); }
+.sw[aria-checked="true"] .ms { opacity: 1; }
+.sw-name { margin: 0; padding: var(--sp-4) var(--sp-page) 0; font-size: var(--fs-caption); color: var(--c-fg-3); }
+
+/* 换主题的扩散：视图过渡只给手机屏幕起名，旧画面留在底下，新画面按圆形从圆心露出来；页面其余部分直接换 */
+#device { view-transition-name: device; }
+::view-transition-old(root), ::view-transition-new(root), ::view-transition-group(device) { animation: none; }
+::view-transition-old(device), ::view-transition-new(device) { animation: none; mix-blend-mode: normal; }
+.no-trans *, .no-trans *::before, .no-trans *::after { transition: none !important; }
+
+/* ---------- 卡片样式（index.html 里只有变量，页面样子以这里为准） ---------- */
+:root[data-style="card"] { --c-accent-tint: color-mix(in srgb, var(--c-accent) 14%, transparent); }
+[data-style="card"] .hero { padding-bottom: var(--sp-4); }
+[data-style="card"] .hero h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
+[data-style="card"] .list { margin: 0 var(--sp-4); background: var(--c-card); border-radius: var(--r-card); overflow: hidden; }
+[data-style="card"] .list > * + * { box-shadow: inset 0 1px 0 var(--c-line); }
+[data-style="card"] .row { padding-left: var(--sp-4); }
+[data-style="card"] .row > .ms:first-child { width: 40px; height: 40px; border-radius: 12px; background: var(--c-surface); display: grid; place-items: center; font-size: 22px; color: var(--c-fg); }
+[data-style="card"] .row.off > .ms:first-child { color: var(--c-fg-3); }
+[data-style="card"] .gh { padding: var(--sp-5) var(--sp-2) var(--sp-2) calc(var(--sp-4) + var(--sp-2)); }
+[data-style="card"] .g-empty { margin: 0 var(--sp-4); padding: var(--sp-4); background: var(--c-card); border-radius: var(--r-card); }
+[data-style="card"] .foot { padding: var(--sp-4) calc(var(--sp-4) + var(--sp-2)) var(--sp-8); }
+[data-style="card"] .btn.ink { background: var(--c-accent); color: var(--c-on-accent); }
+[data-style="card"] .btn.tonal { background: var(--c-card); }
+[data-style="card"] .sheet .btn.tonal, [data-style="card"] .dialog .btn.tonal { background: var(--c-surface); }
+[data-style="card"] .btn:disabled { background: var(--c-surface); color: var(--c-fg-3); }
+[data-style="card"] .snackbar { border-radius: 14px; }
+/* 导航栏：实心悬浮胶囊，选中项铺一层浅主题色 */
+[data-style="card"] .navbar { background: var(--c-card); -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: 28px; box-shadow: 0 0 0 0.5px var(--c-line), 0 12px 30px -12px rgba(0, 0, 0, 0.3); }
+[data-style="card"] .navbar::before { display: none; }
+[data-style="card"] .nav-ind { background: var(--c-accent-tint); box-shadow: none; border-radius: 22px; }
+[data-style="card"] .nav-item { border-radius: 22px; }
+[data-style="card"] .nav-item[aria-current="true"] { color: var(--c-accent); }
+/* git：「时间线 / 改动」变成分段按钮，滑动的是实心胶囊；提交图、改动列表、提交框各是一张卡片 */
+[data-style="card"] .tabs { margin: var(--sp-1) var(--sp-4) 0; padding: 4px; gap: 4px; background: var(--c-card); border-radius: var(--r-pill); border-bottom: 0; }
+[data-style="card"] .tab { flex: 1; justify-content: center; padding: 9px 0; border-radius: var(--r-pill); isolation: isolate; color: var(--c-fg-2); }
+[data-style="card"] .tab.on { color: var(--c-on-accent); }
+[data-style="card"] .tab.on::after { top: 0; bottom: 0; height: auto; border-radius: var(--r-pill); background: var(--c-accent); z-index: -1; }
+[data-style="card"] .branchbar { padding-left: calc(var(--sp-4) + var(--sp-2)); padding-right: calc(var(--sp-4) + var(--sp-2)); }
+[data-style="card"] .graph-list { margin: 0 var(--sp-4); background: var(--c-card); border-radius: var(--r-card); overflow: hidden; }
+[data-style="card"] .crow { padding-right: var(--sp-4); }
+[data-style="card"] .sec-h { padding: var(--sp-5) calc(var(--sp-4) + var(--sp-2)) var(--sp-2); }
+[data-style="card"] .frow-main { padding-left: var(--sp-4); }
+[data-style="card"] .actions { padding: 0 var(--sp-4) var(--sp-3); }
+[data-style="card"] .busy-line { padding-left: calc(var(--sp-4) + var(--sp-2)); }
+[data-style="card"] .commit-box { margin: var(--sp-2) var(--sp-4) var(--sp-3); padding: var(--sp-3) var(--sp-4) var(--sp-4); border-top: 0; border-radius: var(--r-card); background: var(--c-card); }
+[data-style="card"] .screen.has-nav .commit-box { padding-bottom: var(--sp-4); margin-bottom: 88px; }
+/* 提交详情和差异 */
+[data-style="card"] .cmsg { margin: var(--sp-2) var(--sp-4) var(--sp-3); padding: var(--sp-5); background: var(--c-card); border-radius: var(--r-card); }
+[data-style="card"] .cmsg h2 { font-size: var(--fs-title); font-weight: 600; }
+[data-style="card"] .cmeta { margin: 0 var(--sp-4); padding: var(--sp-4) var(--sp-5); background: var(--c-card); border-radius: var(--r-card); }
+[data-style="card"] .diff-wrap { margin: var(--sp-2) var(--sp-4) var(--sp-6); background: var(--c-card); border-radius: var(--r-card); }
+[data-style="card"] .diff { padding-bottom: var(--sp-2); }
+[data-style="card"] .folded { margin: var(--sp-4); padding: var(--sp-5); background: var(--c-card); border-radius: var(--r-card); }
+[data-style="card"] .folded b { font-weight: 600; }
+[data-style="card"] .folded .btn.tonal { background: var(--c-surface); }
+/* 会话页：自己的消息用主题色，回复是白卡片，输入框浮在灰底上 */
+[data-style="card"] .bubble { border-radius: 20px; }
+[data-style="card"] .bubble.me { background: var(--c-accent); color: var(--c-on-accent); }
+[data-style="card"] .bubble.ai { background: var(--c-card); }
+[data-style="card"] .bubble.queued { background: none; color: var(--c-fg-2); }
+[data-style="card"] .tool-detail { background: var(--c-card); }
+[data-style="card"] .composer { background: var(--c-card); box-shadow: 0 0 0 0.5px var(--c-line); }
+[data-style="card"] .send { background: var(--c-accent); color: var(--c-on-accent); }
+[data-style="card"] .send:disabled { background: var(--c-surface); color: var(--c-fg-3); }
+[data-style="card"] .thumb-add { background: var(--c-card); }
+[data-style="card"] .offline-line { background: var(--c-card); }
+/* 新建会话：每个输入项一张卡片 */
+[data-style="card"] .form { padding: 0 var(--sp-4) var(--sp-8); gap: var(--sp-3); }
+[data-style="card"] .tier-line { padding: var(--sp-1) var(--sp-2) var(--sp-2); }
+[data-style="card"] .field { padding: var(--sp-3) var(--sp-4) var(--sp-2); background: var(--c-card); border-radius: var(--r-card); }
+[data-style="card"] .input { border-bottom-color: var(--c-line); }
+/* 设置：每组一张卡片，标题在卡片里 */
+[data-style="card"] .set-group { margin: 0 var(--sp-4) var(--sp-3); padding: var(--sp-4) var(--sp-2) var(--sp-5); background: var(--c-card); border-radius: var(--r-card); }
+[data-style="card"] .set-h { padding: 0 var(--sp-2) var(--sp-4); }
+[data-style="card"] .opts, [data-style="card"] .swatches { padding: 0; }
+[data-style="card"] .opt[aria-checked="true"] { color: var(--c-accent); }
+[data-style="card"] .sw-name { padding: var(--sp-4) var(--sp-2) 0; }
+
 @media (max-width: 860px) {
   .review { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-block: 16px; }
   .desk { position: static; max-height: none; overflow: visible; order: 2; }
@@ -590,6 +776,10 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       <button type="button" data-theme-set="system" aria-pressed="true">跟随系统</button>
       <button type="button" data-theme-set="light" aria-pressed="false">浅色</button>
       <button type="button" data-theme-set="dark" aria-pressed="false">深色</button>
+    </div>
+    <div class="themes" role="group" aria-label="样式">
+      <button type="button" data-style-set="minimal" aria-pressed="true">极简</button>
+      <button type="button" data-style-set="card" aria-pressed="false">卡片</button>
     </div>
 
     <section class="knob">
@@ -619,8 +809,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     <section class="knob">
       <h2>返回手势松手后</h2>
       <div class="seg" data-k="finish" role="group" aria-label="松手后">
-        <button type="button" data-v="linear">匀速走完（现状）</button>
-        <button type="button" data-v="ease">减速收尾</button>
+        <button type="button" data-v="linear">匀速走完（旧版）</button>
+        <button type="button" data-v="ease">减速收尾（现状）</button>
       </div>
     </section>
 
@@ -667,6 +857,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
             <button type="button" class="nav-item" data-act="tab" data-v="machines"><span class="ms">computer</span>目标机</button>
             <button type="button" class="nav-item" data-act="tab" data-v="sessions"><span class="ms">forum</span>会话<span class="nav-dot" hidden></span></button>
             <button type="button" class="nav-item" data-act="tab" data-v="git"><span class="ms">account_tree</span>git</button>
+            <button type="button" class="nav-item" data-act="tab" data-v="settings"><span class="ms">settings</span>设置</button>
           </nav>
           <div class="snackbar" id="snack" hidden></div>
           <button type="button" class="scrim" id="scrim" data-act="dlg-cancel" aria-label="关闭" hidden></button>
@@ -707,18 +898,23 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     spring: [["0.34, 1.3, 0.64, 1", "现状：小回弹"], ["0.34, 1.5, 0.64, 1", "旧版：回弹"], ["0.25, 1, 0.5, 1", "不回弹"]]
   };
   var PRESS_NAME = { ripple: "水波纹", layer: "即时叠层", shrink: "叠层加缩小" };
-  var BASE = { slow: false, finish: "linear", press: "shrink", pressAlpha: 0.12, pressScale: 0.96, edges: false, bugCreate: false };
+  var BASE = { slow: false, finish: "ease", press: "shrink", pressAlpha: 0.12, pressScale: 0.96, edges: false, bugCreate: false };
   var STORE = "clauderc-demo-cfg";
+  // 第 2 版起松手默认减速收尾；之前存下的「匀速走完」是旧默认值，不沿用
+  var STORE_V = 2;
   function defaults() { return Object.assign({}, BASE, PRESETS.now); }
   var cfg = (function () {
     var c = defaults();
     try {
       var s = JSON.parse(localStorage.getItem(STORE) || "null");
-      if (s && typeof s === "object") Object.keys(c).forEach(function (k) { if (typeof s[k] === typeof c[k]) c[k] = s[k]; });
+      if (s && typeof s === "object") Object.keys(c).forEach(function (k) {
+        if (k === "finish" && s.v !== STORE_V) return;
+        if (typeof s[k] === typeof c[k]) c[k] = s[k];
+      });
     } catch (err) { /* 读不到就用默认值 */ }
     return c;
   })();
-  function save() { try { localStorage.setItem(STORE, JSON.stringify(cfg)); } catch (err) { /* 存不了就不记 */ } }
+  function save() { try { localStorage.setItem(STORE, JSON.stringify(Object.assign({ v: STORE_V }, cfg))); } catch (err) { /* 存不了就不记 */ } }
   function slowK() { return cfg.slow ? 5 : 1; }
   function dur(key) { return cfg[key] * slowK(); }
   function ez(key) { return "cubic-bezier(" + cfg[key] + ")"; }
@@ -951,7 +1147,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   }
 
   // ---------- 返回手势 ----------
-  // NavHost 2.10：拖动时按进度 seek 匀速的手势动画；松手确认时不传曲线，沿用匀速曲线走完剩下的距离；
+  // NavHost 2.10：拖动时按进度 seek 手势动画，曲线是直线，页面跟手；APP 里松手后这条曲线从松手点起
+  // 换成进场减速曲线，剩下的距离在「剩余进度 × 总时长」内减速走完（Motion.kt 的 GestureEasing）；
   // 取消时用默认曲线在「已拖进度 × 总时长」内退回。
   var EDGE = 24, G = null, swallowUntil = 0;
   app.addEventListener("pointerdown", function (e) {
@@ -1034,8 +1231,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   // ---------- 按压反馈 ----------
   // 「叠层加缩小」是 APP 现在的效果，照 Press.kt；「水波纹」是改之前 Compose 的默认效果：颜色取主题正文色，按下时 10% 不透明度。
   // 在可滚动的区域里，Compose 要等 100ms 确认不是滚动才算按下，三种样式都照这个等。
-  var PRESS = ".row, .mi, .btn, .icon-btn, .choice, .tool-row, .crow, .frow-main, .tbtn, .recent button, .send, .nav-item, .thumb-add, .gh-name, .branch-btn, .tab, .bar-sub button, .more-link, .slash li button, .vf, .thumb .x";
-  var SHRINK = ".btn, .icon-btn, .send, .tbtn, .nav-item, .thumb-add, .gh-name, .branch-btn, .bar-sub button, .thumb .x";
+  var PRESS = ".row, .mi, .btn, .icon-btn, .choice, .tool-row, .crow, .frow-main, .tbtn, .recent button, .send, .nav-item, .thumb-add, .gh-name, .branch-btn, .tab, .bar-sub button, .more-link, .slash li button, .vf, .thumb .x, .opt, .sw";
+  var SHRINK = ".btn, .icon-btn, .send, .tbtn, .nav-item, .thumb-add, .gh-name, .branch-btn, .bar-sub button, .thumb .x, .opt, .sw";
   var P = null;
   app.addEventListener("pointerdown", function (e) {
     if (e.button !== 0) return;
@@ -1206,11 +1403,11 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   }
 
   // ---------- 首页和底部导航栏 ----------
-  var TABS = ["machines", "sessions", "git"], homeEl = null;
+  var TABS = ["machines", "sessions", "git", "settings"], homeEl = null;
   function buildHome(page) {
     homeEl = page.el;
     page.el.innerHTML = TABS.map(function (t) { return '<div class="screen has-nav pane" data-pane="' + t + '"' + (t === S.tab ? "" : " hidden") + "></div>"; }).join("");
-    page.render = function () { renderMachines(); renderSessions(); renderGit(); };
+    page.render = function () { renderMachines(); renderSessions(); renderGit(); renderSettings(); };
     page.render();
   }
   function pane(name) { return homeEl ? homeEl.querySelector('.pane[data-pane="' + name + '"]') : null; }
@@ -1280,6 +1477,107 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       a.finished.then(function () { if (navbar._leaving === a) { navbar.hidden = true; navbar._leaving = null; a.cancel(); } }, noop);
     }
   }
+
+
+  // ---------- 设置 ----------
+  // 外观选择只存在这个浏览器里：样式、主题色在这里，深浅色沿用左边面板的那份（setTheme）。
+  var LOOK_STORE = "clauderc-demo-look";
+  // 卡片样式的主题色：第一个是「跟随壁纸」，浏览器拿不到壁纸色，用固定的示例色代替；其余 8 个是预设色
+  var ACCENTS = [
+    { v: "wall", hex: "#4F7A6A", name: "跟随壁纸" },
+    { v: "#007AFF", name: "蓝色" }, { v: "#CB30E0", name: "紫色" }, { v: "#FF2D55", name: "粉色" }, { v: "#FF383C", name: "红色" },
+    { v: "#FF8D28", name: "橙色" }, { v: "#FFCC00", name: "黄色" }, { v: "#34C759", name: "绿色" }, { v: "#8E8E93", name: "灰色" }
+  ];
+  // 缩略图要同时画出别的样式和深浅色，这里抄一份各自的底色、卡片色、分隔线、文字色；卡片样式的强调色取当前主题色
+  var LOOK_TOK = {
+    minimal: { light: { bg: "#FFFFFF", card: "#FFFFFF", line: "#ECECEC", fg: "#111111", acc: "#2A45E0" }, dark: { bg: "#000000", card: "#1A1A1A", line: "#262626", fg: "#F1F1F1", acc: "#8395FF" } },
+    card: { light: { bg: "#F2F2F6", card: "#FFFFFF", line: "#E8E8ED", fg: "#111114" }, dark: { bg: "#0B0B0D", card: "#1C1C1F", line: "#2A2A2E", fg: "#F3F3F6" } }
+  };
+  var look = (function () {
+    var l = { style: "minimal", accent: "#007AFF" };
+    try {
+      var s = JSON.parse(localStorage.getItem(LOOK_STORE) || "null");
+      if (s && (s.style === "minimal" || s.style === "card")) l.style = s.style;
+      if (s && ACCENTS.some(function (a) { return a.v === s.accent; })) l.accent = s.accent;
+    } catch (err) { /* 读不到就用默认值 */ }
+    return l;
+  })();
+  function saveLook() { try { localStorage.setItem(LOOK_STORE, JSON.stringify(look)); } catch (err) { /* 存不了就不记 */ } }
+  function accentOf(v) { var a = ACCENTS.filter(function (x) { return x.v === v; })[0] || ACCENTS[1]; return a.hex || a.v; }
+  // 主题色上的文字：亮色（黄色）配深色字，其余配白字
+  function onAccent(hex) {
+    var n = parseInt(hex.slice(1), 16), c = [n >> 16, (n >> 8) & 255, n & 255].map(function (x) { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] > 0.5 ? "#111111" : "#FFFFFF";
+  }
+  var darkQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  function themeMode() { var t = document.documentElement.getAttribute("data-theme"); return t === "light" || t === "dark" ? t : "system"; }
+  function isDark() { var m = themeMode(); return m === "dark" || (m === "system" && !!(darkQuery && darkQuery.matches)); }
+  function applyLook() {
+    var r = document.documentElement;
+    if (look.style === "card") {
+      var a = accentOf(look.accent);
+      r.setAttribute("data-style", "card");
+      r.style.setProperty("--c-accent", a);
+      r.style.setProperty("--c-on-accent", onAccent(a));
+      r.style.setProperty("--c-lane-2", a);
+    } else {
+      r.removeAttribute("data-style");
+      ["--c-accent", "--c-on-accent", "--c-lane-2"].forEach(function (k) { r.style.removeProperty(k); });
+    }
+    $$("[data-style-set]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.styleSet === look.style)); });
+    renderSettings();
+  }
+  function setLook(k, v) { look[k] = v; saveLook(); applyLook(); }
+  // 换主题色、深浅色、样式时，新主题从 origin（所点选项的中心，没有就是屏幕中央）画一个圆扩散开，导航栏弹回的时长、进场曲线
+  function reveal(origin, change) {
+    var dev = $("#device");
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!document.startViewTransition || reduce) { change(); return; }
+    var r = dev.getBoundingClientRect();
+    var fx = origin ? clamp((origin.x - r.left) / r.width, 0, 1) : 0.5, fy = origin ? clamp((origin.y - r.top) / r.height, 0, 1) : 0.5;
+    var rad = Math.ceil(Math.hypot(Math.max(fx, 1 - fx) * dev.offsetWidth, Math.max(fy, 1 - fy) * dev.offsetHeight));
+    var at = " at " + (fx * 100).toFixed(2) + "% " + (fy * 100).toFixed(2) + "%";
+    var html = document.documentElement;
+    var vt = document.startViewTransition(function () { html.classList.add("no-trans"); change(); });
+    function done() { html.classList.toggle("no-trans", false); }
+    vt.ready.then(function () {
+      var d = dur("durL"), e = ez("emph");
+      note("换主题：从" + (origin ? "所点的选项" : "屏幕中央") + "扩散", d, e);
+      html.animate({ clipPath: ["circle(0px" + at + ")", "circle(" + rad + "px" + at + ")"] }, { duration: d, easing: e, pseudoElement: "::view-transition-new(device)" });
+    }, noop);
+    vt.finished.then(done, done);
+  }
+  function centerOf(n) { var b = n.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; }
+  function mini(style, dark) {
+    var t = LOOK_TOK[style][dark ? "dark" : "light"], acc = style === "card" ? accentOf(look.accent) : t.acc;
+    return '<span class="mini ' + style + '" style="--m-bg:' + t.bg + ";--m-card:" + t.card + ";--m-line:" + t.line + ";--m-fg:" + t.fg + ";--m-acc:" + acc + '">' +
+      '<i class="m-t"></i><i class="m-r"></i><i class="m-r"></i><i class="m-r"></i><i class="m-n"><b></b></i></span>';
+  }
+  function opt(act, v, label, on, thumb) {
+    return '<button type="button" class="opt" role="radio" aria-checked="' + on + '" data-act="' + act + '" data-v="' + v + '">' + thumb + "<span>" + label + "</span></button>";
+  }
+  function setGroup(icon, title, body) { return '<section class="set-group"><h3 class="set-h"><span class="ms">' + icon + "</span>" + title + "</h3>" + body + "</section>"; }
+  function renderSettings() {
+    var n = pane("settings");
+    if (!n) return;
+    var mode = themeMode(), dark = isDark(), cur = ACCENTS.filter(function (a) { return a.v === look.accent; })[0];
+    var html = '<header class="appbar"></header><div class="content"><div class="hero"><h1>设置</h1></div>' +
+      setGroup("style", "样式", '<div class="opts" role="radiogroup" aria-label="样式">' +
+        opt("set-style", "minimal", "极简", look.style === "minimal", mini("minimal", dark)) +
+        opt("set-style", "card", "卡片", look.style === "card", mini("card", dark)) + "</div>") +
+      setGroup("contrast", "深浅色", '<div class="opts" role="radiogroup" aria-label="深浅色">' +
+        opt("set-mode", "system", "跟随系统", mode === "system", '<span class="mini-split">' + mini(look.style, false) + mini(look.style, true) + "</span>") +
+        opt("set-mode", "light", "浅色", mode === "light", mini(look.style, false)) +
+        opt("set-mode", "dark", "深色", mode === "dark", mini(look.style, true)) + "</div>");
+    if (look.style === "card") {
+      html += setGroup("palette", "主题色", '<div class="swatches" role="radiogroup" aria-label="主题色">' + ACCENTS.map(function (a) {
+        var hex = a.hex || a.v, wall = a.v === "wall";
+        return '<button type="button" class="sw' + (wall ? " wall" : "") + '" role="radio" aria-checked="' + (a.v === look.accent) + '" aria-label="' + a.name + '" title="' + a.name + '" data-act="set-accent" data-v="' + a.v + '" style="--sw:' + hex + ";--sw-on:" + onAccent(hex) + '"><span class="ms">' + (wall && a.v !== look.accent ? "wallpaper" : "check") + "</span></button>";
+      }).join("") + '</div><p class="sw-name">' + cur.name + "</p>");
+    }
+    paint(n, html + "</div>");
+  }
+  if (darkQuery && darkQuery.addEventListener) darkQuery.addEventListener("change", renderSettings);
 
   // ---------- 目标机 ----------
   function renderMachines() {
@@ -1404,8 +1702,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       html += (busy ? '<div class="busy-line"><span class="glyph g-work"></span>「' + esc(busy.title) + "」正在这个目录工作</div>" : "") +
         '<div class="actions"><button type="button" class="btn tonal" data-act="pull"><span class="ms">download</span>拉取</button><button type="button" class="btn tonal" data-act="push-git"><span class="ms">upload</span>推送</button><button type="button" class="btn tonal" data-act="branches"><span class="ms">alt_route</span>切换</button></div>' +
         '<div class="content">' +
-        (g.staged.length ? '<h3 class="sec-h">已暂存</h3>' + g.staged.map(function (f) { return statusRow(f, true); }).join("") : "") +
-        (g.unstaged.length ? '<h3 class="sec-h">未暂存</h3>' + g.unstaged.map(function (f) { return statusRow(f, false); }).join("") : "") +
+        (g.staged.length ? '<h3 class="sec-h">已暂存</h3><div class="list">' + g.staged.map(function (f) { return statusRow(f, true); }).join("") + "</div>" : "") +
+        (g.unstaged.length ? '<h3 class="sec-h">未暂存</h3><div class="list">' + g.unstaged.map(function (f) { return statusRow(f, false); }).join("") + "</div>" : "") +
         "</div>" +
         '<div class="commit-box"><textarea class="input commit-msg" rows="1" placeholder="提交说明">' + esc(g.msg) + '</textarea><button type="button" class="btn accent block" data-act="commit"' + (g.msg.trim() && g.staged.length ? "" : " disabled") + ">提交</button></div>";
     }
@@ -1736,11 +2034,11 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     page.el.innerHTML = '<header class="appbar"><button type="button" class="icon-btn" data-act="back" aria-label="返回"><span class="ms">arrow_back</span></button><div class="bar-title"><h1 class="mono" style="font-size:15px">' + esc(c.h) + "</h1></div></header>" +
       '<div class="content"><div class="cmsg"><h2>' + esc(c.s) + "</h2>" + (c.body ? "<p>" + esc(c.body) + "</p>" : "") + "</div>" +
       '<dl class="cmeta"><dt>作者</dt><dd>' + esc(c.a) + "</dd><dt>时间</dt><dd>" + esc(c.t) + '</dd><dt>父提交</dt><dd class="mono">' + esc(c.p[0] || "—") + "</dd></dl>" +
-      '<h3 class="sec-h"><span>' + FILES.length + ' 个文件</span><span class="num" style="padding:0"><span class="p">+1,500</span><span class="d">−3</span></span></h3>' +
+      '<h3 class="sec-h"><span>' + FILES.length + ' 个文件</span><span class="num" style="padding:0"><span class="p">+1,500</span><span class="d">−3</span></span></h3><div class="list">' +
       FILES.map(function (f) {
         var inner = '<span class="fx">' + f.x + '</span><span class="fpath"><b>' + esc(f.name) + "</b><span>" + esc(f.dir) + "</span></span>" + (f.binary ? '<span class="num"><span class="muted">二进制文件已更改</span></span>' : numHtml(f));
         return '<div class="frow">' + (f.binary ? '<div class="frow-main">' + inner + "</div>" : '<button type="button" class="frow-main" data-act="open-file" data-v="' + esc(f.name) + '">' + inner + "</button>") + "</div>";
-      }).join("") + '<p class="foot"></p></div>';
+      }).join("") + '</div><p class="foot"></p></div>';
   }
   function buildDiff(page) {
     var r = page.route;
@@ -1878,6 +2176,9 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     "pick-repo": function (t) { S.git.repo = REPOS.filter(function (r) { return r.name === t.dataset.v; })[0]; closeOverlay(); renderGit(); },
     "git-refresh": function (t) { t.querySelector(".ms").animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], { duration: 600 * slowK(), easing: ez("emph") }); },
     "git-tab": function (t) { switchGitTab(t.dataset.v); },
+    "set-style": function (t) { if (look.style !== t.dataset.v) reveal(centerOf(t), function () { setLook("style", t.dataset.v); }); },
+    "set-mode": function (t) { if (themeMode() !== t.dataset.v) reveal(centerOf(t), function () { setTheme(t.dataset.v); }); },
+    "set-accent": function (t) { if (look.accent !== t.dataset.v) reveal(centerOf(t), function () { setLook("accent", t.dataset.v); }); },
     branches: function () {
       openOverlay(sheet("<h2>切换分支</h2>", '<div class="sheet-sec">本地</div>' +
         ["dev", "main", "feat-relay"].map(function (b) { return mi({ act: "pick-branch", v: b, html: '<span class="mono-name">' + b + "</span>", radio: true, tick: S.git.branch === b }); }).join("") +
@@ -2003,8 +2304,11 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     if (v === "light" || v === "dark") root.setAttribute("data-theme", v); else root.removeAttribute("data-theme");
     $$("[data-theme-set]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.themeSet === (v || "system"))); });
     try { localStorage.setItem("clauderc-demo-theme", v || "system"); } catch (err) { /* 存不了就不记 */ }
+    renderSettings();
   }
-  $$("[data-theme-set]").forEach(function (b) { b.addEventListener("click", function () { setTheme(b.dataset.themeSet); }); });
+  $$("[data-theme-set]").forEach(function (b) { b.addEventListener("click", function () { if (themeMode() !== b.dataset.themeSet) reveal(null, function () { setTheme(b.dataset.themeSet); }); }); });
+  $$("[data-style-set]").forEach(function (b) { b.addEventListener("click", function () { if (look.style !== b.dataset.styleSet) reveal(null, function () { setLook("style", b.dataset.styleSet); }); }); });
+  applyLook();
   try { var savedTheme = localStorage.getItem("clauderc-demo-theme"); if (savedTheme) setTheme(savedTheme); } catch (err) { /* 读不到就跟随系统 */ }
 
   // ---------- 启动 ----------
@@ -2029,6 +2333,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     stack: function () { return stack.map(function (p) { return p.route.name; }); },
     last: function () { return last; },
     cfg: function () { return Object.assign({}, cfg); },
+    look: function () { return Object.assign({ mode: themeMode() }, look); },
     back: back
   };
 })();

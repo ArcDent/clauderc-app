@@ -46,6 +46,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.pressShrink
@@ -62,6 +63,7 @@ data class NavTab(val label: String, val icon: ImageVector, val selectedIcon: Im
  * The liquid-glass bottom navigation from the mockup: a blurred, tinted pill
  * floating 12dp above the bottom edge. Switching tabs moves the indicator's
  * leading edge first and lets the trailing edge catch up, in step with the page swap.
+ * The card style trades the glass for a solid card and tints the picked tab with the accent.
  */
 @Composable
 fun GlassNavBar(
@@ -72,8 +74,11 @@ fun GlassNavBar(
     modifier: Modifier = Modifier,
 ) {
     val c = Clauderc.colors
-    val shape = RoundedCornerShape(32.dp)
-    val glass = if (hazeState != null) {
+    val card = Clauderc.style == UiStyle.Card
+    val shape = RoundedCornerShape(if (card) 28.dp else 32.dp)
+    val glass = if (card) {
+        Modifier.background(c.card)
+    } else if (hazeState != null) {
         Modifier.hazeBlur(
             HazeInput.Sources(hazeState),
             HazeBlurStyle {
@@ -108,11 +113,12 @@ fun GlassNavBar(
             .padding(start = Clauderc.spacing.sp4, end = Clauderc.spacing.sp4, bottom = Clauderc.spacing.sp3)
             .fillMaxWidth()
             .height(64.dp)
-            .shadow(14.dp, shape, ambientColor = c.glassShadow, spotColor = c.glassShadow)
+            .shadow(if (card) 10.dp else 14.dp, shape, ambientColor = c.glassShadow, spotColor = c.glassShadow)
             .clip(shape)
             .then(glass)
             .drawWithContent {
                 drawContent()
+                if (card) return@drawWithContent
                 // Sheen, inner highlight and hairline edge (.navbar::before and its box-shadow).
                 drawRect(Brush.verticalGradient(0f to c.glassSheen, 0.38f to Color.Transparent))
                 drawRect(
@@ -125,21 +131,26 @@ fun GlassNavBar(
                 drawLine(c.glassHi, Offset(32.dp.toPx(), 0.5f), Offset(size.width - 32.dp.toPx(), 0.5f), 1.dp.toPx())
                 drawLine(c.glassLo, Offset(32.dp.toPx(), size.height - 0.5f), Offset(size.width - 32.dp.toPx(), size.height - 0.5f), 1.dp.toPx())
             }
-            .border(0.5.dp, c.glassEdge, shape)
+            .border(0.5.dp, if (card) c.line else c.glassEdge, shape)
             .padding(6.dp),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val cell = maxWidth / tabs.size
-            Box(
-                Modifier
-                    .offset(x = cell * left.value)
-                    .width(cell * (right.value - left.value))
-                    .fillMaxHeight()
-                    .shadow(4.dp, RoundedCornerShape(26.dp), ambientColor = c.glassShadow, spotColor = c.glassShadow)
-                    .clip(RoundedCornerShape(26.dp))
-                    .background(c.glassInd)
-                    .border(0.5.dp, c.glassEdge, RoundedCornerShape(26.dp)),
-            )
+            val indicator = Modifier
+                .offset(x = cell * left.value)
+                .width(cell * (right.value - left.value))
+                .fillMaxHeight()
+            if (card) {
+                Box(indicator.clip(RoundedCornerShape(22.dp)).background(c.accent.copy(alpha = 0.14f)))
+            } else {
+                Box(
+                    indicator
+                        .shadow(4.dp, RoundedCornerShape(26.dp), ambientColor = c.glassShadow, spotColor = c.glassShadow)
+                        .clip(RoundedCornerShape(26.dp))
+                        .background(c.glassInd)
+                        .border(0.5.dp, c.glassEdge, RoundedCornerShape(26.dp)),
+                )
+            }
             Row(Modifier.fillMaxSize()) {
                 tabs.forEachIndexed { i, tab -> NavCell(tab, i == selected, Modifier.weight(1f)) { onSelect(i) } }
             }
@@ -150,15 +161,16 @@ fun GlassNavBar(
 @Composable
 private fun NavCell(tab: NavTab, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val c = Clauderc.colors
+    val card = Clauderc.style == UiStyle.Card
     // The selected look fades in as the indicator arrives, like the mockup's FILL transition.
     val on by animateFloatAsState(if (selected) 1f else 0f, Motion.enter(), label = "navCell")
-    val tint = lerp(c.fg2, c.fg, on)
+    val tint = lerp(c.fg2, if (card) c.accent else c.fg, on)
     val press = remember { MutableInteractionSource() }
     Box(
         modifier
             .pressShrink(press)
             .fillMaxHeight()
-            .clip(RoundedCornerShape(26.dp))
+            .clip(RoundedCornerShape(if (card) 22.dp else 26.dp))
             .selectable(selected = selected, interactionSource = press, indication = LocalIndication.current, role = Role.Tab, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

@@ -52,6 +52,7 @@ import clauderc.app.protocol.SessionState
 import clauderc.app.ui.TimeText
 import clauderc.app.ui.baseName
 import clauderc.app.ui.components.AppBar
+import clauderc.app.ui.components.CardBlock
 import clauderc.app.ui.components.ClaudercDialog
 import clauderc.app.ui.components.ClaudercSheet
 import clauderc.app.ui.components.FieldLabel
@@ -66,10 +67,13 @@ import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.TextTone
 import clauderc.app.ui.components.UnderlineField
+import clauderc.app.ui.components.cardDivider
+import clauderc.app.ui.components.isCardStyle
+import clauderc.app.ui.components.rowStart
 import clauderc.app.ui.stateText
 import clauderc.app.ui.theme.Clauderc
-import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.MonoFamily
+import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
 
@@ -159,21 +163,27 @@ fun SessionsScreen(
                             }
                             if (group.sessions.isEmpty()) {
                                 item(key = "e:" + group.profile.id) {
-                                    Text(
-                                        "没有会话",
-                                        modifier = Modifier.padding(start = sp.page, end = sp.page, top = sp.sp2, bottom = sp.sp3),
-                                        fontSize = Clauderc.fontSizes.label,
-                                        color = c.fg3,
-                                    )
+                                    if (isCardStyle) {
+                                        CardBlock(padding = sp.sp4) { Text("没有会话", fontSize = Clauderc.fontSizes.label, color = c.fg3) }
+                                    } else {
+                                        Text(
+                                            "没有会话",
+                                            modifier = Modifier.padding(start = sp.page, end = sp.page, top = sp.sp2, bottom = sp.sp3),
+                                            fontSize = Clauderc.fontSizes.label,
+                                            color = c.fg3,
+                                        )
+                                    }
                                 }
                             }
                             // One item per group, so folding can shrink the rows together like the mockup.
                             if (group.sessions.isNotEmpty()) {
                                 item(key = "g:" + group.profile.id) {
                                     Fold(visible = !group.collapsed) {
-                                        Column {
-                                            group.sessions.forEach { s ->
-                                                key(s.id) { SessionRow(s, enabled = online, onOpen = { onOpenChat(s) }, onMenu = { overlay = Overlay.Menu(s) }) }
+                                        CardBlock {
+                                            group.sessions.forEachIndexed { i, s ->
+                                                key(s.id) {
+                                                    SessionRow(s, enabled = online, onOpen = { onOpenChat(s) }, onMenu = { overlay = Overlay.Menu(s) }, modifier = Modifier.cardDivider(i > 0))
+                                                }
                                             }
                                         }
                                     }
@@ -244,7 +254,7 @@ private fun GroupHeader(group: SessionGroup, enabled: Boolean, onRename: () -> U
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     Row(
-        Modifier.fillMaxWidth().padding(start = sp.page, end = sp.sp2, top = sp.sp6, bottom = sp.sp1),
+        Modifier.fillMaxWidth().padding(start = sp.page, end = sp.sp2, top = if (isCardStyle) sp.sp5 else sp.sp6, bottom = if (isCardStyle) sp.sp2 else sp.sp1),
         horizontalArrangement = Arrangement.spacedBy(sp.sp2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -314,15 +324,15 @@ private fun GroupHeader(group: SessionGroup, enabled: Boolean, onRename: () -> U
 }
 
 @Composable
-private fun SessionRow(s: Session, enabled: Boolean, onOpen: () -> Unit, onMenu: () -> Unit) {
+private fun SessionRow(s: Session, enabled: Boolean, onOpen: () -> Unit, onMenu: () -> Unit, modifier: Modifier = Modifier) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
-    Row(Modifier.fillMaxWidth().padding(end = sp.sp2).semantics { isTraversalGroup = true }, verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().padding(end = sp.sp2).semantics { isTraversalGroup = true }, verticalAlignment = Alignment.CenterVertically) {
         Row(
             Modifier
                 .weight(1f)
                 .clickable(enabled = enabled, role = Role.Button, onClick = onOpen)
-                .padding(start = sp.page, top = 14.dp, bottom = 14.dp),
+                .padding(start = rowStart, top = 14.dp, bottom = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(sp.sp4),
         ) {
             StatusGlyph(glyphOf(s.state), Modifier.padding(top = 6.dp))
