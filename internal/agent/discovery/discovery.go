@@ -4,7 +4,8 @@
 //
 // ClaudeDir is only ever read; the one file this package writes is
 // ProfilesFile in the agent's own config directory. Formats are those of
-// Claude Code 2.1.323.
+// Claude Code 2.1.323, plus the `claude agents` output of 2.1.326, which
+// lists background sessions without pid and status.
 package discovery
 
 import (
@@ -17,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"clauderc/internal/agent/config"
@@ -56,9 +58,12 @@ type Target struct {
 	// SessionID is the full session id naming the transcript file.
 	SessionID string
 	Cwd       string
-	// Running is false when claude reports no pid: the session is stopped.
+	// Running is false when the session is stopped: claude reports no pid,
+	// or, from 2.1.326 on, no status either and leaves it out of the list
+	// of active sessions.
 	Running bool
 	// Status and State are claude's own status and state of the session.
+	// Status is empty from 2.1.326 on; State then tells a working session.
 	Status string
 	State  string
 }
@@ -78,7 +83,7 @@ func (t Target) SessionState(pending bool) protocol.SessionState {
 		return protocol.StateStopped
 	case t.Blocked() && pending:
 		return protocol.StatePending
-	case t.Status == "busy":
+	case t.Status == "busy", t.Status == "" && t.State == "working":
 		return protocol.StateWorking
 	default:
 		return protocol.StateIdle
@@ -94,6 +99,8 @@ type jobState struct {
 	ProviderEnv json.RawMessage `json:"providerEnv"`
 	Cwd         string          `json:"cwd"`
 	UpdatedAt   time.Time       `json:"updatedAt"`
+	// Detail is the one-line progress beside the job's state.
+	Detail string `json:"detail"`
 }
 
 // sessionFile is the part of sessions/<pid>.json this package reads;
@@ -138,16 +145,25 @@ func (s Source) Targets(ctx context.Context) ([]Target, error) {
 // session, index for index, so List never has to guess a profile back
 // from its id.
 func (s Source) sessions(ctx context.Context) ([]protocol.Session, []protocol.Profile, []Target, error) {
-	cmd := exec.CommandContext(ctx, s.ClaudePath, "agents", "--json", "--all")
-	cmd.Env = config.Environ()
-	cmd.WaitDelay = claudeWaitDelay
-	out, err := cmd.Output()
+	entries, err := s.agents(ctx, "--json", "--all")
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("claude agents: %w", err)
+		return nil, nil, nil, err
 	}
-	var entries []agentEntry
-	if err := json.Unmarshal(out, &entries); err != nil {
-		return nil, nil, nil, fmt.Errorf("claude agents: parse output: %w", err)
+	// From 2.1.326 on a background session has neither pid nor status;
+	// only the list without --all tells the running ones.
+	var active map[string]bool
+	for _, e := range entries {
+		if e.Kind == "background" && e.PID == nil && e.Status == "" {
+			running, err := s.agents(ctx, "--json")
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			active = map[string]bool{}
+			for _, r := range running {
+				active[r.ID] = true
+			}
+			break
+		}
 	}
 	sessions := []protocol.Session{}
 	profiles := []protocol.Profile{}
@@ -162,7 +178,8 @@ func (s Source) sessions(ctx context.Context) ([]protocol.Session, []protocol.Pr
 			last = job.UpdatedAt
 		}
 		p := profileOfJob(job)
-		t := Target{ID: e.ID, SessionID: e.SessionID, Cwd: e.Cwd, Running: e.PID != nil, Status: e.Status, State: e.State}
+		running := e.PID != nil || e.Status == "" && active[e.ID]
+		t := Target{ID: e.ID, SessionID: e.SessionID, Cwd: e.Cwd, Running: running, Status: e.Status, State: e.State}
 		sessions = append(sessions, protocol.Session{
 			ID:   e.ID,
 			Name: e.Name,
@@ -172,11 +189,29 @@ func (s Source) sessions(ctx context.Context) ([]protocol.Session, []protocol.Pr
 			State:        t.SessionState(t.Blocked()),
 			ProfileID:    p.ID,
 			LastActiveAt: last.UTC().Truncate(time.Second),
+			JobState:     e.State,
+			Detail:       strings.TrimSpace(job.Detail),
 		})
 		profiles = append(profiles, p)
 		targets = append(targets, t)
 	}
 	return sessions, profiles, targets, nil
+}
+
+// agents runs `claude agents` with args and parses its JSON list.
+func (s Source) agents(ctx context.Context, args ...string) ([]agentEntry, error) {
+	cmd := exec.CommandContext(ctx, s.ClaudePath, append([]string{"agents"}, args...)...)
+	cmd.Env = config.Environ()
+	cmd.WaitDelay = claudeWaitDelay
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("claude agents: %w", err)
+	}
+	var entries []agentEntry
+	if err := json.Unmarshal(out, &entries); err != nil {
+		return nil, fmt.Errorf("claude agents: parse output: %w", err)
+	}
+	return entries, nil
 }
 
 // readJob reads the record of the session with short id id. Anything that

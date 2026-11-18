@@ -1,0 +1,6 @@
+[
+  {"pid": 200, "cwd": "/w/terminal", "kind": "interactive", "startedAt": 1794529871884, "sessionId": "9a1c2a5e-0000-4000-8000-000000000006", "name": "terminal", "status": "busy"},
+  {"id": "work0001", "cwd": "/w/working", "kind": "background", "startedAt": 1794529871000, "sessionId": "9a1c2a5e-0000-4000-8000-000000000002", "name": "busy one", "state": "working"},
+  {"id": "block001", "cwd": "/w/blocked", "kind": "background", "startedAt": 1794529871500, "sessionId": "9a1c2a5e-0000-4000-8000-000000000003", "name": "dialog open", "state": "blocked"},
+  {"id": "idle0001", "cwd": "/w/idle", "kind": "background", "startedAt": 1794529871600, "sessionId": "9a1c2a5e-0000-4000-8000-000000000004", "name": "turn over", "state": "done"}
+]

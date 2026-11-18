@@ -464,6 +464,11 @@ func TestTargetSessionState(t *testing.T) {
 		// A pending call only counts while claude reports blocked.
 		{"busy, not blocked", discovery.Target{Running: true, Status: "busy", State: "working"}, true, protocol.StateWorking},
 		{"idle", discovery.Target{Running: true, Status: "idle", State: "done"}, false, protocol.StateIdle},
+		// 2.1.326: no status, state tells working.
+		{"no status, working", discovery.Target{Running: true, State: "working"}, false, protocol.StateWorking},
+		{"no status, done", discovery.Target{Running: true, State: "done"}, false, protocol.StateIdle},
+		{"no status, blocked, pending", discovery.Target{Running: true, State: "blocked"}, true, protocol.StatePending},
+		{"no status, blocked, nothing pending", discovery.Target{Running: true, State: "blocked"}, false, protocol.StateIdle},
 	}
 	for _, c := range cases {
 		if got := c.target.SessionState(c.pending); got != c.want {
@@ -497,6 +502,83 @@ func TestTargetsKeepReportedState(t *testing.T) {
 		w := wants[g.ID]
 		if g.Running != w.running || g.Status != w.status || g.State != w.state || g.Blocked() != w.blocked {
 			t.Errorf("%s = %+v blocked %v, want %+v", g.ID, g, g.Blocked(), w)
+		}
+	}
+}
+
+// From 2.1.326 on background sessions come without pid and status: the
+// list of active sessions tells the running ones, state the working one.
+func TestSessionsWithoutPID(t *testing.T) {
+	src := sampleSource(t, "v2326")
+	got, err := src.Sessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants := map[string]protocol.SessionState{
+		"done0001": protocol.StateStopped,
+		"work0001": protocol.StateWorking,
+		// Blocked counts as pending until the transcript check settles it.
+		"block001": protocol.StatePending,
+		"idle0001": protocol.StateIdle,
+	}
+	if len(got) != len(wants) {
+		t.Fatalf("got %+v", got)
+	}
+	for _, g := range got {
+		if g.State != wants[g.ID] {
+			t.Errorf("%s: %q, want %q", g.ID, g.State, wants[g.ID])
+		}
+	}
+	targets, err := src.Targets(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tg := range targets {
+		if tg.ID == "block001" && (!tg.Blocked() || tg.SessionState(false) != protocol.StateIdle) {
+			t.Errorf("block001 = %+v: blocked with nothing pending should be idle", tg)
+		}
+	}
+}
+
+// Each session carries claude's state as jobState and the detail of its
+// jobs/<id>/state.json, trimmed; without a record the detail is empty.
+func TestSessionsJobStateAndDetail(t *testing.T) {
+	got, err := sampleSource(t, "v2326").Sessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	type want struct{ jobState, detail string }
+	wants := map[string]want{
+		"done0001": {"done", ""},
+		"work0001": {"working", "正在查 22:04 订阅更新改了什么"},
+		"block001": {"blocked", ""},
+		"idle0001": {"done", "空白报告已生成于 电子荷质比实验.docx"},
+	}
+	for _, g := range got {
+		if w := wants[g.ID]; g.JobState != w.jobState || g.Detail != w.detail {
+			t.Errorf("%s: jobState %q detail %q, want %+v", g.ID, g.JobState, g.Detail, w)
+		}
+	}
+}
+
+// The list of active sessions is only read when the full list has a
+// background session without pid and status.
+func TestActiveListOnlyForNewFormat(t *testing.T) {
+	for _, c := range []struct {
+		sample string
+		calls  int
+	}{{"basic", 1}, {"v2326", 2}} {
+		dir, err := filepath.Abs(filepath.Join("testdata", c.sample))
+		if err != nil {
+			t.Fatal(err)
+		}
+		logDir := fakeclaude.Setup(t, dir)
+		src := discovery.Source{ClaudePath: fakeclaude.Path(), ClaudeDir: dir}
+		if _, err := src.Sessions(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if got := len(fakeclaude.Calls(t, logDir)); got != c.calls {
+			t.Errorf("%s: %d claude calls, want %d", c.sample, got, c.calls)
 		}
 	}
 }

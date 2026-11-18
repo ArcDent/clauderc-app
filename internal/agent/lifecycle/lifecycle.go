@@ -5,6 +5,7 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -142,6 +143,9 @@ func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest)
 	const failed = "启动 claude 失败，请在目标机上查看日志"
 	out, err := h.run(ctx, req.Cwd, t.ProviderEnv, "--bg", args)
 	if err != nil {
+		if bytes.Contains(ansi.ReplaceAll(out, nil), []byte("Workspace not trusted")) {
+			return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "这个目录还没被信任：" + req.Cwd + "。请先在目标机上进入这个目录运行一次 claude，接受信任提示后再试"}
+		}
 		return "", h.internal(failed, err)
 	}
 	id := parseBackgrounded(out)
@@ -181,37 +185,82 @@ func (h *Handler) Remove(ctx context.Context, id string) error {
 	return nil
 }
 
-// Wake resumes the stopped session whose full session id is sessionID
-// with exactly `claude --bg --resume <sessionID>` in its original working
-// directory, adding the providerEnv of its job record, and returns once
-// the CLI lists it as running. Any further flag would start a copy under
-// a new id instead (design D8). A session that is running is left alone.
-// It implements the chat package's Waker.
-func (h *Handler) Wake(ctx context.Context, sessionID string) error {
-	bySessionID := func(t discovery.Target) bool { return t.SessionID == sessionID }
-	t, err := h.find(ctx, sessionID, bySessionID)
-	if err != nil || t.Running {
+// Wake resumes the stopped session whose full session id is sessionID by
+// holding its attach through hold, which runs it again under its own ids,
+// and returns once the CLI lists it as running. `claude --bg --resume`
+// went through a wrapper's extra flags, which made Claude Code start a
+// copy instead (design D8). A new session in the same working directory
+// that shows up meanwhile is taken for such a copy: it is stopped and
+// removed, and Wake fails. A session that is running is left alone. It
+// implements the chat package's Waker.
+func (h *Handler) Wake(ctx context.Context, sessionID string, hold func(ctx context.Context, id string) (func(), error)) error {
+	targets, err := h.targets(ctx)
+	if err != nil {
 		return err
+	}
+	i := slices.IndexFunc(targets, func(t discovery.Target) bool { return t.SessionID == sessionID })
+	if i < 0 {
+		return &protocol.Error{Code: protocol.CodeSessionNotFound, Message: "找不到会话：" + sessionID}
+	}
+	t := targets[i]
+	if t.Running {
+		return nil
 	}
 	if err := checkDir(t.Cwd, "会话的工作目录已不存在："+t.Cwd); err != nil {
 		return err
 	}
-	env := h.opts.Source.ProviderEnv(t.ID)
-	if _, err := h.run(ctx, t.Cwd, env, "--bg --resume", []string{"--bg", "--resume", sessionID}); err != nil {
-		return h.internal("claude 没能接着运行这个会话，请在目标机上查看日志", err)
+	known := map[string]bool{}
+	for _, k := range targets {
+		known[k.ID] = true
 	}
+	release, err := hold(ctx, t.ID)
+	if err != nil {
+		return h.internal("接入会话失败，请在目标机上查看日志", err)
+	}
+	defer release()
 	ctx, cancel := context.WithTimeout(ctx, h.opts.WakeTimeout)
 	defer cancel()
 	ticker := time.NewTicker(h.opts.PollInterval)
 	defer ticker.Stop()
 	for {
-		if t, err := h.find(ctx, sessionID, bySessionID); err == nil && t.Running {
+		now, _ := h.opts.Source.Targets(ctx)
+		if slices.ContainsFunc(now, func(n discovery.Target) bool { return n.SessionID == sessionID && n.Running }) {
 			return nil
+		}
+		if i := slices.IndexFunc(now, func(n discovery.Target) bool { return !known[n.ID] && n.SessionID != sessionID && n.Cwd == t.Cwd }); i >= 0 {
+			h.removeCopy(ctx, now[i].ID)
+			return &protocol.Error{Code: protocol.CodeInternal, Message: "唤醒时 claude 另起了会话，已停止并移出；请在目标机上检查 claude 命令是否原样转发参数"}
 		}
 		select {
 		case <-ctx.Done():
 			return &protocol.Error{Code: protocol.CodeTimeout, Message: "会话唤醒后没有恢复运行"}
 		case <-ticker.C:
+		}
+	}
+}
+
+// removeCopy stops and removes the session with short id id, waiting for
+// the CLI to list it as stopped in between; failures are only logged.
+func (h *Handler) removeCopy(ctx context.Context, id string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claudeTimeout)
+	defer cancel()
+	if err := h.Stop(ctx, id); err != nil {
+		h.opts.Logger.Error("停止唤醒时另起的会话失败", "id", id, "err", err)
+	}
+	for {
+		var pe *protocol.Error
+		err := h.Remove(ctx, id)
+		if !errors.As(err, &pe) || pe.Code != protocol.CodeSessionRunning {
+			if err != nil {
+				h.opts.Logger.Error("移出唤醒时另起的会话失败", "id", id, "err", err)
+			}
+			return
+		}
+		select {
+		case <-ctx.Done():
+			h.opts.Logger.Error("唤醒时另起的会话没有停下", "id", id)
+			return
+		case <-time.After(h.opts.PollInterval):
 		}
 	}
 }
@@ -224,9 +273,9 @@ func (h *Handler) target(ctx context.Context, id string) (discovery.Target, erro
 // find returns the first background session in the CLI list that match
 // accepts; name is the id quoted when there is none.
 func (h *Handler) find(ctx context.Context, name string, match func(discovery.Target) bool) (discovery.Target, error) {
-	targets, err := h.opts.Source.Targets(ctx)
+	targets, err := h.targets(ctx)
 	if err != nil {
-		return discovery.Target{}, h.internal("读取会话列表失败，请检查目标机上的 claude 能否运行", err)
+		return discovery.Target{}, err
 	}
 	for _, t := range targets {
 		if match(t) {
@@ -234,6 +283,15 @@ func (h *Handler) find(ctx context.Context, name string, match func(discovery.Ta
 		}
 	}
 	return discovery.Target{}, &protocol.Error{Code: protocol.CodeSessionNotFound, Message: "找不到会话：" + name}
+}
+
+// targets is the CLI list of background sessions.
+func (h *Handler) targets(ctx context.Context) ([]discovery.Target, error) {
+	targets, err := h.opts.Source.Targets(ctx)
+	if err != nil {
+		return nil, h.internal("读取会话列表失败，请检查目标机上的 claude 能否运行", err)
+	}
+	return targets, nil
 }
 
 // internal logs err on the agent and returns msg for the phone: claude's
