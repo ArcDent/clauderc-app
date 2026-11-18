@@ -1,5 +1,8 @@
 package clauderc.app.sessions
 
+import clauderc.app.ui.components.StickerCorner
+import clauderc.app.ui.components.sticker
+import clauderc.app.ui.theme.page
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,7 +39,6 @@ import clauderc.app.ui.components.FieldLabel
 import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.UnderlineField
-import clauderc.app.ui.components.isCardStyle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Lift
 import clauderc.app.ui.theme.MonoFamily
@@ -58,16 +60,16 @@ fun CreateSessionScreen(
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
-    Column(Modifier.fillMaxSize().background(c.bg).imePadding()) {
+    Column(Modifier.fillMaxSize().page().imePadding()) {
         AppBar(
             navigation = { SymbolButton(Symbols.Close, "关闭", onClick = onClose) },
             title = { BarTitle("新建会话") },
             actions = { TextAction(if (state.submitting) "正在启动" else "启动", onClick = onSubmit, enabled = state.canSubmit) },
         )
-        val card = isCardStyle
-        // The card style puts each field on its own card, closer together.
+        val card = Clauderc.look.cards
+        // 贴纸 puts each field on its own ink-outlined card, closer together.
         val field = if (card) {
-            Modifier.clip(RoundedCornerShape(Clauderc.radii.card)).background(c.card).padding(start = sp.sp4, end = sp.sp4, top = sp.sp3, bottom = sp.sp2)
+            Modifier.sticker(c.panel, c.ink, StickerCorner).padding(start = sp.sp4, end = sp.sp4, top = sp.sp3, bottom = sp.sp2)
         } else {
             Modifier
         }

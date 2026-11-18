@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,15 +29,18 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -49,10 +53,12 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Lift
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Symbols
+import clauderc.app.ui.theme.styled
 import kotlinx.coroutines.delay
 
 /** .sheet: a bottom sheet with a short handle and 28dp top corners. */
@@ -60,13 +66,26 @@ import kotlinx.coroutines.delay
 @Composable
 fun ClaudercSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val c = Clauderc.colors
+    val ui = Clauderc.style
+    val corner = when (ui) {
+        UiStyle.Grid -> 10.dp
+        UiStyle.Sticker -> 32.dp
+        UiStyle.Clear -> Clauderc.radii.lg
+    }
+    val shape = RoundedCornerShape(topStart = corner, topEnd = corner)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = c.sheet,
+        // 清玻's glass tint over the sheet colour: the sheet sits in its own window, where the page behind cannot be blurred.
+        modifier = when (ui) {
+            UiStyle.Sticker -> Modifier.border(2.dp, c.ink, shape)
+            UiStyle.Clear -> Modifier.topHighlight(c.rim)
+            UiStyle.Grid -> Modifier
+        },
+        containerColor = if (ui == UiStyle.Clear) c.pane.compositeOver(c.sheet) else c.sheet,
         contentColor = c.fg,
         scrimColor = c.scrim,
-        shape = RoundedCornerShape(topStart = Clauderc.radii.lg, topEnd = Clauderc.radii.lg),
+        shape = shape,
         dragHandle = {
             Box(
                 Modifier
@@ -82,10 +101,14 @@ fun ClaudercSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> 
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = Clauderc.spacing.sp5)
                 .navigationBarsPadding(),
-            content = content,
-        )
+        ) {
+            CompositionLocalProvider(LocalOverlayActions provides true) { content() }
+        }
     }
 }
+
+/** True for the action buttons of a sheet or dialog, which 贴纸 draws as ink-outlined stickers. */
+internal val LocalOverlayActions = staticCompositionLocalOf { false }
 
 /** .sheet-head */
 @Composable
@@ -139,7 +162,7 @@ fun MenuItem(
         horizontalArrangement = Arrangement.spacedBy(sp.sp4),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (icon != null) Icon(icon, contentDescription = null, tint = if (danger) c.danger else c.fg2)
+        if (icon != null) Icon(icon.styled, contentDescription = null, tint = if (danger) c.danger else c.fg2)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 text,
@@ -174,25 +197,32 @@ fun ClaudercDialog(
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
+    val ui = Clauderc.style
+    val surface = when (ui) {
+        UiStyle.Sticker -> Modifier.sticker(c.sheet, c.ink, 32.dp, drop = 6.dp)
+        UiStyle.Grid -> Modifier.clip(RoundedCornerShape(6.dp)).background(c.sheet)
+        UiStyle.Clear -> Modifier.clip(RoundedCornerShape(Clauderc.radii.lg)).background(c.pane.compositeOver(c.sheet)).topHighlight(c.rim)
+    }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
             Modifier
                 .padding(horizontal = sp.sp6)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(Clauderc.radii.lg))
-                .background(c.sheet)
-                .padding(start = sp.sp6, end = sp.sp6, top = sp.sp6, bottom = sp.sp4),
+                .then(surface)
+                .padding(start = sp.sp6, end = sp.sp6, top = sp.sp6, bottom = sp.sp4 + if (ui == UiStyle.Sticker) 4.dp else 0.dp),
             verticalArrangement = Arrangement.spacedBy(sp.sp4),
         ) {
             Text(title, fontSize = Clauderc.fontSizes.headline, lineHeight = 1.3.em, color = c.fg, modifier = Modifier.semantics { heading() })
             if (text != null) Text(text, fontSize = Clauderc.fontSizes.label, lineHeight = 1.65.em, color = c.fg2)
             body?.invoke(this)
-            Row(
-                Modifier.fillMaxWidth().padding(top = sp.sp2).padding(end = 0.dp),
-                horizontalArrangement = Arrangement.spacedBy(sp.sp1, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically,
-                content = buttons,
-            )
+            CompositionLocalProvider(LocalOverlayActions provides true) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = sp.sp2).padding(end = 0.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (ui == UiStyle.Sticker) sp.sp2 else sp.sp1, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = buttons,
+                )
+            }
         }
     }
 }
@@ -216,7 +246,7 @@ class SnackState {
     internal val key get() = serial
 }
 
-/** .snackbar: inverse colors, 4dp corners, auto-dismissed after four seconds. */
+/** .snackbar: inverse colors, 4dp corners (贴纸: an 18dp ink-outlined sticker), auto-dismissed after four seconds. */
 @Composable
 fun SnackHost(state: SnackState, modifier: Modifier = Modifier, bottom: Dp = Clauderc.spacing.sp3) {
     val c = Clauderc.colors
@@ -236,8 +266,13 @@ fun SnackHost(state: SnackState, modifier: Modifier = Modifier, bottom: Dp = Cla
                 .padding(start = sp.sp3, end = sp.sp3, bottom = bottom)
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
-                .clip(RoundedCornerShape(if (isCardStyle) 14.dp else 4.dp))
-                .background(c.inverse)
+                .then(
+                    if (Clauderc.style == UiStyle.Sticker) {
+                        Modifier.sticker(c.inverse, c.ink, 18.dp)
+                    } else {
+                        Modifier.clip(RoundedCornerShape(4.dp)).background(c.inverse)
+                    },
+                )
                 .padding(horizontal = sp.sp4, vertical = sp.sp3),
             contentAlignment = Alignment.CenterStart,
         ) {

@@ -103,11 +103,11 @@ class ThemeRenderTest {
         return pixels[0]
     }
 
-    @Test fun cardStyleTakesThePickedAccent() {
-        assertEquals(Color(0xFF34C759).toArgb(), accentButtonPixel(UiStyle.Card, Color(0xFF34C759)))
+    @Test fun stickerTakesThePickedAccent() {
+        assertEquals(Color(0xFF34C759).toArgb(), accentButtonPixel(UiStyle.Sticker, Color(0xFF34C759)))
     }
 
     @Test fun minimalStyleKeepsItsCobalt() {
-        assertEquals(Color(0xFF2A45E0).toArgb(), accentButtonPixel(UiStyle.Minimal, Color(0xFF34C759)))
+        assertEquals(Color(0xFF2A45E0).toArgb(), accentButtonPixel(UiStyle.Clear, Color(0xFF34C759)))
     }
 }

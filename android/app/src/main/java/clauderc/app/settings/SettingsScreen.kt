@@ -1,5 +1,12 @@
 package clauderc.app.settings
 
+import androidx.compose.ui.unit.sp
+import clauderc.app.ui.theme.MonoFamily
+import clauderc.app.ui.components.topLine
+import clauderc.app.ui.components.GridRule
+import clauderc.app.ui.components.StickerCorner
+import clauderc.app.ui.components.sticker
+import clauderc.app.ui.theme.page
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -54,6 +62,8 @@ import clauderc.app.data.UiStyle
 import clauderc.app.machines.NavClearance
 import clauderc.app.ui.components.AppBar
 import clauderc.app.ui.components.Hero
+import clauderc.app.ui.components.highlighter
+import clauderc.app.ui.components.inkFrame
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercColors
 import clauderc.app.ui.theme.PressIndication
@@ -92,18 +102,15 @@ fun SettingsScreen(
 ) {
     val c = Clauderc.colors
     val dark = c.isDark
-    Column(Modifier.fillMaxSize().background(c.bg)) {
+    Column(Modifier.fillMaxSize().page()) {
         AppBar()
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = NavClearance)) {
             Hero("设置")
             SettingsGroup(Symbols.Style, "样式") {
                 OptionRow {
                     for (style in UiStyle.entries) {
-                        Option(if (style == UiStyle.Minimal) "极简" else "卡片", look.style == style, { onStyle(style, it) }) {
-                            MiniPhone(style, dark, cardAccent)
-                        }
+                        Option(style.label, look.style == style, { onStyle(style, it) }) { MiniPhone(style, dark, cardAccent) }
                     }
-                    Spacer(Modifier.weight(1f))
                 }
             }
             SettingsGroup(Symbols.Contrast, "深浅色") {
@@ -113,7 +120,7 @@ fun SettingsScreen(
                     Option("深色", look.mode == ThemeMode.Dark, { onMode(ThemeMode.Dark, it) }) { MiniPhone(look.style, true, cardAccent) }
                 }
             }
-            if (look.style == UiStyle.Card) {
+            if (look.style == UiStyle.Sticker) {
                 SettingsGroup(Symbols.Palette, "主题色") {
                     val choices = AccentChoice.entries.filter { it != AccentChoice.Wallpaper || wallpaperAvailable }
                     Swatches(choices, look.accent, dark, onAccent)
@@ -127,31 +134,37 @@ fun SettingsScreen(
 private fun SettingsGroup(icon: ImageVector, title: String, content: @Composable () -> Unit) {
     val sp = Clauderc.spacing
     val c = Clauderc.colors
-    val card = Clauderc.style == UiStyle.Card
-    // Minimal: a heading in the page gutter; card: the heading sits inside its own card.
-    val outer = if (card) {
-        Modifier
+    val ui = Clauderc.style
+    // 清玻: a heading in the page gutter. 贴纸: the heading inside the group's own ink-outlined card.
+    // 格栅: 16dp in under a heavy rule, with a small monospace heading and no icon.
+    val outer = when (ui) {
+        UiStyle.Sticker -> Modifier
             .padding(start = sp.sp4, end = sp.sp4, bottom = sp.sp3)
-            .clip(RoundedCornerShape(Clauderc.radii.card))
-            .background(c.card)
+            .sticker(c.panel, c.ink, StickerCorner)
             .padding(start = sp.sp2, end = sp.sp2, top = sp.sp4, bottom = sp.sp5)
-    } else {
-        Modifier.padding(horizontal = sp.page - sp.sp1)
+        UiStyle.Grid -> Modifier
+            .padding(start = sp.sp4, end = sp.sp4, bottom = sp.sp4)
+            .topLine(c.fg, GridRule)
+        UiStyle.Clear -> Modifier.padding(horizontal = sp.page - sp.sp1)
     }
     Column(outer.fillMaxWidth()) {
-        Row(
-            Modifier.padding(start = sp.sp2, top = if (card) 0.dp else sp.sp6, bottom = sp.sp4),
-            horizontalArrangement = Arrangement.spacedBy(sp.sp2),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, contentDescription = null, tint = c.fg2, modifier = Modifier.size(20.dp))
-            Text(title, fontSize = Clauderc.fontSizes.label, fontWeight = FontWeight.Medium, color = c.fg)
+        if (ui == UiStyle.Grid) {
+            Text(title, Modifier.padding(top = sp.sp3, bottom = sp.sp4), fontSize = 12.sp, fontFamily = MonoFamily, fontWeight = FontWeight.Medium, color = c.fg)
+        } else {
+            Row(
+                Modifier.padding(start = sp.sp2, top = if (ui == UiStyle.Sticker) 0.dp else sp.sp6, bottom = sp.sp4),
+                horizontalArrangement = Arrangement.spacedBy(sp.sp2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(icon, contentDescription = null, tint = c.fg2, modifier = Modifier.size(20.dp))
+                Text(title, fontSize = Clauderc.fontSizes.label, fontWeight = if (ui == UiStyle.Sticker) FontWeight.Bold else FontWeight.Medium, color = c.fg)
+            }
         }
         content()
     }
 }
 
-/** Three equal columns, like the mockup's .opts grid; two options leave the third empty. */
+/** Three equal columns, like the mockup's .opts grid. */
 @Composable
 private fun OptionRow(content: @Composable RowScope.() -> Unit) {
     Row(Modifier.fillMaxWidth()) { content() }
@@ -165,7 +178,8 @@ private fun RowScope.Option(
     preview: @Composable () -> Unit,
 ) {
     val c = Clauderc.colors
-    val card = Clauderc.style == UiStyle.Card
+    val sticker = Clauderc.style == UiStyle.Sticker
+    val corner = miniCorner(Clauderc.style)
     var center by remember { mutableStateOf(Offset.Zero) }
     val press = remember { MutableInteractionSource() }
     Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
@@ -179,33 +193,42 @@ private fun RowScope.Option(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp2),
         ) {
-            Box(Modifier.size(84.dp, 116.dp).border(if (selected) 2.dp else 1.dp, if (selected) c.accent else c.line, RoundedCornerShape(14.dp))) {
-                preview()
+            val frame = when {
+                // 贴纸: a faint ink ring; the picked one gets a full ink ring and a hard shadow below it.
+                sticker && selected -> Modifier.inkFrame(c.ink, corner, ring = 2.dp, drop = 4.dp)
+                sticker -> Modifier.inkFrame(c.ink.copy(alpha = 0.18f), corner, ring = 2.dp, drop = 0.dp)
+                else -> Modifier.border(if (selected) 2.dp else 1.dp, if (selected) c.accent else c.line, RoundedCornerShape(corner))
             }
+            Box(Modifier.size(84.dp, 116.dp).then(frame)) { preview() }
             Text(
                 label,
                 fontSize = Clauderc.fontSizes.label,
-                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                color = when {
-                    selected && card -> c.accent
-                    selected -> c.fg
-                    else -> c.fg2
+                fontWeight = when {
+                    selected && sticker -> FontWeight.ExtraBold
+                    selected -> FontWeight.Medium
+                    else -> FontWeight.Normal
                 },
+                color = if (selected) c.fg else c.fg2,
+                // 贴纸 marks the picked name with a highlighter stroke across its lower half.
+                modifier = if (selected && sticker) Modifier.highlighter(c.highlight, from = 0.55f).padding(horizontal = 3.dp) else Modifier,
             )
         }
     }
 }
 
+/** The mini phones' corners: square-ish for 格栅, round for the other two. */
+private fun miniCorner(style: UiStyle) = if (style == UiStyle.Grid) 3.dp else 14.dp
+
 /**
  * A tiny phone in [style]'s colours: a title, three rows and the nav bar, with the accent on the
  * first row and in the nav indicator. [splitDark] covers the lower right half with the dark version.
- * [cardAccent] only shows in the card style; the minimal one keeps its cobalt.
+ * [cardAccent] only shows in 贴纸; the other two keep their cobalt.
  */
 @Composable
 private fun MiniPhone(style: UiStyle, dark: Boolean, cardAccent: Color, splitDark: Boolean = false) {
     val light = palette(style, dark, cardAccent)
     val night = palette(style, true, cardAccent)
-    Canvas(Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp)).testTag("mini")) {
+    Canvas(Modifier.fillMaxSize().clip(RoundedCornerShape(miniCorner(style))).testTag("mini")) {
         drawMini(style, light)
         if (splitDark) {
             val half = Path().apply {
@@ -220,35 +243,49 @@ private fun MiniPhone(style: UiStyle, dark: Boolean, cardAccent: Color, splitDar
 }
 
 private fun DrawScope.drawMini(style: UiStyle, p: ClaudercColors) {
-    val card = style == UiStyle.Card
+    val sticker = style == UiStyle.Sticker
     val u = 1.dp.toPx()
     drawRect(p.bg)
     val left = 9 * u
     val width = size.width - 18 * u
+    // 格栅 rules its rows in black; the other two use the hairline colour.
+    val rule = if (style == UiStyle.Grid) p.fg else p.line
+    // 贴纸 outlines its rows and nav bar in ink 1.2dp wide, with a 1.5dp hard shadow below.
+    fun inked(topLeft: Offset, box: Size, radius: Float) {
+        val o = 1.2f * u
+        val r = CornerRadius(radius + o)
+        drawRoundRect(p.fg, Offset(topLeft.x - o, topLeft.y - o + 1.5f * u), Size(box.width + 2 * o, box.height + 2 * o), r)
+        drawRoundRect(p.fg, Offset(topLeft.x - o, topLeft.y - o), Size(box.width + 2 * o, box.height + 2 * o), r)
+        drawRoundRect(p.card, topLeft, box, CornerRadius(radius))
+    }
     var y = 13 * u
     // Title
-    drawRoundRect(p.fg.copy(alpha = if (card) 1f else 0.8f), Offset(left, y), Size(width * if (card) 0.46f else 0.52f, (if (card) 8 else 7) * u), CornerRadius(4 * u))
-    y += (if (card) 8 else 7) * u + 10 * u
+    drawRoundRect(p.fg.copy(alpha = if (sticker) 1f else 0.8f), Offset(left, y), Size(width * if (sticker) 0.46f else 0.52f, (if (sticker) 8 else 7) * u), CornerRadius(4 * u))
+    y += (if (sticker) 8 else 7) * u + 10 * u
     // Rows
-    val rowH = (if (card) 17 else 15) * u
+    val rowH = (if (sticker) 17 else 15) * u
     repeat(3) { i ->
-        if (card) {
-            drawRoundRect(p.card, Offset(left, y), Size(width, rowH), CornerRadius(6 * u))
+        if (sticker) {
+            inked(Offset(left, y), Size(width, rowH), 7 * u)
         } else {
-            drawRect(p.line, Offset(left, y + rowH - u), Size(width, u))
+            drawRect(rule, Offset(left, y + rowH - u), Size(width, u))
         }
-        if (i == 0) drawCircle(p.accent, 3 * u, Offset(left + (if (card) 9 else 6) * u, y + (if (card) 8.5f else 7f) * u))
+        if (i == 0) drawCircle(p.accent, 3 * u, Offset(left + (if (sticker) 9 else 6) * u, y + (if (sticker) 8.5f else 7f) * u))
         y += rowH + 5 * u
     }
     // Nav bar and its indicator
     val navLeft = size.width * 0.12f
     val navW = size.width * 0.76f
     val navTop = size.height - 21 * u
-    val navColor = if (card) p.card else p.sheet
-    drawRoundRect(navColor, Offset(navLeft, navTop), Size(navW, 14 * u), CornerRadius(7 * u))
-    drawRoundRect(p.line, Offset(navLeft, navTop), Size(navW, 14 * u), CornerRadius(7 * u), style = Stroke(0.5f * u))
+    val navR = (if (sticker) 8 else 7) * u
+    if (sticker) {
+        inked(Offset(navLeft, navTop), Size(navW, 14 * u), navR)
+    } else {
+        drawRoundRect(p.sheet, Offset(navLeft, navTop), Size(navW, 14 * u), CornerRadius(navR))
+        drawRoundRect(rule, Offset(navLeft, navTop), Size(navW, 14 * u), CornerRadius(navR), style = Stroke(0.5f * u))
+    }
     drawRoundRect(
-        if (card) p.accent.copy(alpha = 0.22f) else p.fg.copy(alpha = 0.1f),
+        if (sticker) p.accent.copy(alpha = 0.3f) else p.fg.copy(alpha = 0.1f),
         Offset(navLeft + 3 * u, navTop + 3 * u),
         Size(navW * 0.3f, 8 * u),
         CornerRadius(5 * u),
@@ -279,7 +316,7 @@ private fun Swatches(choices: List<AccentChoice>, picked: AccentChoice, dark: Bo
 @Composable
 private fun Swatch(choice: AccentChoice, selected: Boolean, dark: Boolean, onPick: (AccentChoice, Offset) -> Unit) {
     val color = accentColor(choice, dark)
-    val on = palette(UiStyle.Card, dark, color).onAccent
+    val on = palette(UiStyle.Sticker, dark, color).onAccent
     var center by remember { mutableStateOf(Offset.Zero) }
     val press = remember { MutableInteractionSource() }
     Box(
@@ -291,11 +328,19 @@ private fun Swatch(choice: AccentChoice, selected: Boolean, dark: Boolean, onPic
             .selectable(selected, press, indication = null, role = Role.RadioButton) { onPick(choice, center) },
         contentAlignment = Alignment.Center,
     ) {
-        // The ring sits 5dp outside the dot. A pick spreads the new theme out from here, so the ring needs no animation of its own.
-        if (selected) {
+        // 贴纸 rings each dot in ink on a hard shadow and lifts the picked one 3dp higher onto a longer shadow.
+        // Elsewhere the picked one gets a ring 5dp outside the dot. A pick spreads the new theme out from
+        // here, so neither needs an animation of its own.
+        val sticker = Clauderc.style == UiStyle.Sticker
+        if (selected && !sticker) {
             Canvas(Modifier.fillMaxSize()) { drawCircle(color, radius = size.minDimension / 2 - 1.dp.toPx(), style = Stroke(2.dp.toPx())) }
         }
-        Box(Modifier.size(44.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
+        val dot = if (sticker) {
+            Modifier.offset(y = if (selected) (-3).dp else 0.dp).inkFrame(Clauderc.colors.ink, 22.dp, ring = 2.dp, drop = if (selected) 6.dp else 3.dp)
+        } else {
+            Modifier
+        }
+        Box(Modifier.size(44.dp).then(dot).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
             val icon = when {
                 selected -> Symbols.Check
                 choice == AccentChoice.Wallpaper -> Symbols.Wallpaper

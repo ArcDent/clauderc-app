@@ -1,5 +1,10 @@
 package clauderc.app.ui
 
+import org.junit.Assert.assertEquals
+import clauderc.app.ui.components.StatusGlyph
+import clauderc.app.ui.components.Glyph
+import clauderc.app.ui.components.CliGlyphs
+import clauderc.app.data.UiStyle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -54,5 +59,50 @@ class GlyphsTest {
             last = now
         }
         assertTrue("the ring moved $moves times in 12 frames", moves in 2..6)
+    }
+
+    /** 格栅's star steps through Claude Code's ten frames every 1.2s and comes back to the dot. */
+    @Test fun gridStarStepsLikeClaudeCode() {
+        val frames = (0 until 10).map { CliGlyphs.star(it * 120L + 60) }
+        assertEquals(listOf("·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"), frames)
+        assertEquals("·", CliGlyphs.star(1_200))
+        assertEquals("✢", CliGlyphs.star(1_200 + 120))
+    }
+
+    /** 格栅's spinner turns the braille dots in ten steps of 80ms. */
+    @Test fun gridSpinnerTurnsBrailleDots() {
+        val frames = (0 until 10).map { CliGlyphs.braille(it * 80L) }
+        assertEquals(listOf("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"), frames)
+        assertEquals("⠋", CliGlyphs.braille(800))
+        assertEquals("⠋", CliGlyphs.braille(879))
+        assertEquals("⠙", CliGlyphs.braille(880))
+    }
+
+    /** 格栅's 「等你」 dot is full for 61% of each 1.2s and faint for the rest. */
+    @Test fun gridNeedDotBlinks() {
+        assertEquals(1f, CliGlyphs.blink(0), 0f)
+        assertEquals(1f, CliGlyphs.blink(731), 0f)
+        assertEquals(0.25f, CliGlyphs.blink(732), 0f)
+        assertEquals(0.25f, CliGlyphs.blink(1_199), 0f)
+        assertEquals(1f, CliGlyphs.blink(1_200), 0f)
+    }
+
+    /** The star redraws its own canvas when the frame changes, and only then. */
+    @Test fun gridStarRedrawsOnItsSteps() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Grid) {
+                Box(Modifier.testTag("star").size(48.dp).background(Color.White), contentAlignment = Alignment.Center) { StatusGlyph(Glyph.Work) }
+            }
+        }
+        compose.mainClock.advanceTimeByFrame()
+        fun shot() = compose.onNodeWithTag("star").captureToImage().asAndroidBitmap()
+        val first = shot()
+        fun ink(b: android.graphics.Bitmap) = (0 until b.height).sumOf { y -> (0 until b.width).count { x -> b.getPixel(x, y) != android.graphics.Color.WHITE } }
+        assertTrue("the first frame draws something", ink(first) > 0)
+        // The loop clock steps about every 49ms here, so 250ms surely crosses the first 120ms step.
+        compose.mainClock.advanceTimeBy(250)
+        val next = shot()
+        assertFalse("the star did not change past its first 120ms step (${ink(first)} -> ${ink(next)} inked pixels)", first.sameAs(next))
     }
 }

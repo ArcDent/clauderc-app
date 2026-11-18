@@ -161,78 +161,167 @@
   --bezel: #2A2A2A;
   color-scheme: dark;
 }
-/* 卡片样式：浅灰底上铺大圆角卡片，只有一种强调色。--c-accent 是默认的蓝色，APP 里换成「设置」选的主题色，
-   --c-lane-2 跟着一起换。没列出的变量沿用上面极简样式的值。 */
-:root[data-style="card"] {
-  --c-bg: #F2F2F6;
+/* 三套样式（第四轮，操作稿 demo.html 已批准）：清玻、格栅、贴纸。没列出的 --c- 变量沿用上面极简样式同深浅的值。
+   清玻：颜色就是极简的，只多出浮在内容上的玻璃顶栏、输入框和弹层用的 --k- 变量。
+   格栅：更硬的黑白灰，粗黑分隔线、直角、等宽字。
+   贴纸：米色点点纸（--k-dot 是 18px 一格的小点），粗墨线（--k-ink）描边加错位硬阴影；--k-p2 到 --k-p5 是图标贴纸的颜色，
+   第一种是主题色；--k-glass 是卡片底色，--k-float 是导航栏和输入框的底色。--c-accent 是默认的蓝色，APP 里换成「设置」选的主题色，
+   --c-lane-2 跟着一起换。 */
+:root[data-style="clear"] {
+  --k-pane: rgba(255, 255, 255, 0.64);
+  --k-rimc: rgba(255, 255, 255, 0.95);
+  --k-edgec: rgba(0, 0, 0, 0.07);
+  --k-lens: rgba(255, 255, 255, 0.72);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-style="clear"]:not([data-theme="light"]) {
+    --k-pane: rgba(22, 22, 22, 0.6);
+    --k-rimc: rgba(255, 255, 255, 0.16);
+    --k-edgec: rgba(255, 255, 255, 0.08);
+    --k-lens: rgba(255, 255, 255, 0.13);
+  }
+}
+:root[data-style="clear"][data-theme="dark"] {
+  --k-pane: rgba(22, 22, 22, 0.6);
+  --k-rimc: rgba(255, 255, 255, 0.16);
+  --k-edgec: rgba(255, 255, 255, 0.08);
+  --k-lens: rgba(255, 255, 255, 0.13);
+}
+:root[data-style="grid"] {
+  --c-bg: #FFFFFF;
   --c-sheet: #FFFFFF;
   --c-card: #FFFFFF;
-  --c-surface: #EBEBF0;
-  --c-surface-2: #DCDCE2;
-  --c-line: #E8E8ED;
-  --c-fg: #111114;
-  --c-fg-2: #67676E;
-  --c-fg-3: #A2A2A9;
+  --c-surface: #F1F1F1;
+  --c-surface-2: #E0E0E0;
+  --c-line: #E6E6E6;
+  --c-fg: #0A0A0A;
+  --c-fg-2: #555555;
+  --c-fg-3: #9A9A9A;
+  --c-lane-1: #0A0A0A;
+  --c-lane-3: #A0A0A0;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-style="grid"]:not([data-theme="light"]) {
+    --c-bg: #0A0A0A;
+    --c-sheet: #141414;
+    --c-card: #0A0A0A;
+    --c-surface: #171717;
+    --c-surface-2: #282828;
+    --c-line: #1E1E1E;
+    --c-fg: #F2F2F2;
+    --c-fg-2: #9A9A9A;
+    --c-fg-3: #5E5E5E;
+    --c-lane-1: #F2F2F2;
+    --c-lane-3: #5E5E5E;
+  }
+}
+:root[data-style="grid"][data-theme="dark"] {
+  --c-bg: #0A0A0A;
+  --c-sheet: #141414;
+  --c-card: #0A0A0A;
+  --c-surface: #171717;
+  --c-surface-2: #282828;
+  --c-line: #1E1E1E;
+  --c-fg: #F2F2F2;
+  --c-fg-2: #9A9A9A;
+  --c-fg-3: #5E5E5E;
+  --c-lane-1: #F2F2F2;
+  --c-lane-3: #5E5E5E;
+}
+:root[data-style="sticker"] {
+  --c-bg: #FFF6E9;
+  --c-sheet: #FFFDF8;
+  --c-card: #FFFFFF;
+  --c-surface: #FFFFFF;
+  --c-surface-2: rgba(30, 27, 46, 0.14);
+  --c-line: rgba(30, 27, 46, 0.12);
+  --c-fg: #1E1B2E;
+  --c-fg-2: #5E5870;
+  --c-fg-3: #A49DB0;
   --c-accent: #007AFF;
   --c-on-accent: #FFFFFF;
   --c-danger: #E5352B;
-  --c-add-bg: #E7F6EA;
-  --c-add-fg: #1B7A33;
-  --c-del-bg: #FDECEB;
+  --c-add-bg: #E3F8E8;
+  --c-add-fg: #17732F;
+  --c-del-bg: #FFE7E5;
   --c-del-fg: #C4271E;
-  --c-inverse: #2C2C2E;
-  --c-on-inverse: #F5F5F7;
-  --c-lane-1: #111114;
+  --c-inverse: #1E1B2E;
+  --c-on-inverse: #FFF6E9;
+  --c-lane-1: #1E1B2E;
   --c-lane-2: #007AFF;
-  --c-lane-3: #B4B4BB;
+  --c-lane-3: #B9B2C4;
+  --k-ink: #1E1B2E;
+  --k-p2: #FFD84D;
+  --k-p3: #FF9EC4;
+  --k-p4: #8EE3C8;
+  --k-p5: #C7B2FF;
+  --k-glass: rgba(255, 255, 255, 0.9);
+  --k-float: rgba(255, 255, 255, 0.82);
+  --k-dot: rgba(30, 27, 46, 0.11);
 }
 @media (prefers-color-scheme: dark) {
-  :root[data-style="card"]:not([data-theme="light"]) {
-    --c-bg: #0B0B0D;
-    --c-sheet: #1C1C1F;
-    --c-card: #1C1C1F;
-    --c-surface: #2A2A2E;
-    --c-surface-2: #3A3A3F;
-    --c-line: #2A2A2E;
-    --c-fg: #F3F3F6;
-    --c-fg-2: #A0A0A8;
-    --c-fg-3: #66666E;
+  :root[data-style="sticker"]:not([data-theme="light"]) {
+    --c-bg: #1C1A27;
+    --c-sheet: #2E2A3E;
+    --c-card: #353048;
+    --c-surface: #353048;
+    --c-surface-2: rgba(255, 255, 255, 0.14);
+    --c-line: rgba(255, 255, 255, 0.1);
+    --c-fg: #F6F1FF;
+    --c-fg-2: #B4ACC6;
+    --c-fg-3: #6E6782;
     --c-accent: #007AFF;
     --c-on-accent: #FFFFFF;
     --c-danger: #FF6B61;
-    --c-add-bg: #0E2414;
-    --c-add-fg: #7FD48F;
-    --c-del-bg: #2A1210;
+    --c-add-bg: #12301C;
+    --c-add-fg: #86DE9A;
+    --c-del-bg: #3A1614;
     --c-del-fg: #FF8A80;
-    --c-inverse: #E8E8ED;
-    --c-on-inverse: #111114;
-    --c-lane-1: #F3F3F6;
+    --c-inverse: #F6F1FF;
+    --c-on-inverse: #15131D;
+    --c-lane-1: #F6F1FF;
     --c-lane-2: #007AFF;
-    --c-lane-3: #6E6E76;
+    --c-lane-3: #6E6782;
+    --k-ink: #000000;
+    --k-p2: #FFD84D;
+    --k-p3: #FF8DBA;
+    --k-p4: #74D9B8;
+    --k-p5: #B9A0FF;
+    --k-glass: rgba(53, 48, 72, 0.96);
+    --k-float: rgba(53, 48, 72, 0.9);
+    --k-dot: rgba(255, 255, 255, 0.07);
   }
 }
-:root[data-style="card"][data-theme="dark"] {
-  --c-bg: #0B0B0D;
-  --c-sheet: #1C1C1F;
-  --c-card: #1C1C1F;
-  --c-surface: #2A2A2E;
-  --c-surface-2: #3A3A3F;
-  --c-line: #2A2A2E;
-  --c-fg: #F3F3F6;
-  --c-fg-2: #A0A0A8;
-  --c-fg-3: #66666E;
+:root[data-style="sticker"][data-theme="dark"] {
+  --c-bg: #1C1A27;
+  --c-sheet: #2E2A3E;
+  --c-card: #353048;
+  --c-surface: #353048;
+  --c-surface-2: rgba(255, 255, 255, 0.14);
+  --c-line: rgba(255, 255, 255, 0.1);
+  --c-fg: #F6F1FF;
+  --c-fg-2: #B4ACC6;
+  --c-fg-3: #6E6782;
   --c-accent: #007AFF;
   --c-on-accent: #FFFFFF;
   --c-danger: #FF6B61;
-  --c-add-bg: #0E2414;
-  --c-add-fg: #7FD48F;
-  --c-del-bg: #2A1210;
+  --c-add-bg: #12301C;
+  --c-add-fg: #86DE9A;
+  --c-del-bg: #3A1614;
   --c-del-fg: #FF8A80;
-  --c-inverse: #E8E8ED;
-  --c-on-inverse: #111114;
-  --c-lane-1: #F3F3F6;
+  --c-inverse: #F6F1FF;
+  --c-on-inverse: #15131D;
+  --c-lane-1: #F6F1FF;
   --c-lane-2: #007AFF;
-  --c-lane-3: #6E6E76;
+  --c-lane-3: #6E6782;
+  --k-ink: #000000;
+  --k-p2: #FFD84D;
+  --k-p3: #FF8DBA;
+  --k-p4: #74D9B8;
+  --k-p5: #B9A0FF;
+  --k-glass: rgba(53, 48, 72, 0.96);
+  --k-float: rgba(53, 48, 72, 0.9);
+  --k-dot: rgba(255, 255, 255, 0.07);
 }
 
 * { box-sizing: border-box; }
@@ -432,24 +521,77 @@ textarea.input { resize: none; line-height: 1.5; }
 .bubble.queued { background: none; color: var(--c-fg-2); box-shadow: inset 0 0 0 1px var(--c-surface-2); }
 .bubble.sending { opacity: 0.5; }
 .cap-r { align-self: flex-end; font-size: var(--fs-caption); color: var(--c-fg-3); padding-right: var(--sp-2); }
-.cap-c { align-self: center; font-size: var(--fs-caption); color: var(--c-fg-3); padding: var(--sp-2) 0; display: inline-flex; align-items: center; gap: var(--sp-2); }
-/* 跨会话消息：标题照 .cap-c 居中小字三级灰；正文和气泡同字号行高、左右内边距，左边对齐 claude 回复的文字，二级灰，全文显示；两种样式都不加底色和边框 */
+.cap-c { align-self: flex-start; font-size: var(--fs-caption); color: var(--c-fg-3); padding: var(--sp-2) 16px; display: inline-flex; align-items: center; gap: var(--sp-2); }
+/* 灰字（.cap-c：已中断、后台通知、回复末尾的 result: / needs input: / failed: 行）和跨会话消息的标题都是左对齐小字三级灰，左边对齐 claude 回复的文字；跨会话消息正文和气泡同字号行高、左右内边距，二级灰，全文显示；都不加底色和边框 */
 .peer { align-self: stretch; display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) 0; }
-.peer-t { align-self: center; font-size: var(--fs-caption); color: var(--c-fg-3); }
+.peer-t { align-self: flex-start; padding: 0 16px; font-size: var(--fs-caption); color: var(--c-fg-3); }
 .peer-b { padding: 0 16px; font-size: 15px; line-height: 1.55; color: var(--c-fg-2); white-space: pre-line; overflow-wrap: anywhere; }
 .tool { align-self: stretch; }
 .tool-row { width: 100%; border: 0; background: none; display: flex; align-items: center; gap: var(--sp-2); padding: 6px var(--sp-2); border-radius: var(--r-sm); text-align: left; font-size: 13px; }
 .t-verb { color: var(--c-fg-3); flex: none; }
 .t-arg { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-mono-sm); color: var(--c-fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-row .ms { font-size: 18px; color: var(--c-fg-3); transition: transform var(--dur-s) var(--ease-emph); }
-.tool.open .tool-row .ms { transform: rotate(90deg); }
+.tool.open > .tool-row .ms { transform: rotate(90deg); }
 .t-flag { font-size: var(--fs-caption); color: var(--c-danger); flex: none; }
-.tool.open.closing .tool-row .ms { transform: none; }
+.tool.open.closing > .tool-row .ms { transform: none; }
 .tool-detail { display: none; overflow: hidden; margin: 2px var(--sp-2) var(--sp-2); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-sm); background: var(--c-surface); font-family: var(--font-mono); font-size: var(--fs-mono-sm); line-height: 1.6; color: var(--c-fg-2); white-space: pre-wrap; overflow-wrap: anywhere; }
-.tool.open .tool-detail { display: block; }
+.tool.open > .tool-detail { display: block; }
 .tool-detail .k { color: var(--c-fg-3); display: block; margin-top: var(--sp-2); }
 .tool-detail .k:first-child { margin-top: 0; }
 .tool-detail .v { color: var(--c-fg); }
+/* 编辑、写入默认展开，露出前 6 行，读取在行尾标行数、点开看内容；行号一列，删除行用旧行号，其余用新行号（照 CLI）。
+   颜色沿用 git 差异页的 add / del，不加新变量；超过 6 行时底下是「展开全部」，展开后换成「收起」 */
+.t-num { flex: none; display: inline-flex; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-mono-sm); color: var(--c-fg-3); font-variant-numeric: tabular-nums; }
+.t-num .p { color: var(--c-add-fg); }
+.t-num .d { color: var(--c-del-fg); }
+.tool-detail.tp { padding: var(--sp-2) 0; font-size: 11.5px; line-height: 1.7; tab-size: 4; white-space: normal; }
+.pl { display: grid; grid-template-columns: 40px 16px minmax(0, 1fr); padding-right: var(--sp-3); }
+.pl .ln { color: var(--c-fg-3); text-align: right; font-variant-numeric: tabular-nums; user-select: none; }
+.pl .sg { color: var(--c-fg-3); text-align: center; }
+.pl .tx { color: var(--c-fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pl.add { background: var(--c-add-bg); }
+.pl.add .sg, .pl.add .tx { color: var(--c-add-fg); }
+.pl.del { background: var(--c-del-bg); }
+.pl.del .sg, .pl.del .tx { color: var(--c-del-fg); }
+.pl.gap { display: block; padding-left: 56px; color: var(--c-fg-3); }
+.tmore { position: relative; display: flex; align-items: center; gap: var(--sp-2); width: 100%; border: 0; background: none; padding: var(--sp-2) var(--sp-3) 0 56px; font-family: var(--font-ui); font-size: var(--fs-caption); color: var(--c-fg-2); text-align: left; }
+.tmore .spin { width: 12px; height: 12px; }
+/* 连续的搜索、读取、列目录、运行命令合成一行：上面是计数，下面一行是最近一条的路径或命令；点开换成一条条单独的工具行 */
+.tg-row { align-items: flex-start; }
+.tg-sum { flex: 1; min-width: 0; color: var(--c-fg-2); line-height: 1.5; }
+.tg-row > .ms, .tg-row > .spin { margin-top: 1px; }
+.tg-last { margin-top: -4px; padding: 0 var(--sp-2) 6px calc(var(--sp-2) + 2px); font-family: var(--font-mono); font-size: var(--fs-mono-sm); color: var(--c-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-kids { display: none; overflow: hidden; padding-left: var(--sp-3); }
+.tool.open > .tg-kids { display: block; }
+/* 工具结果和 clauderc show 的图：缩略图最长边 360 像素，按原比例显示；没有缩略图（WebP 解不了）时是「点开查看」 */
+.timg { position: relative; display: block; width: fit-content; max-width: 62%; margin: 2px var(--sp-2) var(--sp-2); padding: 0; border: 0; border-radius: 12px; overflow: hidden; background: var(--c-surface); }
+/* 白底截图贴在白底聊天页上会看不出边，盖一圈分隔线色的细边 */
+.timg::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px var(--c-line); pointer-events: none; }
+.timg img { display: block; max-width: 100%; max-height: 200px; }
+.timg.none { width: 148px; height: 96px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: var(--fs-caption); color: var(--c-fg-2); }
+.timg.none .ms { font-size: 22px; color: var(--c-fg-3); margin-bottom: 2px; }
+.timg.none small { font-family: var(--font-mono); font-size: 10.5px; color: var(--c-fg-3); }
+.shown { align-self: flex-start; max-width: 82%; display: flex; flex-direction: column; gap: var(--sp-1); margin: var(--sp-1) 0; }
+.shown .timg { max-width: 100%; margin: 0; }
+.shown .timg img { max-height: 320px; }
+.shown-cap { padding: 0 var(--sp-1); font-family: var(--font-mono); font-size: 11px; color: var(--c-fg-3); }
+/* 全屏看图：黑底，顶栏是关闭和文件名、尺寸。图从缩略图的位置放大到屏幕宽或高，黑底同时淡入；关掉时缩回去。
+   第一次打开先把缩略图放大顶着，底下一行「正在取原图」，取到后原图淡入盖上；没有缩略图的在中间转圈 */
+.viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--c-camera); color: var(--c-on-camera); }
+.v-bar { flex: none; height: 56px; display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-4) 0 var(--sp-1); }
+.v-bar .icon-btn { color: var(--c-on-camera); }
+.v-title { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.v-title b { font-family: var(--font-mono); font-size: var(--fs-mono); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-title span { font-size: var(--fs-caption); opacity: 0.6; }
+.v-stage { flex: 1; min-height: 0; position: relative; container-type: size; display: flex; align-items: center; justify-content: center; }
+.v-pic { position: relative; width: min(100cqw, calc(100cqh * var(--ar))); aspect-ratio: var(--ar); overflow: hidden; transform-origin: 0 0; }
+.v-pic img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.v-note { position: absolute; left: 0; right: 0; bottom: var(--sp-4); display: flex; align-items: center; justify-content: center; gap: var(--sp-2); font-size: var(--fs-caption); opacity: 0.7; }
+.v-note .spin { width: 12px; height: 12px; }
+.v-note .ms { font-size: 16px; }
+.v-wait { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); font-size: var(--fs-caption); opacity: 0.7; }
+.v-wait .spin { width: 24px; height: 24px; }
+.v-wait .ms { font-size: 32px; }
 .composer-wrap { flex: none; display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3) var(--sp-3); background: var(--c-bg); position: relative; }
 .composer { display: flex; align-items: flex-end; gap: var(--sp-1); padding: 4px; border-radius: 28px; background: var(--c-surface); }
 .composer textarea { flex: 1; min-width: 0; border: 0; background: none; resize: none; padding: 12px 4px; font-size: var(--fs-body); line-height: 1.4; max-height: 120px; color: var(--c-fg); }

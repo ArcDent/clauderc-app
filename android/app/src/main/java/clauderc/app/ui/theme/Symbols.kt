@@ -15,6 +15,7 @@ object Symbols {
     val AltRoute by lazy { symbol("alt_route", SymbolPaths.altRoute) }
     val ArrowBack by lazy { symbol("arrow_back", SymbolPaths.arrowBack) }
     val ArrowUpward by lazy { symbol("arrow_upward", SymbolPaths.arrowUpward) }
+    val Backspace by lazy { symbol("backspace", SymbolPaths.backspace) }
     val Check by lazy { symbol("check", SymbolPaths.check) }
     val CheckBox by lazy { symbol("check_box", SymbolPaths.checkBox) }
     val CheckBoxOutlineBlank by lazy { symbol("check_box_outline_blank", SymbolPaths.checkBoxOutlineBlank) }
@@ -35,6 +36,11 @@ object Symbols {
     val Forum by lazy { symbol("forum", SymbolPaths.forum) }
     val ForumFilled by lazy { symbol("forum_filled", SymbolPaths.forumFilled) }
     val Image by lazy { symbol("image", SymbolPaths.image) }
+    val KeyboardArrowDown by lazy { symbol("keyboard_arrow_down", SymbolPaths.keyboardArrowDown) }
+    val KeyboardArrowLeft by lazy { symbol("keyboard_arrow_left", SymbolPaths.keyboardArrowLeft) }
+    val KeyboardArrowRight by lazy { symbol("keyboard_arrow_right", SymbolPaths.keyboardArrowRight) }
+    val KeyboardArrowUp by lazy { symbol("keyboard_arrow_up", SymbolPaths.keyboardArrowUp) }
+    val KeyboardReturn by lazy { symbol("keyboard_return", SymbolPaths.keyboardReturn) }
     val MoreVert by lazy { symbol("more_vert", SymbolPaths.moreVert) }
     val Palette by lazy { symbol("palette", SymbolPaths.palette) }
     val PhotoCamera by lazy { symbol("photo_camera", SymbolPaths.photoCamera) }
@@ -45,6 +51,7 @@ object Symbols {
     val Settings by lazy { symbol("settings", SymbolPaths.settings) }
     val SettingsFilled by lazy { symbol("settings_filled", SymbolPaths.settingsFilled) }
     val Style by lazy { symbol("style", SymbolPaths.style) }
+    val Terminal by lazy { symbol("terminal", SymbolPaths.terminal) }
     val Upload by lazy { symbol("upload", SymbolPaths.upload) }
     val Wallpaper by lazy { symbol("wallpaper", SymbolPaths.wallpaper) }
     val Warning by lazy { symbol("warning", SymbolPaths.warning) }

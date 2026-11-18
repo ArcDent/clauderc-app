@@ -48,7 +48,7 @@ fun UnderlineField(
         error -> c.danger
         focused -> c.accent
         // Inside the card style's cards the rule is a hairline.
-        isCardStyle -> c.line
+        Clauderc.look.cards -> c.line
         else -> c.surface2
     }
     val thick = error || focused

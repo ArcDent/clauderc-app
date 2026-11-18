@@ -29,8 +29,8 @@ class ThemeTokensTest {
 
     private val light by lazy { block(":root {") }
     private val dark by lazy { block(""":root[data-theme="dark"] {""") }
-    private val cardLight by lazy { block(""":root[data-style="card"] {""") }
-    private val cardDark by lazy { block(""":root[data-style="card"][data-theme="dark"] {""") }
+    private fun styleLight(style: String) = block(""":root[data-style="$style"] {""")
+    private fun styleDark(style: String) = block(""":root[data-style="$style"][data-theme="dark"] {""")
 
     private fun colors(c: ClaudercColors) = mapOf(
         "--c-bg" to c.bg, "--c-sheet" to c.sheet, "--c-card" to c.card, "--c-surface" to c.surface, "--c-surface-2" to c.surface2,
@@ -42,6 +42,13 @@ class ThemeTokensTest {
         "--c-lane-1" to c.lane1, "--c-lane-2" to c.lane2, "--c-lane-3" to c.lane3,
         "--c-glass" to c.glass, "--c-glass-ind" to c.glassInd, "--c-glass-hi" to c.glassHi, "--c-glass-lo" to c.glassLo,
         "--c-glass-edge" to c.glassEdge, "--c-glass-sheen" to c.glassSheen, "--c-glass-shadow" to c.glassShadow,
+    )
+
+    /** The --k- variables of the three styles; each style sets only its own, the rest stay transparent. */
+    private fun extras(c: ClaudercColors) = mapOf(
+        "--k-ink" to c.ink, "--k-p2" to c.hue2, "--k-p3" to c.hue3, "--k-p4" to c.hue4, "--k-p5" to c.hue5,
+        "--k-glass" to c.panel, "--k-float" to c.float, "--k-dot" to c.dot,
+        "--k-pane" to c.pane, "--k-rimc" to c.rim, "--k-edgec" to c.edge, "--k-lens" to c.lens,
     )
 
     private fun parseColor(css: String): Int {
@@ -70,26 +77,33 @@ class ThemeTokensTest {
         assertEquals(dark, block(""":root:not([data-theme="light"]) {"""))
     }
 
-    // The card blocks only override some variables; the rest come from the minimal style of the same brightness.
-    @Test fun cardLightColorsMatchMockup() {
-        val tokens = colors(CardLightColors)
-        val css = light.filterKeys { it.startsWith("--c-") } + cardLight.filterKeys { it.startsWith("--c-") }
-        assertEquals(css.keys, tokens.keys)
-        css.forEach { (name, value) -> assertEquals(name, parseColor(value), tokens.getValue(name).toArgb()) }
+    /**
+     * A style's blocks only override some --c- variables; the rest come from the minimal style of the
+     * same brightness. Its --k- variables must all have a token, and the tokens it does not set stay transparent.
+     */
+    private fun assertStyle(style: String, lightTokens: ClaudercColors, darkTokens: ClaudercColors) {
+        val l = styleLight(style)
+        val d = styleDark(style)
+        assertEquals("$style: the dark block overrides everything the light block does", l.keys, d.keys)
+        assertEquals("$style: the system dark block equals the explicit one", d, block(""":root[data-style="$style"]:not([data-theme="light"]) {"""))
+        for ((tokens, base, own) in listOf(Triple(lightTokens, light, l), Triple(darkTokens, light + dark, d))) {
+            val css = base.filterKeys { it.startsWith("--c-") } + own.filterKeys { it.startsWith("--c-") }
+            val c = colors(tokens)
+            assertEquals(style, css.keys, c.keys)
+            css.forEach { (name, value) -> assertEquals("$style $name", parseColor(value), c.getValue(name).toArgb()) }
+            val k = own.filterKeys { it.startsWith("--k-") }
+            extras(tokens).forEach { (name, color) ->
+                val expected = k[name]?.let(::parseColor) ?: Color.Transparent.toArgb()
+                assertEquals("$style $name", expected, color.toArgb())
+            }
+        }
     }
 
-    @Test fun cardDarkColorsMatchMockup() {
-        val tokens = colors(CardDarkColors)
-        val css = light.filterKeys { it.startsWith("--c-") } + dark.filterKeys { it.startsWith("--c-") } +
-            cardDark.filterKeys { it.startsWith("--c-") }
-        assertEquals("the card dark block overrides everything the card light block does", cardLight.keys, cardDark.keys)
-        assertEquals(css.keys, tokens.keys)
-        css.forEach { (name, value) -> assertEquals(name, parseColor(value), tokens.getValue(name).toArgb()) }
-    }
+    @Test fun clearColorsMatchMockup() = assertStyle("clear", ClearLightColors, ClearDarkColors)
 
-    @Test fun systemCardDarkBlockEqualsExplicitCardDarkBlock() {
-        assertEquals(cardDark, block(""":root[data-style="card"]:not([data-theme="light"]) {"""))
-    }
+    @Test fun gridColorsMatchMockup() = assertStyle("grid", GridLightColors, GridDarkColors)
+
+    @Test fun stickerColorsMatchMockup() = assertStyle("sticker", StickerLightColors, StickerDarkColors)
 
     @Test fun fontSizesSpacingAndRadiiMatchMockup() {
         val f = ClaudercFontSizes()

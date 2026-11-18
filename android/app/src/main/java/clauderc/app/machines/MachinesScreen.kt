@@ -1,5 +1,15 @@
 package clauderc.app.machines
 
+import clauderc.app.ui.theme.MonoFamily
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.LocalIndication
+import clauderc.app.ui.theme.pressShrink
+import clauderc.app.ui.components.StickerCorner
+import clauderc.app.ui.components.sticker
+import clauderc.app.data.UiStyle
+import clauderc.app.ui.components.RowIcon
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -50,9 +60,7 @@ import clauderc.app.ui.components.SnackState
 import clauderc.app.ui.components.Spinner
 import clauderc.app.ui.components.StatusGlyph
 import clauderc.app.ui.components.SymbolButton
-import clauderc.app.ui.components.cardItem
-import clauderc.app.ui.components.isCardStyle
-import clauderc.app.ui.components.rowStart
+import clauderc.app.ui.components.groupItem
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Symbols
 import kotlin.math.ceil
@@ -72,6 +80,8 @@ fun MachinesScreen(
     var menu by remember { mutableStateOf(false) }
     val sp = Clauderc.spacing
     val paired = state.relays.isNotEmpty()
+    // 贴纸 puts a summary on top and gives every machine a sticker of its own.
+    val own = Clauderc.look.cards
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             AppBar(actions = {
@@ -85,8 +95,10 @@ fun MachinesScreen(
                     !paired -> item { EmptyMachines(onAdd) }
                     rows == null -> item { Spinner(Modifier.padding(start = sp.page), size = 16.dp, color = Clauderc.colors.fg3) }
                     else -> {
+                        if (own) item { MachineSummary(rows) }
                         itemsIndexed(rows, key = { _, it -> it.machine.id }) { i, row ->
-                            MachineRowView(row, Modifier.cardItem(first = i == 0, last = i == rows.lastIndex)) {
+                            val place = if (own) Modifier.padding(start = sp.sp4, end = sp.sp4, bottom = sp.sp4) else Modifier.groupItem(first = i == 0, last = i == rows.lastIndex)
+                            MachineRowView(row, i, place) {
                                 if (row.machine.online) onOpen(row.machine.id) else snack.show("${row.machine.name} 已离线，联网后才能查看会话")
                             }
                         }
@@ -156,28 +168,25 @@ private fun RelayLine(link: RelayLink) {
 }
 
 @Composable
-private fun MachineRowView(row: MachineRow, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun MachineRowView(row: MachineRow, index: Int, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val m = row.machine
-    val card = isCardStyle
+    val card = Clauderc.look.cards
+    val grid = Clauderc.style == UiStyle.Grid
+    val press = remember { MutableInteractionSource() }
     Row(
         modifier
             .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(start = rowStart, top = 14.dp, bottom = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(sp.sp4),
+            // 贴纸: the row is its own sticker and sinks onto its shadow when pressed.
+            .then(if (card) Modifier.pressShrink(press).sticker(c.panel, c.ink, StickerCorner, source = press) else Modifier)
+            .clickable(press, LocalIndication.current, role = Role.Button, onClick = onClick)
+            .padding(start = Clauderc.look.rowStart, top = if (card) sp.sp4 else if (grid) 12.dp else 14.dp, bottom = if (card) sp.sp4 else if (grid) 12.dp else 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (grid) sp.sp3 else sp.sp4),
     ) {
-        if (card) {
-            // The card style sets the icon in a small rounded tile.
-            Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(c.surface), contentAlignment = Alignment.Center) {
-                Icon(Symbols.Computer, contentDescription = null, tint = if (m.online) c.fg else c.fg3, modifier = Modifier.size(22.dp))
-            }
-        } else {
-            Icon(Symbols.Computer, contentDescription = null, tint = if (m.online) c.fg2 else c.fg3)
-        }
+        RowIcon(Symbols.Computer, index, off = !m.online, tint = if (m.online) c.fg2 else c.fg3, modifier = if (card) Modifier.align(Alignment.CenterVertically) else Modifier)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(m.name, fontSize = Clauderc.fontSizes.body, color = if (m.online) c.fg else c.fg3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(m.name, fontSize = Clauderc.fontSizes.body, fontWeight = if (card) FontWeight.ExtraBold else null, color = if (m.online) c.fg else c.fg3, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 buildAnnotatedString {
                     when {
@@ -193,7 +202,9 @@ private fun MachineRowView(row: MachineRow, modifier: Modifier = Modifier, onCli
                         }
                     }
                 },
-                fontSize = Clauderc.fontSizes.label,
+                // 格栅 sets the second line in small monospace.
+                fontSize = if (grid) 11.5.sp else Clauderc.fontSizes.label,
+                fontFamily = if (grid) MonoFamily else null,
                 color = c.fg2,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -208,6 +219,36 @@ private fun MachineRowView(row: MachineRow, modifier: Modifier = Modifier, onCli
             )
         } else {
             Spacer(Modifier.padding(end = sp.sp3))
+        }
+    }
+}
+
+/**
+ * 贴纸's summary over the machine stickers (.k-sum): a forum sticker, then how many machines are
+ * online, how many sessions wait for an answer, in the accent, and how many sessions there are.
+ */
+@Composable
+private fun MachineSummary(rows: List<MachineRow>) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    val online = rows.count { it.machine.online }
+    val need = rows.sumOf { it.pending }
+    val sessions = rows.sumOf { it.sessions ?: 0 }
+    Row(
+        Modifier
+            .padding(start = sp.sp4, end = sp.sp4, bottom = sp.sp3 + sp.sp1)
+            .fillMaxWidth()
+            .sticker(c.panel, c.ink, StickerCorner)
+            .padding(sp.sp4),
+        horizontalArrangement = Arrangement.spacedBy(sp.sp3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RowIcon(Symbols.Forum, index = 1, off = false, tint = c.fg)
+        for ((n, label, accent) in listOf(Triple("$online/${rows.size}", "台在线", false), Triple("$need", "个等你", true), Triple("$sessions", "个会话", false))) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(n, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.02).em, lineHeight = 1.05.em, color = if (accent) c.accent else c.fg, maxLines = 1)
+                Text(label, fontSize = Clauderc.fontSizes.caption, color = c.fg2, maxLines = 1)
+            }
         }
     }
 }

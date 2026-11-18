@@ -13,6 +13,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.Role
@@ -54,7 +55,7 @@ class ThemeRevealTest {
     private val motion = ClaudercMotion()
     private lateinit var reveal: ThemeReveal
 
-    private val start = Appearance(UiStyle.Card, ThemeMode.Light, AccentChoice.Blue)
+    private val start = Appearance(UiStyle.Sticker, ThemeMode.Light, AccentChoice.Blue)
 
     /** The 设置 page over the nav bar, with the pick kept in memory so a change lands in the same frame. */
     private fun app() {
@@ -75,7 +76,7 @@ class ThemeRevealTest {
                     GlassNavBar(
                         tabs = listOf(
                             NavTab("目标机", Symbols.Computer, Symbols.ComputerFilled),
-                            NavTab("会话", Symbols.Forum, Symbols.ForumFilled),
+                            NavTab("会话", Symbols.Forum, Symbols.ForumFilled, dot = true),
                             NavTab("git", Symbols.AccountTree, Symbols.AccountTreeFilled),
                             NavTab("设置", Symbols.Settings, Symbols.SettingsFilled),
                         ),
@@ -113,9 +114,11 @@ class ThemeRevealTest {
         return px[0]
     }
 
-    /** The screen corner farthest from [c], 2px in. */
-    private fun farCorner(c: Offset, w: Int, h: Int): Offset =
-        listOf(Offset(2f, 2f), Offset(w - 3f, 2f), Offset(2f, h - 3f), Offset(w - 3f, h - 3f)).maxBy { hypot(it.x - c.x, it.y - c.y) }
+    /** The screen corner farthest from [c], 9dp in: between 贴纸's paper dots and clear of the floating nav bar. */
+    private fun farCorner(c: Offset, w: Int, h: Int): Offset {
+        val i = with(compose.density) { 9.dp.toPx() }
+        return listOf(Offset(i, i), Offset(w - i, i), Offset(i, h - i), Offset(w - i, h - i)).maxBy { hypot(it.x - c.x, it.y - c.y) }
+    }
 
     private fun assertClose(message: String, expected: Int, actual: Int) {
         val e = Color(expected)
@@ -129,6 +132,8 @@ class ThemeRevealTest {
         val option = compose.onNodeWithText("深色")
         val b = bounds(option)
         val below = Offset(b.center.x, b.bottom + with(compose.density) { 8.dp.toPx() })
+        // The light paper as drawn, washes and all, before the tap.
+        val lightCorner = shot().let { it.at(farCorner(b.center, it.width, it.height)) }
         tapAndWaitForTheCircle(option)
 
         // Slow at the start: a quarter of the way in, the circle has not reached half its size.
@@ -138,12 +143,13 @@ class ThemeRevealTest {
         compose.mainClock.advanceTimeBy(motion.durReveal / 4L, ignoreFrameDuration = true)
         var image = shot()
         val corner = farCorner(b.center, image.width, image.height)
-        assertEquals("next to the option the group card is already dark", CardDarkColors.card.toArgb(), image.at(below))
-        assertEquals("the far corner still shows the light page", CardLightColors.bg.toArgb(), image.at(corner))
+        // The group card is 贴纸's see-through panel over the dark paper.
+        assertClose("next to the option the group card is already dark", StickerDarkColors.panel.compositeOver(StickerDarkColors.bg).toArgb(), image.at(below))
+        assertEquals("the far corner still shows the light page", lightCorner, image.at(corner))
 
         compose.mainClock.advanceTimeBy(motion.durReveal.toLong())
         image = shot()
-        assertEquals("the far corner is dark at the end", CardDarkColors.bg.toArgb(), image.at(corner))
+        assertClose("the far corner is dark at the end", StickerDarkColors.bg.toArgb(), image.at(corner))
         assertFalse(reveal.running)
     }
 
@@ -151,44 +157,107 @@ class ThemeRevealTest {
         app()
         val green = compose.onNodeWithContentDescription("绿色")
         val swatch = bounds(green)
-        // The 2dp ring is drawn at radius 26dp in the 54dp swatch: its top is 1dp below the swatch's.
-        val ring = Offset(swatch.center.x, swatch.top + with(compose.density) { 1.dp.toPx() })
-        val tab = compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))[3]
+        // 贴纸 lifts the picked dot 3dp: 3.5dp below the swatch's top its ink ring gives way to the green dot.
+        val lifted = Offset(swatch.center.x, swatch.top + with(compose.density) { 3.5.dp.toPx() })
+        // The accent dot on the 会话 tab, 10.5dp right of the cell's centre and 6.5dp below its top.
+        val tab = compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))[1]
         val cell = bounds(tab)
-        val indicator = Offset(cell.left + with(compose.density) { 6.dp.toPx() }, cell.center.y)
-        fun tint(rgb: Long) = Color(0xFF000000 or rgb).copy(alpha = 0.14f).compositeOver(CardLightColors.card).toArgb()
+        val dot = with(compose.density) { Offset(cell.center.x + 10.5.dp.toPx(), cell.top + 6.5.dp.toPx()) }
         tapAndWaitForTheCircle(green)
 
-        // The first frame the circle takes in the ring, 26dp from the swatch's centre.
-        val ringReach = with(compose.density) { 27.dp.toPx() }
-        while (reveal.radius.value < ringReach) compose.mainClock.advanceTimeByFrame()
+        // The first frame the circle takes in the lifted dot's top edge.
+        val reach = with(compose.density) { 25.dp.toPx() }
+        while (reveal.radius.value < reach) compose.mainClock.advanceTimeByFrame()
         var image = shot()
-        assertEquals("the picked swatch already has its green ring", Color(0xFF34C759).toArgb(), image.at(ring))
-        assertClose("the nav bar is still blue", tint(0x007AFF), image.at(indicator))
+        assertEquals("the picked swatch is already lifted", Color(0xFF34C759).toArgb(), image.at(lifted))
+        assertClose("the nav bar's dot is still blue", Color(0xFF007AFF).toArgb(), image.at(dot))
 
         compose.mainClock.advanceTimeBy(motion.durReveal.toLong())
         image = shot()
-        assertClose("the nav bar is green at the end", tint(0x34C759), image.at(indicator))
+        assertClose("the nav bar's dot is green at the end", Color(0xFF34C759).toArgb(), image.at(dot))
     }
 
-    @Test fun minimalSpreadsFromTheMinimalOption() {
+    /**
+     * 贴纸 → 清玻 → 格栅 → 贴纸 → 格栅 → 清玻 → 贴纸, each ordered pair once: the circle grows from the
+     * tapped option; halfway, every point well outside it is the page from before the tap and every
+     * point well inside it is the page from the end; then nothing of the old page is left.
+     */
+    @Test fun everyStyleSpreadsIntoEveryOther() {
         app()
-        val option = compose.onNodeWithText("极简")
+        val step = with(compose.density) { 12.dp.toPx() }
+        val edge = with(compose.density) { 3.dp.toPx() }
+        // The old page's snapshot leaves out elevation shadows as Robolectric draws it: outside the
+        // circle 清玻's glass nav bar loses its soft shadow, so the bar and 28dp round it are skipped there.
+        val bar = compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).fetchSemanticsNodes()
+            .map { it.boundsInRoot }.reduce { a, b -> Rect(minOf(a.left, b.left), minOf(a.top, b.top), maxOf(a.right, b.right), maxOf(a.bottom, b.bottom)) }.inflate(with(compose.density) { 28.dp.toPx() })
+        var from = start.style
+        for (to in listOf(UiStyle.Clear, UiStyle.Grid, UiStyle.Sticker, UiStyle.Grid, UiStyle.Clear, UiStyle.Sticker)) {
+            val option = compose.onNodeWithText(to.label)
+            // The option itself animates its pick, so it is left out of the comparison.
+            val b = bounds(option).inflate(with(compose.density) { 8.dp.toPx() })
+            val before = shot()
+            tapAndWaitForTheCircle(option)
+            assertTrue("$from → $to starts at the option", b.contains(reveal.center))
+            compose.mainClock.advanceTimeBy(motion.durReveal / 2L, ignoreFrameDuration = true)
+            val mid = shot()
+            val c = reveal.center
+            val r = reveal.radius.value
+            compose.mainClock.advanceTimeBy(motion.durReveal + 500L)
+            assertFalse("$from → $to has ended", reveal.running)
+            val end = shot()
+            compose.mainClock.advanceTimeBy(500L)
+            val later = shot()
+
+            var outside = 0
+            var inside = 0
+            val wrong = mutableListOf<String>()
+            var y = step / 2
+            while (y < mid.height) {
+                var x = step / 2
+                while (x < mid.width) {
+                    val p = Offset(x, y)
+                    val d = hypot(p.x - c.x, p.y - c.y)
+                    if (!b.contains(p)) {
+                        if (d > r + edge && !bar.contains(p)) {
+                            outside++
+                            if (mid.at(p) != before.at(p)) wrong += "outside $p ${Integer.toHexString(before.at(p))}→${Integer.toHexString(mid.at(p))}"
+                        } else if (d < r - edge) {
+                            inside++
+                            if (mid.at(p) != end.at(p)) wrong += "inside $p ${Integer.toHexString(end.at(p))}→${Integer.toHexString(mid.at(p))}"
+                        }
+                    }
+                    if (end.at(p) != later.at(p)) wrong += "after the end $p"
+                    x += step
+                }
+                y += step
+            }
+            assertTrue("$from → $to halfway compares points on both sides ($inside in, $outside out)", inside > 50 && outside > 50)
+            assertTrue("$from → $to: ${wrong.size} points off, first ${wrong.take(8)}", wrong.isEmpty())
+            assertFalse("$from → $to changes the page", before.asAndroidBitmap().sameAs(end.asAndroidBitmap()))
+            from = to
+        }
+    }
+
+    @Test fun clearSpreadsFromTheClearOption() {
+        app()
+        val option = compose.onNodeWithText("清玻")
         val b = bounds(option)
-        // The 12dp gap between the 样式 and 深浅色 cards, on the right: grey page in the card style, white in the minimal one.
+        // The 12dp gap between the 样式 and 深浅色 cards, on the right: the 贴纸 paper, or 清玻 white.
         val heading = bounds(compose.onNodeWithText("深浅色"))
         val gap = with(compose.density) { Offset(390.dp.toPx() - 40.dp.toPx(), heading.top - 16.dp.toPx() - 6.dp.toPx()) }
+        // The 贴纸 paper as drawn, washes and all, before the tap.
+        val paperCorner = shot().let { it.at(farCorner(b.center, it.width, it.height)) }
         tapAndWaitForTheCircle(option)
 
         compose.mainClock.advanceTimeBy(motion.durReveal * 3L / 4, ignoreFrameDuration = true)
         var image = shot()
         val corner = farCorner(b.center, image.width, image.height)
-        assertEquals("near the option the page is already the minimal white", LightColors.bg.toArgb(), image.at(gap))
-        assertEquals("the far corner still shows the card grey", CardLightColors.bg.toArgb(), image.at(corner))
+        assertEquals("near the option the page is already 清玻 white", ClearLightColors.bg.toArgb(), image.at(gap))
+        assertEquals("the far corner still shows the 贴纸 paper", paperCorner, image.at(corner))
 
         compose.mainClock.advanceTimeBy(motion.durReveal.toLong())
         image = shot()
-        // The far corner is the lower right one, where the glass nav bar's soft shadow tints the white by a step.
+        // Near the glass nav bar its soft shadow may tint the white by a step.
         assertClose("the far corner is white at the end", LightColors.bg.toArgb(), image.at(corner))
     }
 }
