@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.items",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "items": [
+      {"seq": 270, "kind": "tool", "tool": {"toolUseId": "toolu_01I", "toolName": "Read", "summary": "读取 chat.png", "input": {"file_path": "/p/x/chat.png"}, "result": {"content": "", "isError": false, "images": [{"id": "toolu_01I.0", "mediaType": "image/png", "width": 720, "height": 1560, "size": 217088, "thumb": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="}]}}},
+      {"seq": 271, "kind": "tool", "tool": {"toolUseId": "toolu_01J", "toolName": "Read", "summary": "读取 hero.webp", "input": {"file_path": "/p/x/hero.webp"}, "result": {"content": "", "isError": false, "images": [{"id": "toolu_01J.0", "mediaType": "image/webp", "size": 1258291}]}}},
+      {"seq": 272, "kind": "tool", "tool": {"toolUseId": "toolu_01K", "toolName": "Bash", "summary": "运行 clauderc show readme-hero.png", "input": {"command": "clauderc show readme-hero.png"}, "result": {"content": "[clauderc show 0123456789abcdef] readme-hero.png", "isError": false, "images": [{"id": "show-0123456789abcdef", "mediaType": "image/png", "name": "readme-hero.png", "width": 1440, "height": 810, "size": 497664, "thumb": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="}]}}}
+    ]
+  }
+}

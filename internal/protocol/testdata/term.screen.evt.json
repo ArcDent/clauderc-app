@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "term.screen",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"sessionId": "a1b2c3", "lines": ["   Manage MCP servers", "   8 servers", "", "   ❯ ✔ chrome-devtools     26 tools", "     ✔ gsearch             8 tools", "", "   ↑/↓ to navigate · Enter to confirm · Esc to cancel"], "cursorRow": 3, "cursorCol": 3, "cursor": false}
+}

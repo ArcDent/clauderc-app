@@ -71,6 +71,9 @@ const (
 	CodeInvalidParams ErrorCode = "invalidParams"
 	// CodeSessionNotFound: no background session with that id.
 	CodeSessionNotFound ErrorCode = "sessionNotFound"
+	// CodeNotFound: the session has no such item, e.g. chat.toolOutput
+	// named a tool_use id that is not in its transcript.
+	CodeNotFound ErrorCode = "notFound"
 	// CodeSessionRunning: the operation needs a stopped session.
 	CodeSessionRunning ErrorCode = "sessionRunning"
 	// CodePendingChanged: chat.answer named a tool_use id that is no longer

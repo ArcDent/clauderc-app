@@ -4,9 +4,9 @@
 // it receives to a log file. With a transcript configured it also plays
 // the session's side of sending a message: pasted text followed by Enter
 // becomes a user record, or an enqueue record, appended to the transcript.
-// It draws a status line that Shift+Tab cycles and Ctrl+L redraws, and a
-// /model picker (the one recorded from Claude Code 2.1.323) that arrows
-// move in, s picks from and Esc closes.
+// It draws the input box between two rules, a status line that Shift+Tab
+// cycles and Ctrl+L redraws, and a /model picker (the one recorded from
+// Claude Code 2.1.323) that arrows move in, s picks from and Esc closes.
 // Only tests import this package; their TestMain calls RunIfFake first.
 package fakeattach
 
@@ -195,7 +195,9 @@ func (in *input) render() {
 	case in.confirm:
 		b.WriteString("   Switch model?\r\n   ❯ 1. Yes, switch to the model\r\n")
 	default:
-		b.WriteString("❯ \r\n\x1b[40;1H  " + footers[in.modes[in.mode]])
+		// The input box between two rules, as Claude Code draws it.
+		rule := strings.Repeat("─", 40)
+		b.WriteString(rule + "\r\n❯\u00a0\r\n" + rule + "\x1b[40;1H  " + footers[in.modes[in.mode]])
 	}
 	_, _ = in.out.WriteString(b.String())
 }

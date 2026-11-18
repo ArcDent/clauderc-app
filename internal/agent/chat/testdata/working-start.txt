@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.327
+▝▜██████▀  hy-4-flash[1M] with low effort · API Usage Billing
+ ▝▝   ▝▝   ~/w/working
+
+
+❯ 只回复 OK
+
+  Thought for 10s
+
+⏺ 已加载全局规则。
+
+  OK
+
+  喵呜~
+
+✻ Sautéed for 12s · done 4:27 PM
+
+❯ 请写一段约 400 字的中文短文，主题是终端模拟器怎样把字节流画成屏幕，直接输出正文，不要使用任何工具
+
+
+
+
+
+
+
+
+
+
+
+
+· Whirring…
+  ⎿  Tip: Use /permissions to pre-approve and pre-deny bash, edit, and MCP tools
+ ☀ 27.6k │ 5h ━╍╍╍╍─ 11% · 1h12 │ 7d ━━━━╍─ 62% · 18h32 │ cache 0% · 1h00 │ ≈ $0.16 (+$0.16)                        [-]
+  ⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence ov…
+─────────────────────────────────────────────────────────────────────────────────────────────────── e2e-working-69409c ─
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Model: hy-4-flash[1m]  Ctx: 27.6k  ⎇ main  (+4385,-631)                                            199 t/s · ≥$0.00
+  ⏸ manual mode on · ← for agents · esc to interrupt

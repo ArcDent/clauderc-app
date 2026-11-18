@@ -20,6 +20,7 @@ import (
 	"clauderc/internal/agent/discovery"
 	"clauderc/internal/agent/fakeattach"
 	"clauderc/internal/agent/fakeclaude"
+	"clauderc/internal/agent/lifecycle"
 	"clauderc/internal/protocol"
 )
 
@@ -46,6 +47,7 @@ type fixture struct {
 	events     chan protocol.Envelope
 	h          *chat.Handler
 	cwd        string // the session's working directory
+	claudeLog  string // the fake claude's call log
 }
 
 type setup struct {
@@ -56,6 +58,9 @@ type setup struct {
 	// from a real `claude attach` up to this mark of the attach package's
 	// testdata; received bytes still go to the key log.
 	replay string
+	// screen, when set, replaces the fake attach with one that prints this
+	// text and logs received bytes to the key log.
+	screen string
 	opts   func(*chat.Options)
 	// cwd is the session's working directory; it defaults to /w/x.
 	cwd string
@@ -87,6 +92,19 @@ func replayCommand(t *testing.T, mark, keys string) func(string) []string {
 	}
 }
 
+// screenCommand prints text, one line per row, then logs every byte it
+// receives to keys.
+func screenCommand(t *testing.T, text, keys string) func(string) []string {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "screen.txt")
+	if err := os.WriteFile(file, []byte(strings.ReplaceAll(text, "\n", "\r\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return func(string) []string {
+		return []string{"/bin/sh", "-c", `stty raw -echo; cat "$1"; exec cat > "$2"`, "sh", file, keys}
+	}
+}
+
 // newFixture runs the handler against the fake claude, listing one
 // background session whose transcript holds 60 messages "m1".."m60", and
 // the fake attach.
@@ -102,7 +120,7 @@ func newFixture(t *testing.T, s setup) *fixture {
 		s.cwd = "/w/x"
 	}
 	f := &fixture{sample: t.TempDir(), uploads: filepath.Join(t.TempDir(), "uploads"), events: make(chan protocol.Envelope, 256), cwd: s.cwd}
-	fakeclaude.Setup(t, f.sample)
+	f.claudeLog = fakeclaude.Setup(t, f.sample)
 	f.setAgents(t, s.status, s.state, s.pid)
 	proj := filepath.Join(f.sample, "projects", "-w-x")
 	if err := os.MkdirAll(proj, 0o700); err != nil {
@@ -139,6 +157,9 @@ func newFixture(t *testing.T, s setup) *fixture {
 	if s.replay != "" {
 		opts.Attach = attach.Options{Command: replayCommand(t, s.replay, f.keys)}
 	}
+	if s.screen != "" {
+		opts.Attach = attach.Options{Command: screenCommand(t, s.screen, f.keys)}
+	}
 	if s.opts != nil {
 		s.opts(&opts)
 	}
@@ -149,9 +170,20 @@ func newFixture(t *testing.T, s setup) *fixture {
 
 func (f *fixture) setAgents(t *testing.T, status, state, pid string) {
 	t.Helper()
-	body := fmt.Sprintf(`[{"pid": %s, "id": %q, "cwd": %q, "kind": "background", "startedAt": 1794529871000, "sessionId": %q, "name": "t", "status": %q, "state": %q}]`,
-		pid, shortID, f.cwd, sessionID, status, state)
-	if err := os.WriteFile(filepath.Join(f.sample, "agents.json"), []byte(body), 0o600); err != nil {
+	f.writeAgents(t, "agents.json", f.agent(shortID, sessionID, status, state, pid))
+}
+
+// agent is one entry of the fake `claude agents --json --all` in the
+// session's working directory.
+func (f *fixture) agent(id, session, status, state, pid string) string {
+	return fmt.Sprintf(`{"pid": %s, "id": %q, "cwd": %q, "kind": "background", "startedAt": 1794529871000, "sessionId": %q, "name": "t", "status": %q, "state": %q}`,
+		pid, id, f.cwd, session, status, state)
+}
+
+// writeAgents writes entries as the list file name in the sample directory.
+func (f *fixture) writeAgents(t *testing.T, name string, entries ...string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(f.sample, name), []byte("["+strings.Join(entries, ",")+"]"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -214,6 +246,21 @@ func (f *fixture) nextEvent(t *testing.T, method protocol.Method, timeout time.D
 			}
 		case <-deadline:
 			t.Fatalf("no %s event within %v", method, timeout)
+		}
+	}
+}
+
+// maybeEvent is nextEvent that reports a missing event instead of failing.
+func (f *fixture) maybeEvent(method protocol.Method, timeout time.Duration) (protocol.Envelope, bool) {
+	deadline := time.After(timeout)
+	for {
+		select {
+		case e := <-f.events:
+			if e.Method == method {
+				return e, true
+			}
+		case <-deadline:
+			return protocol.Envelope{}, false
 		}
 	}
 }
@@ -546,7 +593,7 @@ type fakeWaker struct {
 	wake  func() error
 }
 
-func (w *fakeWaker) Wake(ctx context.Context, sessionID string) error {
+func (w *fakeWaker) Wake(ctx context.Context, sessionID string, hold func(context.Context, string) (func(), error)) error {
 	w.mu.Lock()
 	w.calls = append(w.calls, sessionID)
 	w.mu.Unlock()
@@ -566,6 +613,99 @@ func TestSendWakesStoppedSession(t *testing.T) {
 	}
 	if got, want := f.keyLog(), "\x15\x1b[200~继续\x1b[201~\r"; got != want {
 		t.Fatalf("keys = %q, want %q", got, want)
+	}
+}
+
+// launches are the fake claude's calls other than `claude agents`.
+func (f *fixture) launches(t *testing.T) [][]string {
+	t.Helper()
+	var out [][]string
+	for _, c := range fakeclaude.Calls(t, f.claudeLog) {
+		if len(c.Args) == 0 || c.Args[0] != "agents" {
+			out = append(out, c.Args)
+		}
+	}
+	return out
+}
+
+// wakeWith makes the lifecycle Handler the Waker, with claude stop
+// replacing the list by agents.stopped.json. attached runs as each attach
+// starts and may return an argv to run instead of the fake attach.
+func wakeWith(t *testing.T, attached func() []string) func(*chat.Options) {
+	return func(o *chat.Options) {
+		command := o.Attach.Command
+		o.Attach.Command = func(id string) []string {
+			if argv := attached(); argv != nil {
+				return argv
+			}
+			return command(id)
+		}
+		src := o.Source
+		src.ClaudePath = filepath.Join(t.TempDir(), "claude")
+		script := "#!/bin/sh\n" + `if [ "$1" = stop ]; then cp "$FAKE_CLAUDE_DIR/agents.stopped.json" "$FAKE_CLAUDE_DIR/agents.json"; fi` + "\nexec " + strconv.Quote(fakeclaude.Path()) + ` "$@"` + "\n"
+		if err := os.WriteFile(src.ClaudePath, []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		o.Waker = lifecycle.New(lifecycle.Options{Source: src, WakeTimeout: 5 * time.Second, PollInterval: 20 * time.Millisecond})
+	}
+}
+
+// A stopped session is woken by a new attach, not by claude --bg --resume,
+// also while an open chat holds its attach from before the session stopped;
+// the message then goes into that held attach.
+func TestSendWakesThroughAttach(t *testing.T) {
+	var f *fixture
+	var mu sync.Mutex
+	attaches := 0
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return attaches
+	}
+	f = newFixture(t, setup{cwd: t.TempDir(), opts: wakeWith(t, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		if attaches++; attaches == 1 {
+			return nil // the open chat's
+		}
+		f.setAgents(t, "idle", "done", "7") // waking runs the session again
+		return []string{"/bin/sh", "-c", "stty raw -echo; exec cat >/dev/null"}
+	})})
+	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
+	for deadline := time.Now().Add(5 * time.Second); count() == 0; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the open chat did not attach")
+		}
+	}
+	f.setAgents(t, "idle", "done", "null") // claude stop: the held attach stays up
+	f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "继续"})
+	if n := count(); n != 2 {
+		t.Errorf("attaches = %d, want the chat's and one to wake the session", n)
+	}
+	if l := f.launches(t); len(l) != 0 {
+		t.Errorf("claude calls besides agents = %q, want none", l)
+	}
+	// The chat's attach redrew the screen when it started.
+	if got, want := f.keyLog(), "\x15\x1b[200~继续\x1b[201~\r"; !strings.HasSuffix(got, want) {
+		t.Fatalf("keys = %q, want them to end in %q", got, want)
+	}
+}
+
+// A copy that shows up while waking is stopped and removed, and chat.send
+// says the session did not wake because of it.
+func TestSendWakeRemovesCopy(t *testing.T) {
+	var f *fixture
+	f = newFixture(t, setup{status: "idle", state: "done", pid: "null", cwd: t.TempDir(), opts: wakeWith(t, func() []string {
+		f.writeAgents(t, "agents.json", f.agent(shortID, sessionID, "idle", "done", "null"), f.agent("cpy00001", "uuid-copy", "idle", "blocked", "8"))
+		return nil
+	})})
+	f.writeAgents(t, "agents.stopped.json", f.agent(shortID, sessionID, "idle", "done", "null"), f.agent("cpy00001", "uuid-copy", "idle", "done", "null"))
+	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "继续"})
+	if res.Error == nil || !strings.HasPrefix(res.Error.Message, "唤醒会话失败：") || !strings.Contains(res.Error.Message, "另起了会话") {
+		t.Fatalf("error = %+v, want 唤醒会话失败： and the copy", res.Error)
+	}
+	if l, want := f.launches(t), [][]string{{"stop", "cpy00001"}, {"rm", "cpy00001"}}; fmt.Sprint(l) != fmt.Sprint(want) {
+		t.Errorf("claude calls besides agents = %q, want %q", l, want)
 	}
 }
 

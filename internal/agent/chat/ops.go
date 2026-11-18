@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"clauderc/internal/agent"
@@ -121,6 +122,9 @@ func (h *Handler) answer(ctx context.Context, req protocol.Envelope) protocol.En
 		return failWith(req, err)
 	}
 	p := h.currentPending(target)
+	if p == nil && strings.HasPrefix(body.ToolUseID, dialogPrefix) && target.Blocked() {
+		return h.answerDialog(ctx, req, target, body)
+	}
 	if p == nil || p.ToolUseID != body.ToolUseID {
 		return failWith(req, errPendingChanged)
 	}

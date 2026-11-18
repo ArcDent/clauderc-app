@@ -104,37 +104,81 @@ func (t *Transcript) Pending(blocked bool) *protocol.Pending {
 }
 
 // BuiltinCommands are Claude Code's own slash commands offered for
-// completion. Maintained by hand (design Open Questions). Descriptions are
-// shown on the phone as is, so they are Chinese and follow the UI mockup.
+// completion: those of a background session's popup in Claude Code
+// 2.1.326 that run without opening a panel. Maintained by hand (design
+// Open Questions); test/e2e/claude TestSlashList compares them with the
+// real popup. Descriptions are shown on the phone as is, so they are
+// Chinese and follow the UI mockup.
 var BuiltinCommands = []protocol.Command{
 	{Name: "add-dir", Description: "添加工作目录"},
-	{Name: "agents", Description: "管理子代理配置"},
 	{Name: "clear", Description: "清空对话"},
 	{Name: "compact", Description: "压缩对话上下文"},
-	{Name: "config", Description: "打开设置面板"},
 	{Name: "context", Description: "查看上下文用量"},
-	{Name: "cost", Description: "查看本次会话的花费和时长"},
-	{Name: "doctor", Description: "检查 Claude Code 安装是否正常"},
-	{Name: "export", Description: "导出当前对话"},
-	{Name: "help", Description: "查看帮助和可用命令"},
-	{Name: "hooks", Description: "管理工具事件的 hooks 配置"},
-	{Name: "init", Description: "生成 CLAUDE.md"},
-	{Name: "mcp", Description: "管理 MCP 服务器"},
-	{Name: "memory", Description: "编辑记忆文件"},
+	{Name: "goal", Description: "设定 Claude 停下前要核对的目标"},
 	{Name: "model", Description: "切换模型"},
-	{Name: "permissions", Description: "管理工具权限的允许和拒绝规则"},
-	{Name: "review", Description: "审查 pull request"},
-	{Name: "status", Description: "查看 Claude Code 状态"},
-	{Name: "todos", Description: "列出当前待办事项"},
-	{Name: "usage", Description: "查看套餐用量限额"},
+	{Name: "recap", Description: "生成一句话的会话回顾"},
+	{Name: "reload-plugins", Description: "让改过的插件在本会话生效"},
+	{Name: "reload-skills", Description: "重新读取磁盘上新增或改过的技能"},
+	{Name: "rename", Description: "重命名会话"},
+	{Name: "subtask", Description: "带上完整上下文派出子代理，结果回到这里"},
 }
 
-// Commands merges BuiltinCommands with the given lists in order, built-ins
-// first; a name is listed once, as its first occurrence.
+// PanelCommands are the built-ins that open a panel which the phone drives
+// in the terminal view, chosen by the user on 2026-11-17. They come after
+// BuiltinCommands in completion.
+var PanelCommands = []protocol.Command{
+	{Name: "mcp", Description: "管理 MCP 服务器", Panel: true},
+	{Name: "config", Description: "打开设置", Panel: true},
+	{Name: "permissions", Description: "管理工具的允许和拒绝规则", Panel: true},
+	{Name: "hooks", Description: "查看工具事件的钩子配置", Panel: true},
+	{Name: "status", Description: "查看版本、账号、模型和 MCP 状态", Panel: true},
+	{Name: "usage", Description: "查看花费、套餐用量和活动统计", Panel: true},
+	{Name: "effort", Description: "设置模型的思考强度", Panel: true},
+	{Name: "plugin", Description: "管理插件", Panel: true},
+	{Name: "skills", Description: "列出可用的技能", Panel: true},
+	{Name: "tasks", Description: "查看和管理后台在跑的任务", Panel: true},
+	{Name: "rewind", Description: "把对话或代码退回到之前某一步", Panel: true},
+	{Name: "diff", Description: "查看未提交的改动", Panel: true},
+	{Name: "help", Description: "查看帮助和全部命令", Panel: true},
+}
+
+// IsPanelCommand reports whether text is one of PanelCommands with nothing
+// after it.
+func IsPanelCommand(text string) bool {
+	name, ok := strings.CutPrefix(strings.TrimSpace(text), "/")
+	if !ok {
+		return false
+	}
+	for _, c := range PanelCommands {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// UnofferedCommands are the other built-ins of that popup, left out of
+// completion: they open a panel or dialog the phone cannot drive, change
+// only the terminal, or would detach or stop the hidden attach. The last
+// group are Claude Code's own skills that its skill listing leaves out; a
+// background session's popup only shows them in --safe-mode.
+var UnofferedCommands = []string{
+	"advisor", "auto-mode-setup", "autocompact", "background", "branch", "btw", "bug", "cd", "color",
+	"copy", "design-login", "exit", "export", "fast", "feedback", "focus",
+	"fork", "ide", "import", "keybindings", "list-agents", "login", "logout",
+	"memory", "mobile", "output-style", "plan", "powerup", "radio",
+	"release-notes", "resume", "sandbox", "scroll-speed", "skill-doctor",
+	"stickers", "stop", "terminal-setup", "theme", "tui", "workflows",
+	"batch", "debug", "deep-research", "design", "design-sync", "doctor", "insights",
+	"run-skill-generator", "statusline", "team-onboarding", "verify",
+}
+
+// Commands merges BuiltinCommands and PanelCommands with the given lists in
+// order, built-ins first; a name is listed once, as its first occurrence.
 func Commands(lists ...[]protocol.Command) []protocol.Command {
 	out := []protocol.Command{}
 	seen := map[string]bool{}
-	for _, list := range append([][]protocol.Command{BuiltinCommands}, lists...) {
+	for _, list := range append([][]protocol.Command{BuiltinCommands, PanelCommands}, lists...) {
 		for _, c := range list {
 			if seen[c.Name] {
 				continue

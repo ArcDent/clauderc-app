@@ -1,6 +1,9 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Image limits for chat.send (session-chat spec, design D2).
 const (
@@ -12,6 +15,10 @@ const (
 
 // ChatPageSize is how many items one chat.open page holds (design D6).
 const ChatPageSize = 50
+
+// MaxToolOutputBytes bounds a tool result's text, and separately its diff,
+// in chat.open and chat.items; the rest is fetched with chat.toolOutput.
+const MaxToolOutputBytes = 8 << 10
 
 // ItemKind is the kind of a chat item (design D6).
 type ItemKind string
@@ -69,12 +76,95 @@ type ToolCall struct {
 	Input   json.RawMessage `json:"input"`
 	// Result is absent until the tool_result arrives.
 	Result *ToolResult `json:"result,omitempty"`
+	// Agent is set for an Agent call: the subagent it started.
+	Agent *Subagent `json:"agent,omitempty"`
+}
+
+// Subagent is a subagent a session started with the Agent tool.
+type Subagent struct {
+	// ID names its transcript; chat.open with it as AgentID opens it.
+	// Empty until Claude Code reports it.
+	ID          string `json:"id,omitempty"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	// Running is false once it finished, failed or was stopped.
+	Running bool `json:"running"`
+	// StartedAt is when the Agent call was made.
+	StartedAt time.Time `json:"startedAt"`
 }
 
 // ToolResult is the outcome of a tool call, flattened to text.
 type ToolResult struct {
 	Content string `json:"content"`
 	IsError bool   `json:"isError"`
+	// Patch is set for Edit, MultiEdit and Write: the changed hunks, a new
+	// file being one hunk of added lines. The whole file is never sent.
+	Patch []Hunk `json:"patch,omitempty"`
+	// Lines is set for Read of a text file: how many lines it read.
+	Lines int `json:"lines,omitempty"`
+	// Truncated marks a result whose Content or Patch was cut to
+	// MaxToolOutputBytes; chat.toolOutput returns all of it.
+	Truncated bool `json:"truncated,omitempty"`
+	// Images are the pictures in the result, such as a Read of a PNG.
+	Images []ToolImage `json:"images,omitempty"`
+}
+
+// ThumbEdge is the longest side, in pixels, of a ToolImage's thumbnail.
+const ThumbEdge = 360
+
+// ToolImage is a picture in a tool result, or one Claude sent with
+// `clauderc show`. The phone shows Thumb and fetches the picture itself
+// with chat.image by ID.
+type ToolImage struct {
+	ID        string `json:"id"`
+	MediaType string `json:"mediaType"`
+	// Name is the file name a picture sent with `clauderc show` had.
+	Name string `json:"name,omitempty"`
+	// Width and Height are 0 for a format the agent cannot read, such as WebP.
+	Width  int `json:"width,omitempty"`
+	Height int `json:"height,omitempty"`
+	// Size is the picture's length in bytes.
+	Size int `json:"size"`
+	// Thumb is a JPEG at most ThumbEdge pixels on its longest side, or the
+	// picture itself when it is no bigger; empty when the agent cannot read
+	// the format.
+	Thumb []byte `json:"thumb,omitempty"`
+	// Data is the picture itself, kept by the agent for chat.image.
+	Data []byte `json:"-"`
+}
+
+// ChatImageRequest asks for a picture of a tool result by its ID.
+type ChatImageRequest struct {
+	SessionID string `json:"sessionId"`
+	ID        string `json:"id"`
+}
+
+// ChatImageResponse is the picture as it was, at most MaxImageBytes.
+type ChatImageResponse struct {
+	MediaType string `json:"mediaType"`
+	Data      []byte `json:"data"`
+}
+
+// ChatToolOutputRequest asks for the whole result of one tool call.
+type ChatToolOutputRequest struct {
+	SessionID string `json:"sessionId"`
+	ToolUseID string `json:"toolUseId"`
+}
+
+// ChatToolOutputResponse is the whole result, never truncated.
+type ChatToolOutputResponse struct {
+	ToolResult
+}
+
+// Hunk is one block of a diff, as in Claude Code's structuredPatch. Each
+// line starts with " " (unchanged), "-" (removed) or "+" (added); OldStart
+// and NewStart are 1-based line numbers, 0 for a side with no lines.
+type Hunk struct {
+	OldStart int      `json:"oldStart"`
+	OldLines int      `json:"oldLines"`
+	NewStart int      `json:"newStart"`
+	NewLines int      `json:"newLines"`
+	Lines    []string `json:"lines"`
 }
 
 // PermissionMode is Claude Code's own permission-mode value, passed through.
@@ -95,6 +185,20 @@ type ChatStatus struct {
 	// Model is the model id from the transcript.
 	Model          string         `json:"model"`
 	PermissionMode PermissionMode `json:"permissionMode"`
+	// UnknownDialog is set while the session is blocked on something on
+	// screen that is neither its input nor a dialog the agent knows, such
+	// as a panel; the phone offers the terminal view.
+	UnknownDialog bool `json:"unknownDialog,omitempty"`
+	// Activity is Claude Code's status line while the session works, as
+	// on screen without its turning glyph and key hints, e.g.
+	// "Whirring… (20s · ↓ 2.4k tokens)". Only a chat with a hidden attach
+	// has it; the phone falls back to its own timer.
+	Activity string `json:"activity,omitempty"`
+	// Partial is the reply Claude Code has drawn on screen so far and not
+	// yet written to the transcript. It is screen text: markdown already
+	// rendered, wrapped lines joined. The phone shows it until the reply
+	// arrives as an item.
+	Partial string `json:"partial,omitempty"`
 }
 
 // PendingKind tells a permission request from a question (design D6).
@@ -103,6 +207,11 @@ type PendingKind string
 const (
 	PendingPermission PendingKind = "permission"
 	PendingQuestion   PendingKind = "question"
+	// PendingDialog is a Claude Code dialog that holds the session, such
+	// as the approval of a new project MCP server. Questions holds one
+	// single-choice question: the dialog's title and its options, as on
+	// screen. It is answered like a question, with one selected option.
+	PendingDialog PendingKind = "dialog"
 )
 
 // Pending is what the session is waiting for the user to decide.
@@ -137,6 +246,12 @@ type ChatOpenRequest struct {
 	// Before is the Seq of the oldest item already loaded; omit for the
 	// latest page.
 	Before int64 `json:"before,omitempty"`
+	// AgentID opens the chat of the session's subagent with that
+	// Subagent.ID instead, read only: its first item is the task the
+	// session gave it, a notice titled 任务; its state is working while it
+	// runs, idle once it ended; it has no pending prompt. Its events carry
+	// the same AgentID.
+	AgentID string `json:"agentId,omitempty"`
 }
 
 // ChatOpenResponse answers chat.open with up to ChatPageSize items, oldest
@@ -149,9 +264,10 @@ type ChatOpenResponse struct {
 	Pending *Pending `json:"pending"`
 }
 
-// ChatCloseRequest closes a chat.
+// ChatCloseRequest closes a chat, a subagent's when AgentID is set.
 type ChatCloseRequest struct {
 	SessionID string `json:"sessionId"`
+	AgentID   string `json:"agentId,omitempty"`
 }
 
 // ChatSendRequest sends one user message; a stopped session is woken first.
@@ -243,6 +359,10 @@ type Command struct {
 	// Name has no leading slash.
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	// Panel marks a built-in that opens a panel: the phone sends it as is
+	// and opens the terminal view. chat.send confirms it once it left the
+	// input, as Claude Code records it only when the panel closes.
+	Panel bool `json:"panel,omitempty"`
 }
 
 // ChatCommandsResponse answers chat.commands.
@@ -250,9 +370,11 @@ type ChatCommandsResponse struct {
 	Commands []Command `json:"commands"`
 }
 
-// ChatItemsEvent carries new or updated items of an open chat.
+// ChatItemsEvent carries new or updated items of an open chat; AgentID is
+// set for a subagent's chat.
 type ChatItemsEvent struct {
 	SessionID string     `json:"sessionId"`
+	AgentID   string     `json:"agentId,omitempty"`
 	Items     []ChatItem `json:"items"`
 }
 
@@ -262,8 +384,10 @@ type ChatPendingEvent struct {
 	Pending   *Pending `json:"pending"`
 }
 
-// ChatStateEvent reports a change of state, model or permission mode.
+// ChatStateEvent reports a change of state, model or permission mode;
+// AgentID is set for a subagent's chat.
 type ChatStateEvent struct {
 	SessionID string `json:"sessionId"`
+	AgentID   string `json:"agentId,omitempty"`
 	ChatStatus
 }

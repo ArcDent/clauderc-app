@@ -76,6 +76,14 @@ var bodyCases = []bodyCase{
 	{protocol.MethodChatCommands, "chat.commands", protocol.KindRequest, func() any { return &protocol.ChatCommandsRequest{} }, `{"sessionId":"a1"}`},
 	{protocol.MethodChatCommands, "chat.commands", protocol.KindResponse, func() any { return &protocol.ChatCommandsResponse{} },
 		`{"commands":[{"name":"model","description":"Set the AI model"}]}`},
+	{protocol.MethodChatToolOutput, "chat.toolOutput", protocol.KindRequest, func() any { return &protocol.ChatToolOutputRequest{} },
+		`{"sessionId":"a1","toolUseId":"toolu_1"}`},
+	{protocol.MethodChatToolOutput, "chat.toolOutput", protocol.KindResponse, func() any { return &protocol.ChatToolOutputResponse{} },
+		`{"content":"1\tline","isError":false,"patch":[{"oldStart":1,"oldLines":1,"newStart":1,"newLines":1,"lines":["-a","+b"]}],"lines":1}`},
+	{protocol.MethodChatImage, "chat.image", protocol.KindRequest, func() any { return &protocol.ChatImageRequest{} },
+		`{"sessionId":"a1","id":"toolu_1.0"}`},
+	{protocol.MethodChatImage, "chat.image", protocol.KindResponse, func() any { return &protocol.ChatImageResponse{} },
+		`{"mediaType":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="}`},
 	{protocol.EventChatItems, "chat.items", protocol.KindEvent, func() any { return &protocol.ChatItemsEvent{} },
 		`{"sessionId":"a1","items":[{"seq":54,"kind":"tool","tool":{"toolUseId":"toolu_2","toolName":"Bash","summary":"运行 touch marker.txt","input":{"command":"touch marker.txt"}}}]}`},
 	{protocol.EventChatItems, "chat.items", protocol.KindEvent, func() any { return &protocol.ChatItemsEvent{} },
@@ -86,6 +94,17 @@ var bodyCases = []bodyCase{
 		`{"sessionId":"a1","pending":{"toolUseId":"toolu_2","kind":"permission","toolName":"Bash","input":{"command":"touch marker.txt"}}}`},
 	{protocol.EventChatState, "chat.state", protocol.KindEvent, func() any { return &protocol.ChatStateEvent{} },
 		`{"sessionId":"a1","state":"working","model":"claude-sonnet-4-5","permissionMode":"acceptEdits"}`},
+
+	// Terminal view.
+	{protocol.MethodTermOpen, "term.open", protocol.KindRequest, func() any { return &protocol.TermOpenRequest{} }, `{"sessionId":"a1"}`},
+	{protocol.MethodTermOpen, "term.open", protocol.KindResponse, func() any { return &protocol.TermScreen{} },
+		`{"sessionId":"a1","lines":["❯ abc",""],"cursorRow":0,"cursorCol":5,"cursor":true}`},
+	{protocol.MethodTermKey, "term.key", protocol.KindRequest, func() any { return &protocol.TermKeyRequest{} }, `{"sessionId":"a1","key":"up"}`},
+	{protocol.MethodTermKey, "term.key", protocol.KindResponse, func() any { return &protocol.Empty{} }, `{}`},
+	{protocol.MethodTermClose, "term.close", protocol.KindRequest, func() any { return &protocol.TermCloseRequest{} }, `{"sessionId":"a1"}`},
+	{protocol.MethodTermClose, "term.close", protocol.KindResponse, func() any { return &protocol.Empty{} }, `{}`},
+	{protocol.EventTermScreen, "term.screen", protocol.KindEvent, func() any { return &protocol.TermScreen{} },
+		`{"sessionId":"a1","lines":["   ❯ ✔ chrome-devtools     26 tools"],"cursorRow":0,"cursorCol":3,"cursor":false}`},
 
 	// Session management.
 	{protocol.MethodSessionCreate, "session.create", protocol.KindRequest, func() any { return &protocol.SessionCreateRequest{} },
@@ -169,14 +188,15 @@ func TestEveryMethodHasBodyTypes(t *testing.T) {
 		"machines.list",
 		"sessions.subscribe", "sessions.unsubscribe",
 		"chat.open", "chat.close", "chat.send", "chat.answer", "chat.interrupt",
-		"chat.models", "chat.setModel", "chat.setPermissionMode", "chat.commands",
+		"chat.models", "chat.setModel", "chat.setPermissionMode", "chat.commands", "chat.toolOutput", "chat.image",
 		"session.create", "session.stop", "session.remove", "dirs.recent", "usage.get",
 		"git.status", "git.log", "git.show", "git.diff", "git.branches", "git.stage",
 		"git.unstage", "git.commit", "git.pull", "git.push", "git.switch", "dir.busy",
+		"term.open", "term.key", "term.close",
 	}
 	events := []string{
 		"machine.status", "client.gone",
-		"sessions.changed", "chat.items", "chat.pending", "chat.state",
+		"sessions.changed", "chat.items", "chat.pending", "chat.state", "term.screen",
 	}
 	have := map[string]bool{}
 	for _, tc := range bodyCases {
@@ -244,6 +264,7 @@ var errorCodes = map[protocol.ErrorCode]string{
 	protocol.CodeUnknownMethod:         "unknownMethod",
 	protocol.CodeInvalidParams:         "invalidParams",
 	protocol.CodeSessionNotFound:       "sessionNotFound",
+	protocol.CodeNotFound:              "notFound",
 	protocol.CodeSessionRunning:        "sessionRunning",
 	protocol.CodePendingChanged:        "pendingChanged",
 	protocol.CodeNotDelivered:          "notDelivered",

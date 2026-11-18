@@ -125,28 +125,82 @@ func TestCommands(t *testing.T) {
 			t.Errorf("command %q listed %d times", name, n)
 		}
 	}
-	// Built-in commands, and skills, including one named like a built-in.
-	for _, name := range []string{"model", "compact", "clear", "init", "matt-tdd", "opsx:apply", "dataviz"} {
+	// Built-in commands, and skills.
+	for _, name := range []string{"model", "compact", "clear", "reload-skills", "reload-plugins", "init", "matt-tdd", "opsx:apply", "dataviz"} {
 		if count[name] != 1 {
 			t.Errorf("command %q listed %d times, want once", name, count[name])
 		}
 	}
 
 	// Built-in descriptions are shown verbatim on the phone, so they are
-	// Chinese; these match design/ui-mockup/index.html word for word. The
-	// skill named "init" must yield to the built-in description.
+	// Chinese; these match design/ui-mockup/index.html word for word.
+	unoffered := map[string]bool{}
+	for _, name := range transcript.UnofferedCommands {
+		unoffered[name] = true
+	}
 	for _, c := range transcript.BuiltinCommands {
 		if !strings.ContainsFunc(c.Description, func(r rune) bool { return unicode.Is(unicode.Han, r) }) {
 			t.Errorf("built-in %q description %q is not Chinese", c.Name, c.Description)
 		}
+		if unoffered[c.Name] {
+			t.Errorf("built-in %q is both offered and left out", c.Name)
+		}
 	}
 	mockup := map[string]string{
-		"model": "切换模型", "memory": "编辑记忆文件", "compact": "压缩对话上下文",
-		"clear": "清空对话", "context": "查看上下文用量", "init": "生成 CLAUDE.md",
+		"model": "切换模型", "compact": "压缩对话上下文", "clear": "清空对话", "context": "查看上下文用量",
 	}
 	for _, c := range cmds {
 		if want, ok := mockup[c.Name]; ok && c.Description != want {
 			t.Errorf("command %q description = %q, want %q", c.Name, c.Description, want)
+		}
+	}
+}
+
+// The 13 panel commands the user chose come right after the built-ins and
+// are marked; the other panel commands stay left out.
+func TestPanelCommands(t *testing.T) {
+	chosen := []string{"mcp", "config", "permissions", "hooks", "status", "usage", "effort", "plugin", "skills", "tasks", "rewind", "diff", "help"}
+	cmds := transcript.Commands(parseFile(t, "testdata/mode-cycle.jsonl").Info().Skills)
+	at := map[string]int{}
+	for i, c := range cmds {
+		at[c.Name] = i
+	}
+	builtins := len(transcript.BuiltinCommands)
+	for i, name := range chosen {
+		j, ok := at[name]
+		if !ok {
+			t.Errorf("/%s is not offered", name)
+			continue
+		}
+		if c := cmds[j]; !c.Panel || j != builtins+i {
+			t.Errorf("/%s at %d panel %v, want marked at %d", name, j, c.Panel, builtins+i)
+		}
+		if !transcript.IsPanelCommand("/" + name) {
+			t.Errorf("IsPanelCommand(/%s) = false", name)
+		}
+	}
+	unoffered := map[string]bool{}
+	for _, name := range transcript.UnofferedCommands {
+		unoffered[name] = true
+	}
+	for _, name := range chosen {
+		if unoffered[name] {
+			t.Errorf("/%s is still left out", name)
+		}
+	}
+	for _, name := range []string{"memory", "export", "output-style"} {
+		if _, ok := at[name]; ok || !unoffered[name] {
+			t.Errorf("/%s is offered, want left out", name)
+		}
+	}
+	for _, c := range cmds {
+		if c.Panel && !transcript.IsPanelCommand("/"+c.Name) {
+			t.Errorf("/%s is marked panel but is not one", c.Name)
+		}
+	}
+	for _, text := range []string{"/mcp list", "mcp", "/model", "/memory", " /help "} {
+		if got := transcript.IsPanelCommand(text); got != (text == " /help ") {
+			t.Errorf("IsPanelCommand(%q) = %v", text, got)
 		}
 	}
 }

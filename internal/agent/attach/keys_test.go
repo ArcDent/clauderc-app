@@ -46,6 +46,8 @@ func TestKeyEncodings(t *testing.T) {
 		{"two questions, 2nd option each", answer([]protocol.Question{q(false, 3), q(false, 2)}, []protocol.Answer{{Selected: []int{1}}, {Selected: []int{1}}}), "\x1b[B\r\x1b[B\r\r"},
 		// Design D7: move to "Type something" (after the options), type, Enter.
 		{"custom answer", answer([]protocol.Question{q(false, 3)}, []protocol.Answer{{Custom: "都不喜欢"}}), "\x1b[B\x1b[B\x1b[B都不喜欢\r"},
+		// Typing ticks the row in a multi-select question: Up leaves it ticked, then Right and the review's Enter.
+		{"multi select 1st, 3rd and typed", answer([]protocol.Question{q(true, 3)}, []protocol.Answer{{Selected: []int{0, 2}, Custom: "南瓜"}}), "\r\x1b[B\x1b[B\r\x1b[B南瓜\x1b[A\x1b[C\r"},
 		{"cycle mode", joined(attach.CycleModeKeys()), "\x1b[Z"},
 		{"redraw", joined(attach.RedrawKeys()), "\x0c"},
 		{"open model picker", joined(attach.OpenModelPickerKeys()), "\x15\x1b[200~/model\x1b[201~\r"},

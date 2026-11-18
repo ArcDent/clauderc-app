@@ -24,7 +24,9 @@ import (
 
 // Defaults of Options (design D6, D7).
 const (
-	DefaultPollInterval    = time.Second
+	// DefaultPollInterval is short because a poll of an unchanged
+	// transcript only looks at file sizes and modification times.
+	DefaultPollInterval    = 200 * time.Millisecond
 	DefaultStateInterval   = 2 * time.Second
 	DefaultDeliveryTimeout = 5 * time.Second
 	// stateTimeout bounds one `claude agents` run.
@@ -57,18 +59,37 @@ type Options struct {
 }
 
 // Waker resumes a stopped session, named by its full session id, so a
-// message can be sent to it. It returns once the session runs.
+// message can be sent to it. It returns once the session runs. hold keeps
+// the hidden attach of the session with short id id until release is
+// called; attaching is what runs a stopped session again.
 type Waker interface {
-	Wake(ctx context.Context, sessionID string) error
+	Wake(ctx context.Context, sessionID string, hold func(ctx context.Context, id string) (release func(), err error)) error
 }
+
+// hold is the hold given to Waker.Wake. It always starts a new attach: one
+// an open chat held from before the session stopped stays up but does not
+// run it again. That one goes on working once the session runs.
+func (h *Handler) hold(ctx context.Context, id string) (func(), error) {
+	if _, err := h.wakes.Acquire(ctx, id); err != nil {
+		return nil, err
+	}
+	return func() { h.wakes.Release(id) }, nil
+}
+
+// wakeLinger is how long a waking attach outlives its hold; chat.send
+// types into an attach of the main pool.
+const wakeLinger = time.Second
 
 // Handler implements agent.Handler and agent.ClientTracker for chats.
 type Handler struct {
-	opts Options
-	pool *attach.Pool
+	opts  Options
+	pool  *attach.Pool
+	wakes *attach.Pool // see hold
 
 	mu     sync.Mutex
-	chats  map[string]*session // by short session id
+	chats  map[string]*session   // by short session id
+	agents map[string]*agentChat // by agentKey
+	terms  map[string]*termView  // by short session id
 	closed bool
 }
 
@@ -90,7 +111,9 @@ func New(opts Options) *Handler {
 	if opts.DeliveryTimeout <= 0 {
 		opts.DeliveryTimeout = DefaultDeliveryTimeout
 	}
-	return &Handler{opts: opts, pool: attach.NewPool(opts.Attach), chats: map[string]*session{}}
+	wake := opts.Attach
+	wake.Linger = wakeLinger
+	return &Handler{opts: opts, pool: attach.NewPool(opts.Attach), wakes: attach.NewPool(wake), chats: map[string]*session{}, agents: map[string]*agentChat{}, terms: map[string]*termView{}}
 }
 
 // Methods implements agent.Handler.
@@ -105,6 +128,11 @@ func (h *Handler) Methods() []protocol.Method {
 		protocol.MethodChatSetModel,
 		protocol.MethodChatSetPermissionMode,
 		protocol.MethodChatCommands,
+		protocol.MethodChatToolOutput,
+		protocol.MethodChatImage,
+		protocol.MethodTermOpen,
+		protocol.MethodTermKey,
+		protocol.MethodTermClose,
 	}
 }
 
@@ -118,7 +146,11 @@ func (h *Handler) Handle(ctx context.Context, req protocol.Envelope) protocol.En
 		if err := json.Unmarshal(req.Body, &body); err != nil {
 			return failWith(req, errBadRequest)
 		}
-		h.leave(req.Client, body.SessionID)
+		if body.AgentID != "" {
+			h.leaveAgent(req.Client, agentKey(body.SessionID, body.AgentID))
+		} else {
+			h.leave(req.Client, body.SessionID)
+		}
 		return agent.Reply(req, struct{}{})
 	case protocol.MethodChatSend:
 		return h.send(ctx, req)
@@ -134,6 +166,16 @@ func (h *Handler) Handle(ctx context.Context, req protocol.Envelope) protocol.En
 		return h.setPermissionMode(ctx, req)
 	case protocol.MethodChatCommands:
 		return h.commands(ctx, req)
+	case protocol.MethodChatToolOutput:
+		return h.toolOutput(ctx, req)
+	case protocol.MethodChatImage:
+		return h.image(ctx, req)
+	case protocol.MethodTermOpen:
+		return h.termOpen(ctx, req)
+	case protocol.MethodTermKey:
+		return h.termKey(ctx, req)
+	case protocol.MethodTermClose:
+		return h.termClose(req)
 	default:
 		return agent.Fail(req, protocol.CodeUnknownMethod, "目标机不支持这个操作："+string(req.Method))
 	}
@@ -164,6 +206,9 @@ func (h *Handler) open(ctx context.Context, req protocol.Envelope) protocol.Enve
 	var body protocol.ChatOpenRequest
 	if err := json.Unmarshal(req.Body, &body); err != nil || body.SessionID == "" {
 		return failWith(req, errNoSessionID)
+	}
+	if body.AgentID != "" {
+		return h.openAgent(ctx, req, body)
 	}
 	target, err := h.lookup(ctx, body.SessionID)
 	if err != nil {
@@ -233,20 +278,43 @@ func (h *Handler) ClientGone(client string) {
 		}
 		s.mu.Unlock()
 	}
+	var agentStops []*agentChat
+	for key, c := range h.agents {
+		c.mu.Lock()
+		delete(c.clients, client)
+		if len(c.clients) == 0 {
+			delete(h.agents, key)
+			agentStops = append(agentStops, c)
+		}
+		c.mu.Unlock()
+	}
+	termStops := h.dropTermClient(client)
 	h.mu.Unlock()
 	for _, s := range stops {
 		s.stop()
+	}
+	for _, c := range agentStops {
+		c.stop()
+	}
+	for _, v := range termStops {
+		v.stop()
 	}
 }
 
 // AllClientsGone implements agent.ClientTracker.
 func (h *Handler) AllClientsGone() {
 	h.mu.Lock()
-	chats := h.chats
-	h.chats = map[string]*session{}
+	chats, agents, terms := h.chats, h.agents, h.terms
+	h.chats, h.agents, h.terms = map[string]*session{}, map[string]*agentChat{}, map[string]*termView{}
 	h.mu.Unlock()
 	for _, s := range chats {
 		s.stop()
+	}
+	for _, c := range agents {
+		c.stop()
+	}
+	for _, v := range terms {
+		v.stop()
 	}
 }
 
@@ -257,6 +325,7 @@ func (h *Handler) Close() {
 	h.mu.Unlock()
 	h.AllClientsGone()
 	h.pool.Close()
+	h.wakes.Close()
 }
 
 // openFollower opens the session's transcript, or returns nil while there
@@ -273,11 +342,18 @@ func openFollower(claudeDir, sessionID string) *transcript.Follower {
 	return f
 }
 
-// toProtocol maps transcript items to the wire. The protocol has no
-// command kind yet: a command becomes a tool row named after it, with its
-// output as the result and a tool_use id starting with "command-", which
-// the phone draws as the user's own bubble.
+// toProtocol maps transcript items to the wire, tool results cut to
+// protocol.MaxToolOutputBytes (see truncated).
 func toProtocol(items []transcript.Item) []protocol.ChatItem {
+	return convert(items, true)
+}
+
+// convert maps transcript items to the wire, cutting long tool results
+// when cut is set. The protocol has no command kind yet: a command becomes
+// a tool row named after it, with its output as the result and a tool_use
+// id starting with "command-", which the phone draws as the user's own
+// bubble.
+func convert(items []transcript.Item, cut bool) []protocol.ChatItem {
 	out := make([]protocol.ChatItem, 0, len(items))
 	for _, it := range items {
 		ci := it.ChatItem
@@ -294,6 +370,11 @@ func toProtocol(items []transcript.Item) []protocol.ChatItem {
 				tc.Result = &protocol.ToolResult{Content: c.Output}
 			}
 			ci = protocol.ChatItem{Seq: it.Seq, Kind: protocol.ItemTool, Tool: tc}
+		}
+		if cut && ci.Tool != nil && ci.Tool.Result != nil {
+			tc := *ci.Tool
+			tc.Result = truncated(tc.Result)
+			ci.Tool = &tc
 		}
 		out = append(out, ci)
 	}
@@ -318,10 +399,27 @@ type session struct {
 	screenMode protocol.PermissionMode
 	attached   bool
 	attaching  bool
+	// conn is the held attach once attached.
+	conn *attach.Conn
+	// dialog is what the screen showed at the last state poll while the
+	// session was blocked with nothing pending in the transcript.
+	dialog *attach.Dialog
+	// offInput counts the state polls in a row at which the running
+	// session, with nothing pending, showed neither its input box nor a
+	// known dialog: a panel or a dialog the agent cannot read.
+	offInput int
+	// activity and partial are the status line and the reply being drawn,
+	// as last read off the screen (see pollScreen).
+	activity, partial string
 	// last status and pending prompt sent to the phones
 	status  protocol.ChatStatus
 	pending *protocol.Pending
 }
+
+// screenInterval is how often an open chat reads the status line and the
+// reply being drawn off its screen; Claude Code's timer there counts
+// seconds.
+const screenInterval = time.Second
 
 func (h *Handler) newSession(t discovery.Target) *session {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -344,12 +442,23 @@ func (s *session) compute() (protocol.ChatStatus, *protocol.Pending) {
 		info = s.follower.Info()
 		pending = s.follower.Pending(s.target.Blocked())
 	}
+	if pending == nil && s.dialog != nil && s.target.Blocked() {
+		pending = dialogPending(*s.dialog)
+	}
 	state := s.target.SessionState(pending != nil)
 	mode := info.PermissionMode
 	if s.screenMode != "" {
 		mode = s.screenMode
 	}
-	return protocol.ChatStatus{State: state, Model: info.Model, PermissionMode: mode}, pending
+	unknown := s.offInput >= offInputPolls && pending == nil && s.target.Running
+	status := protocol.ChatStatus{State: state, Model: info.Model, PermissionMode: mode, UnknownDialog: unknown}
+	if state == protocol.StateWorking {
+		status.Activity = s.activity
+		if s.partial != "" && !landed(s.follower, s.partial) {
+			status.Partial = s.partial
+		}
+	}
+	return status, pending
 }
 
 // snapshot is the chat.open answer for the latest page.
@@ -383,6 +492,8 @@ func (s *session) run(ctx context.Context) {
 	defer poll.Stop()
 	state := time.NewTicker(s.h.opts.StateInterval)
 	defer state.Stop()
+	screen := time.NewTicker(screenInterval)
+	defer screen.Stop()
 	s.ensureAttach(ctx)
 	for {
 		select {
@@ -393,9 +504,40 @@ func (s *session) run(ctx context.Context) {
 		case <-state.C:
 			s.pollState(ctx)
 			s.ensureAttach(ctx)
+			s.pollDialog()
+		case <-screen.C:
+			s.pollScreen()
 		}
 		s.pushChanges()
 	}
+}
+
+// pollScreen reads the status line and the reply being drawn off the
+// screen of the hidden attach; compute passes them on while the session
+// works. A screen without the status line is taken for a frame caught
+// mid-draw and keeps what the last one showed: once the turn ends,
+// compute drops them anyway.
+func (s *session) pollScreen() {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return
+	}
+	lines := conn.View().Lines
+	activity := screenActivity(lines)
+	if activity == "" {
+		s.mu.Lock()
+		if s.target.SessionState(false) != protocol.StateWorking {
+			s.activity, s.partial = "", ""
+		}
+		s.mu.Unlock()
+		return
+	}
+	partial := screenPartial(lines)
+	s.mu.Lock()
+	s.activity, s.partial = activity, partial
+	s.mu.Unlock()
 }
 
 func (s *session) pollTranscript() {
@@ -433,6 +575,61 @@ func (s *session) pollState(ctx context.Context) {
 	s.mu.Unlock()
 }
 
+// offInputPolls is how many state polls in a row must find the session
+// off its input before the phone is told; one alone may be a frame
+// caught mid-draw.
+const offInputPolls = 2
+
+// pollDialog reads a dialog off the screen while the session is blocked
+// and its transcript shows nothing pending, and counts the polls at which
+// a running session shows neither its input box nor a known dialog. A
+// panel left open is such a screen, and Claude Code reports the session
+// done, not blocked, meanwhile (test/e2e/claude TestTerminal).
+func (s *session) pollDialog() {
+	s.mu.Lock()
+	conn, target, f := s.conn, s.target, s.follower
+	s.mu.Unlock()
+	var d *attach.Dialog
+	off := false
+	if f == nil || f.Pending(target.Blocked()) == nil {
+		d = screenDialog(conn, target)
+		off = d == nil && conn != nil && target.Running && offInput(conn.View())
+	}
+	s.mu.Lock()
+	s.dialog = d
+	if off {
+		s.offInput++
+	} else {
+		s.offInput = 0
+	}
+	s.mu.Unlock()
+}
+
+// hasInputBox reports whether the screen shows Claude Code's input box.
+func hasInputBox(screen string) bool {
+	_, ok := inputLine(screen)
+	return ok
+}
+
+// awayFromInput reports whether the session is off its input: no input
+// box on screen and the cursor hidden. Claude Code 2.1.326 shows the
+// cursor in its input and hides it in a panel; requiring both keeps a
+// screen the emulator drew wrong, such as the 2.1.323 recording, from
+// counting as off the input.
+func awayFromInput(v attach.View) bool {
+	return !v.Cursor && !hasInputBox(strings.Join(v.Lines, "\n"))
+}
+
+// offInput reports whether the session is off its input and the screen
+// shows no dialog the agent can read.
+func offInput(v attach.View) bool {
+	if !awayFromInput(v) {
+		return false
+	}
+	_, known := attach.ParseDialog(strings.Join(v.Lines, "\n"))
+	return !known
+}
+
 // ensureAttach starts the hidden attach of a running session in the
 // background, so typing later does not wait for it.
 func (s *session) ensureAttach(ctx context.Context) {
@@ -449,6 +646,9 @@ func (s *session) ensureAttach(ctx context.Context) {
 		s.attaching = false
 		keep := err == nil && ctx.Err() == nil
 		s.attached = s.attached || keep
+		if keep {
+			s.conn = conn
+		}
 		s.mu.Unlock()
 		if err == nil && !keep {
 			s.h.pool.Release(s.id)

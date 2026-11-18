@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.state",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"sessionId": "a1b2c3", "state": "idle", "model": "claude-opus-5-5", "permissionMode": "default", "unknownDialog": true}
+}

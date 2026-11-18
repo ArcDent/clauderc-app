@@ -318,6 +318,8 @@ func TestMethodsListsAllChatMethods(t *testing.T) {
 		protocol.MethodChatOpen: true, protocol.MethodChatClose: true, protocol.MethodChatSend: true,
 		protocol.MethodChatAnswer: true, protocol.MethodChatInterrupt: true, protocol.MethodChatModels: true,
 		protocol.MethodChatSetModel: true, protocol.MethodChatSetPermissionMode: true, protocol.MethodChatCommands: true,
+		protocol.MethodChatToolOutput: true, protocol.MethodChatImage: true,
+		protocol.MethodTermOpen: true, protocol.MethodTermKey: true, protocol.MethodTermClose: true,
 	}
 	got := h.Methods()
 	if len(got) != len(want) {

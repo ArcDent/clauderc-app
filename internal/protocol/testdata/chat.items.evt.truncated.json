@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.items",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "items": [
+      {"seq": 263, "kind": "tool", "tool": {"toolUseId": "toolu_01T", "toolName": "Bash", "summary": "运行 go test -v ./...", "input": {"command": "go test -v ./..."}, "result": {"content": "=== RUN   TestEnvelopeRoundTrip\n--- PASS: TestEnvelopeRoundTrip (0.00s)\n", "isError": false, "truncated": true}}}
+    ]
+  }
+}

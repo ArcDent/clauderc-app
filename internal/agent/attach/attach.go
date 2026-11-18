@@ -366,6 +366,22 @@ func (c *Conn) send(ctx context.Context, steps []Step) error {
 	return nil
 }
 
+// Screen returns the current screen text without waiting for an
+// operation in progress.
+func (c *Conn) Screen() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.screen.Text()
+}
+
+// View returns the current screen and cursor without waiting for an
+// operation in progress.
+func (c *Conn) View() View {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.screen.View()
+}
+
 // PID is the attach process id.
 func (c *Conn) PID() int { return c.cmd.Process.Pid }
 
@@ -416,6 +432,13 @@ func (t *Term) Screen() string {
 	t.c.mu.Lock()
 	defer t.c.mu.Unlock()
 	return t.c.screen.Text()
+}
+
+// View returns the current screen and cursor.
+func (t *Term) View() View {
+	t.c.mu.Lock()
+	defer t.c.mu.Unlock()
+	return t.c.screen.View()
 }
 
 // WaitQuiet waits until no output arrived for quiet, at most max.

@@ -48,6 +48,10 @@ import (
 // cache.
 const profileID = "e2e.clauderc.invalid"
 
+// safeProfileID is profileID plus --safe-mode, which leaves out every
+// skill, plugin and custom command: its slash popup holds built-ins only.
+const safeProfileID = "e2e-safe.clauderc.invalid"
+
 const client = "c-e2e"
 
 // longTask keeps a session busy for a while without tools.
@@ -118,12 +122,20 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	profiles := filepath.Join(cache, "profiles.json")
-	tmpl := map[string]any{"profiles": map[string]any{profileID: map[string]any{
-		"profile":     protocol.Profile{ID: profileID, Kind: protocol.ProfileEndpoint},
-		"flags":       []string{"--permission-mode", "manual", "--effort", "low"},
-		"providerEnv": map[string]string{},
-		"updatedAt":   "2000-01-01T00:00:00Z",
-	}}}
+	tmpl := map[string]any{"profiles": map[string]any{
+		profileID: map[string]any{
+			"profile":     protocol.Profile{ID: profileID, Kind: protocol.ProfileEndpoint},
+			"flags":       []string{"--permission-mode", "manual", "--effort", "low"},
+			"providerEnv": map[string]string{},
+			"updatedAt":   "2000-01-01T00:00:00Z",
+		},
+		safeProfileID: map[string]any{
+			"profile":     protocol.Profile{ID: safeProfileID, Kind: protocol.ProfileEndpoint},
+			"flags":       []string{"--permission-mode", "manual", "--effort", "low", "--safe-mode"},
+			"providerEnv": map[string]string{},
+			"updatedAt":   "2000-01-01T00:00:00Z",
+		},
+	}}
 	data, _ := json.Marshal(tmpl)
 	if err := os.WriteFile(profiles, data, 0o600); err != nil {
 		t.Fatal(err)
@@ -252,6 +264,12 @@ func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool)
 // first message and opens its chat; cleanup stops and removes it.
 func launch(t *testing.T, name string) *session {
 	t.Helper()
+	return launchIn(t, name, profileID)
+}
+
+// launchIn is launch in the given test profile.
+func launchIn(t *testing.T, name, profile string) *session {
+	t.Helper()
 	x := h(t)
 	tag := make([]byte, 3)
 	_, _ = rand.Read(tag)
@@ -261,7 +279,7 @@ func launch(t *testing.T, name string) *session {
 	}
 	var res protocol.SessionCreateResponse
 	x.must(t, protocol.MethodSessionCreate, protocol.SessionCreateRequest{
-		ProfileID: profileID, Cwd: ws, Name: "e2e-" + name + "-" + hex.EncodeToString(tag), Prompt: "只回复 OK",
+		ProfileID: profile, Cwd: ws, Name: "e2e-" + name + "-" + hex.EncodeToString(tag), Prompt: "只回复 OK",
 	}, &res)
 	if baseline[res.SessionID] {
 		t.Fatalf("新建返回的 %s 是测试前已有的会话", res.SessionID)
@@ -642,6 +660,22 @@ func TestMultiSelect(t *testing.T) {
 	if got := answers(tur); got[q.Question] != "香蕉, 葡萄" {
 		t.Errorf("answers = %v", got)
 	}
+
+	// The phone's 「其他」 is ticked along with options: both go out in one answer.
+	p = ask(t, s, "请再调用一次 AskUserQuestion 工具问我一个多选题（multiSelect 设为 true）：你喜欢哪些蔬菜？选项依次只有：白菜、萝卜、茄子。拿到答案后只复述我的选择")
+	q = p.Questions[0]
+	s.x.must(t, protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: s.id, ToolUseID: p.ToolUseID,
+		Answers: []protocol.Answer{{Selected: []int{index(t, q, "白菜"), index(t, q, "茄子")}, Custom: "南瓜"}}}, nil)
+	_, tur = s.result(p.ToolUseID)
+	got, _ := answers(tur)[q.Question].(string)
+	for _, want := range []string{"白菜", "茄子", "南瓜"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("answer %q lacks %q", got, want)
+		}
+	}
+	if strings.Contains(got, "萝卜") {
+		t.Errorf("answer %q has an option not picked", got)
+	}
 }
 
 func TestMultiQuestion(t *testing.T) {
@@ -857,21 +891,16 @@ func TestModel(t *testing.T) {
 	}
 }
 
-// A stopped session is woken by chat.send and keeps its id. The claude
-// command must pass --bg --resume on unchanged: a wrapper that adds a
-// flag, such as a default --effort, makes Claude Code start a copy.
+// A stopped session is woken by chat.send through `claude attach` and
+// keeps its ids, also when the claude command is a wrapper that adds a
+// flag such as a default --effort: with `claude --bg --resume` that made
+// Claude Code start a copy.
 func TestWake(t *testing.T) {
 	s := launch(t, "wake")
 	s.x.must(t, protocol.MethodSessionStop, protocol.SessionStopRequest{SessionID: s.id}, nil)
 	waitFor(t, 30*time.Second, "会话停止", func() bool { return s.state() == protocol.StateStopped })
 	m := s.mark()
 	if _, e := s.x.call(t, protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: s.id, Text: "只回复 WOKE"}); e != nil {
-		targets, _ := s.x.src.Targets(context.Background())
-		for _, tg := range targets {
-			if tg.Cwd == s.ws && tg.ID != s.id {
-				t.Fatalf("唤醒另起了副本 %s：CLAUDERC_E2E_CLAUDE 可能是会补参数的包装脚本，唤醒必须只带 --bg --resume（%s）", tg.ID, e.Message)
-			}
-		}
 		t.Fatalf("chat.send: %s %s", e.Code, e.Message)
 	}
 	if st := s.state(); st == protocol.StateStopped {
@@ -881,11 +910,17 @@ func TestWake(t *testing.T) {
 	// route the claude command gives the resumed session.
 	r := s.reply(s.waitUser("只回复 WOKE", m, 15*time.Second), 120*time.Second)
 	t.Logf("唤醒后的回复：%q", r)
+	// The attach that woke it has ended by now.
+	if st := s.state(); st == protocol.StateStopped {
+		t.Errorf("回复之后会话又停了")
+	}
 	targets, _ := s.x.src.Targets(context.Background())
 	copies := 0
 	for _, tg := range targets {
 		if tg.SessionID == s.sessionID {
 			copies++
+		} else if tg.Cwd == s.ws {
+			t.Errorf("工作目录里多出了会话 %s", tg.ID)
 		}
 	}
 	if copies != 1 {

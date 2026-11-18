@@ -47,7 +47,7 @@ func (h *Handler) send(ctx context.Context, req protocol.Envelope) protocol.Enve
 		if h.opts.Waker == nil {
 			return failWith(req, errStopped)
 		}
-		if err := h.opts.Waker.Wake(ctx, target.SessionID); err != nil {
+		if err := h.opts.Waker.Wake(ctx, target.SessionID, h.hold); err != nil {
 			// A Waker failure with a protocol code, such as a working
 			// directory that is gone, tells the phone why.
 			var pe *protocol.Error
@@ -67,10 +67,14 @@ func (h *Handler) send(ctx context.Context, req protocol.Envelope) protocol.Enve
 	}
 	defer h.pool.Release(target.ID)
 
+	if transcript.IsPanelCommand(body.Text) && len(paths) == 0 {
+		return h.sendPanel(ctx, req, conn, strings.TrimSpace(body.Text))
+	}
+
 	w := &watch{claudeDir: h.opts.Source.ClaudeDir, sessionID: target.SessionID}
 	w.f = openFollower(w.claudeDir, w.sessionID)
 	err = conn.Do(ctx, func(t *attach.Term) error {
-		if err := checkNoPicker(t); err != nil {
+		if err := checkInput(t); err != nil {
 			return err
 		}
 		if err := t.Send(attach.SendKeys(body.Text, paths, h.opts.ImageWait)); err != nil {
@@ -86,6 +90,81 @@ func (h *Handler) send(ctx context.Context, req protocol.Envelope) protocol.Enve
 		return agent.Fail(req, protocol.CodeNotDelivered, fmt.Sprintf("消息发出后 %g 秒内没有出现在会话里，可能没有送达", h.opts.DeliveryTimeout.Seconds()))
 	}
 	return agent.Reply(req, protocol.ChatSendResponse{Queued: queued})
+}
+
+// panelTyped is how long a panel command may take to show in the input
+// after it was pasted.
+const panelTyped = 2 * time.Second
+
+// sendPanel sends one of transcript.PanelCommands. Claude Code records it
+// only once its panel closes, so the screen tells: the command must show in
+// the input box before Enter, and be gone from it after: its panel open in
+// place of the box, or the box empty when the command was queued.
+func (h *Handler) sendPanel(ctx context.Context, req protocol.Envelope, conn *attach.Conn, cmd string) protocol.Envelope {
+	steps := attach.SendKeys(cmd, nil, 0)
+	err := conn.Do(ctx, func(t *attach.Term) error {
+		if err := checkInput(t); err != nil {
+			return err
+		}
+		if err := t.Send(steps[:len(steps)-1]); err != nil {
+			return &opError{protocol.CodeInternal, "向会话输入消息失败，请重试"}
+		}
+		if !t.WaitFor(func(sc string) bool { return inInput(sc, cmd) }, panelTyped) {
+			return &opError{protocol.CodeNotDelivered, "命令没有出现在会话的输入框里，没有发出"}
+		}
+		if err := t.Send(steps[len(steps)-1:]); err != nil {
+			return &opError{protocol.CodeInternal, "向会话输入消息失败，请重试"}
+		}
+		if !t.WaitFor(func(sc string) bool { return !inInput(sc, cmd) }, h.opts.DeliveryTimeout) {
+			return &opError{protocol.CodeNotDelivered, fmt.Sprintf("命令按下回车后 %g 秒内还留在输入框里，可能没有送达", h.opts.DeliveryTimeout.Seconds())}
+		}
+		return nil
+	})
+	if err != nil {
+		return failWith(req, err)
+	}
+	return agent.Reply(req, protocol.ChatSendResponse{})
+}
+
+// inInput reports whether Claude Code's input box holds exactly cmd.
+func inInput(screen, cmd string) bool {
+	text, ok := inputLine(screen)
+	return ok && text == cmd
+}
+
+// inputLine returns what Claude Code's input box holds: the line starting
+// with its prompt right under a rule. Earlier messages in the conversation
+// above also start with ❯, but not under a rule. The prompt is ❯, or ! for
+// a shell command, and is followed by a no-break space.
+func inputLine(screen string) (string, bool) {
+	lines := strings.Split(screen, "\n")
+	for i := len(lines) - 1; i > 0; i-- {
+		if !strings.HasPrefix(strings.TrimSpace(lines[i-1]), "─") {
+			continue
+		}
+		for _, prompt := range []string{"❯", "!"} {
+			if rest, ok := strings.CutPrefix(lines[i], prompt); ok {
+				return strings.TrimSpace(strings.ReplaceAll(rest, "\u00a0", " ")), true
+			}
+		}
+	}
+	return "", false
+}
+
+var errOffInput = &opError{protocol.CodeInvalidParams, "会话停在面板或对话框上，先在终端里关掉再发"}
+
+// checkInput refuses to type into a session that is off its input (see
+// awayFromInput): a panel or dialog there would take the keys, and its
+// Enter would act on whatever it has selected. The /model picker keeps its
+// own message.
+func checkInput(t *attach.Term) error {
+	if err := checkNoPicker(t); err != nil {
+		return err
+	}
+	if awayFromInput(t.View()) {
+		return errOffInput
+	}
+	return nil
 }
 
 // checkMessage validates a chat.send body and returns why it is refused.

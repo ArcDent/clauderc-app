@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-020",
+  "method": "term.open",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "error": {"code": "invalidParams", "message": "会话已停止，无法操作"}
+}

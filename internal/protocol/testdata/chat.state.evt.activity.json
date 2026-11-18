@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.state",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"sessionId": "a1b2c3", "state": "working", "model": "claude-opus-5-5", "permissionMode": "default", "activity": "Whirring… (20s · ↓ 2.4k tokens)", "partial": "终端模拟器像一台很窄的显示器：它从伪终端收到一串字节。\n\n程序写出的不只是文字"}
+}

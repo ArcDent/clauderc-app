@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"bufio"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -31,7 +32,57 @@ func LocalCommands(claudeDir, cwd string) []protocol.Command {
 		out = append(out, skillsIn(filepath.Join(base, "skills"))...)
 		out = append(out, commandsIn(filepath.Join(base, "commands"), "", 0)...)
 	}
+	if claudeDir != "" {
+		out = append(out, pluginCommands(claudeDir)...)
+	}
 	return out
+}
+
+// pluginCommands lists the commands and skills of the plugins enabled in
+// <claudeDir>/settings.json, named "<plugin>:<name>" as Claude Code shows
+// them; where a plugin lives comes from plugins/installed_plugins.json.
+// Commands a plugin registers from its code are not files and are missed.
+func pluginCommands(claudeDir string) []protocol.Command {
+	var settings struct {
+		EnabledPlugins map[string]bool `json:"enabledPlugins"`
+	}
+	var installed struct {
+		Plugins map[string][]struct {
+			InstallPath string `json:"installPath"`
+		} `json:"plugins"`
+	}
+	if !readJSON(filepath.Join(claudeDir, "settings.json"), &settings) ||
+		!readJSON(filepath.Join(claudeDir, "plugins", "installed_plugins.json"), &installed) {
+		return nil
+	}
+	keys := make([]string, 0, len(settings.EnabledPlugins))
+	for key, on := range settings.EnabledPlugins {
+		if on {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	var out []protocol.Command
+	for _, key := range keys {
+		installs := installed.Plugins[key]
+		if len(installs) == 0 || installs[0].InstallPath == "" {
+			continue
+		}
+		name, _, _ := strings.Cut(key, "@")
+		dir := installs[0].InstallPath
+		for _, c := range append(skillsIn(filepath.Join(dir, "skills")), commandsIn(filepath.Join(dir, "commands"), "", 0)...) {
+			c.Name = name + ":" + c.Name
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// readJSON decodes the JSON file at path into v; false when it is missing
+// or malformed.
+func readJSON(path string, v any) bool {
+	raw, err := os.ReadFile(path)
+	return err == nil && json.Unmarshal(raw, v) == nil
 }
 
 // skillsIn reads <dir>/<name>/SKILL.md for every skill folder in dir.

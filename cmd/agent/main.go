@@ -19,6 +19,7 @@ import (
 	"clauderc/internal/agent/app"
 	"clauderc/internal/agent/config"
 	"clauderc/internal/agent/pairing"
+	"clauderc/internal/agent/picture"
 	"clauderc/internal/agent/service"
 )
 
@@ -38,6 +39,8 @@ const usage = `用法：
   %[1]s devices [--config <agent.toml>]   列出已配对的手机
   %[1]s revoke [--config <agent.toml>] <id>  吊销一台手机
   %[1]s service install [--config <agent.toml>] [--dry-run]  生成开机自启的服务文件
+  %[1]s show <图片路径>...                把图片发到手机上正在看的会话里，给 Claude 用
+  %[1]s skill install                    装上告诉 Claude 什么时候发图的技能
   %[1]s --version
 默认配置文件：~/.config/clauderc/agent.toml
 后台运行的进程号和日志在配置文件同目录的 agent.pid、agent.log
@@ -66,6 +69,17 @@ func main() {
 		err = stopCmd(args, os.Stdout)
 	case "pair", "devices", "revoke":
 		err = adminCmd(ctx, cmd, args, nil, os.Stdout)
+	case "show":
+		err = showCmd(args, picture.Dir(), time.Now(), os.Stdout)
+	case "skill":
+		if len(args) == 0 || args[0] != "install" {
+			err = fmt.Errorf("用法：%s skill install", prog)
+			break
+		}
+		var home string
+		if home, err = os.UserHomeDir(); err == nil {
+			err = skillCmd(home, os.Stdout)
+		}
 	case "service":
 		if len(args) == 0 || args[0] != "install" {
 			err = fmt.Errorf("用法：%s service install [--config <agent.toml>] [--dry-run]", prog)

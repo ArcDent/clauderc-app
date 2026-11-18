@@ -6,7 +6,8 @@
   "client": "c-12",
   "body": {
     "sessions": [
-      {"id": "a1b2c3", "name": "fix reconnect", "cwd": "/Users/me/code/clauderc", "state": "working", "profileId": "api.anthropic.com", "lastActiveAt": "2026-11-12T09:30:20Z", "context": {"usedTokens": 86420, "windowTokens": 200000}}
+      {"id": "a1b2c3", "name": "fix reconnect", "cwd": "/Users/me/code/clauderc", "state": "working", "profileId": "api.anthropic.com", "lastActiveAt": "2026-11-12T09:30:20Z", "context": {"usedTokens": 86420, "windowTokens": 200000}, "jobState": "working", "detail": "正在查断线重连为什么没触发", "agents": [{"id": "ab360a15e1da6a482", "type": "Explore", "description": "读一遍 relay 的连接管理", "running": true, "startedAt": "2026-11-12T09:28:41.512Z"}]},
+      {"id": "d4e5f6", "name": "collector 切换", "cwd": "/srv/ops", "state": "idle", "profileId": "default", "lastActiveAt": "2026-11-12T09:12:03Z", "jobState": "blocked", "detail": "是否现在开始 collector 和 feed 切换？"}
     ],
     "profiles": [
       {"id": "default", "kind": "default"},

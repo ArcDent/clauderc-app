@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.items",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "items": [
+      {"seq": 260, "kind": "tool", "tool": {"toolUseId": "toolu_01E", "toolName": "Edit", "summary": "编辑 envelope.go", "input": {"file_path": "/p/x/envelope.go", "old_string": "a", "new_string": "b"}, "result": {"content": "The file /p/x/envelope.go has been updated successfully.", "isError": false, "patch": [{"oldStart": 8, "oldLines": 2, "newStart": 8, "newLines": 3, "lines": [" // ErrVersion is returned when an envelope is not version 1.", "-var ErrVersion = errors.New(\"unsupported\")", "+var ErrVersion = errors.New(\"version must be 1\")", "+"]}]}}},
+      {"seq": 261, "kind": "tool", "tool": {"toolUseId": "toolu_01W", "toolName": "Write", "summary": "写入 errors.go", "input": {"file_path": "/p/x/errors.go", "content": "package protocol\n"}, "result": {"content": "File created successfully at: /p/x/errors.go", "isError": false, "patch": [{"oldStart": 0, "oldLines": 0, "newStart": 1, "newLines": 1, "lines": ["+package protocol"]}]}}},
+      {"seq": 262, "kind": "tool", "tool": {"toolUseId": "toolu_01R", "toolName": "Read", "summary": "读取 README.md", "input": {"file_path": "/p/x/README.md"}, "result": {"content": "1\t# proj\n2\thello", "isError": false, "lines": 2}}}
+    ]
+  }
+}
