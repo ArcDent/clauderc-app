@@ -1,5 +1,9 @@
 package clauderc.app
 
+import clauderc.app.net.ConnectionState
+import clauderc.app.ui.components.LoadingArt
+import clauderc.app.ui.components.LoadingCover
+import clauderc.app.ui.theme.page
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -9,6 +13,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
@@ -37,6 +42,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
@@ -47,9 +56,14 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import androidx.navigationevent.NavigationEventTransitionState
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import clauderc.app.chat.AgentHeader
+import clauderc.app.chat.AgentScreen
 import clauderc.app.chat.ChatActions
 import clauderc.app.chat.ChatScreen
 import clauderc.app.chat.ChatViewModel
+import clauderc.app.chat.TermViewModel
+import clauderc.app.chat.TerminalScreen
+import clauderc.app.protocol.Subagent
 import clauderc.app.git.CommitScreen
 import clauderc.app.git.CommitViewModel
 import clauderc.app.git.DiffScreen
@@ -63,7 +77,6 @@ import clauderc.app.pair.PairScreen
 import clauderc.app.pair.PairUiState
 import clauderc.app.pair.PairViewModel
 import clauderc.app.protocol.GitDiffRequest
-import clauderc.app.protocol.SessionState
 import clauderc.app.sessions.CreateSessionScreen
 import clauderc.app.sessions.CreateSessionViewModel
 import clauderc.app.sessions.SessionsScreen
@@ -73,6 +86,7 @@ import clauderc.app.ui.components.GlassNavBar
 import clauderc.app.ui.components.NavTab
 import clauderc.app.ui.components.SnackState
 import clauderc.app.settings.SettingsScreen
+import clauderc.app.ui.needsYou
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.LocalAppearance
 import clauderc.app.ui.theme.LocalThemeReveal
@@ -90,6 +104,9 @@ import kotlinx.serialization.Serializable
 @Serializable data object HomeRoute
 @Serializable data class CreateRoute(val machineId: String, val profileId: String)
 @Serializable data class ChatRoute(val machineId: String, val sessionId: String)
+/** A subagent's page; [startedAt] is epoch milliseconds, 0 when unknown. */
+@Serializable data class AgentRoute(val machineId: String, val sessionId: String, val agentId: String, val description: String, val type: String, val startedAt: Long)
+@Serializable data class TermRoute(val machineId: String, val sessionId: String)
 @Serializable data class CommitRoute(val machineId: String, val dir: String, val hash: String)
 @Serializable data class DiffRoute(val machineId: String, val dir: String, val path: String, val hash: String? = null, val staged: Boolean = false)
 
@@ -98,9 +115,16 @@ fun ClaudercNav(container: AppContainer) {
     val nav = rememberNavController()
     // The home tabs are the glass bar's blur source; the bar itself floats over every page.
     val haze = rememberHazeState()
-    Box(Modifier.fillMaxSize()) {
-        ClaudercPages(container, nav, haze)
-        HomeNavBar(container, nav, haze, Modifier.align(Alignment.BottomCenter))
+    // Starting up, a dot runs between a phone and a computer over the whole app until the first machine
+    // list arrives. Once the relay fails and waits to retry, the page shows how the reconnect goes instead.
+    val links by container.connection.links.collectAsStateWithLifecycle()
+    val machines by container.fleet.machines.collectAsStateWithLifecycle()
+    val booting = machines == null && links.isNotEmpty() && links.none { it.state is ConnectionState.Waiting }
+    LoadingCover(booting, LoadingArt.Link, Modifier.fillMaxSize(), splash = true, label = links.firstOrNull()?.let { "正在连接 ${it.host}" }.orEmpty()) {
+        Box(Modifier.fillMaxSize()) {
+            ClaudercPages(container, nav, haze)
+            HomeNavBar(container, nav, haze, Modifier.align(Alignment.BottomCenter))
+        }
     }
 }
 
@@ -149,23 +173,35 @@ private fun ClaudercPages(container: AppContainer, nav: NavHostController, haze:
             LaunchedEffect(vm) {
                 vm.created.collect { id -> nav.navigate(ChatRoute(r.machineId, id)) { popUpTo<CreateRoute> { inclusive = true } } }
             }
-            CreateSessionScreen(state, nav::popBackStack, vm::submit, vm::setDir, vm::pickDir, vm::showAllDirs, vm::setName, vm::setPrompt)
+            CreateSessionScreen(state, { nav.popFrom(entry) }, vm::submit, vm::setDir, vm::pickDir, vm::showAllDirs, vm::setName, vm::setPrompt)
         }
         composable<ChatRoute> { entry ->
             val r = entry.toRoute<ChatRoute>()
-            ChatRouteContent(container, r, nav)
+            ChatRouteContent(container, r, nav, entry)
+        }
+        composable<AgentRoute> { entry ->
+            val r = entry.toRoute<AgentRoute>()
+            AgentRouteContent(container, r, nav, entry)
+        }
+        composable<TermRoute> { entry ->
+            val r = entry.toRoute<TermRoute>()
+            val vm = viewModel { TermViewModel(r.machineId, r.sessionId, container.connection, container.fleet, container.scope) }
+            val state by vm.state.collectAsStateWithLifecycle()
+            val snack = remember { SnackState() }
+            LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
+            TerminalScreen(state, onBack = { nav.popFrom(entry) }, onKey = vm::key, snack = snack)
         }
         composable<CommitRoute> { entry ->
             val r = entry.toRoute<CommitRoute>()
             val vm = viewModel { CommitViewModel(r.machineId, r.dir, r.hash, container.connection) }
             val state by vm.state.collectAsStateWithLifecycle()
-            CommitScreen(r.hash, state, onBack = nav::popBackStack, onOpenFile = { f -> nav.navigate(DiffRoute(r.machineId, r.dir, f.path, hash = r.hash)) })
+            CommitScreen(r.hash, state, onBack = { nav.popFrom(entry) }, onOpenFile = { f -> nav.navigateFrom(entry, DiffRoute(r.machineId, r.dir, f.path, hash = r.hash)) })
         }
         composable<DiffRoute> { entry ->
             val r = entry.toRoute<DiffRoute>()
             val vm = viewModel { DiffViewModel(r.machineId, GitDiffRequest(r.dir, r.path, r.hash, r.staged), container.connection) }
             val state by vm.state.collectAsStateWithLifecycle()
-            DiffScreen(r.path, r.hash?.take(7) ?: if (r.staged) "已暂存" else "未暂存", state, onBack = nav::popBackStack)
+            DiffScreen(r.path, r.hash?.take(7) ?: if (r.staged) "已暂存" else "未暂存", state, onBack = { nav.popFrom(entry) })
         }
     }
 }
@@ -184,7 +220,7 @@ fun ClaudercNavHost(nav: NavHostController, startDestination: Any, builder: NavG
     NavHost(
         navController = nav,
         startDestination = startDestination,
-        modifier = Modifier.fillMaxSize().background(Clauderc.colors.bg),
+        modifier = Modifier.fillMaxSize().page(),
         enterTransition = { Motion.pushIn },
         exitTransition = { Motion.pushOut },
         popEnterTransition = { Motion.popIn },
@@ -194,6 +230,13 @@ fun ClaudercNavHost(nav: NavHostController, startDestination: Any, builder: NavG
         predictivePopExitTransition = { Motion.gestureOut(gesture) },
         builder = builder,
     )
+    // A page is resumed once its slide is over. A back swipe during the slide would scrub the
+    // unfinished slide, which on the phone left the chat page stranded a quarter to the left
+    // (plans.md 6), so until then the swipe is taken here, after NavHost's own handler, and goes
+    // back plainly on release.
+    val entry by nav.currentBackStackEntryAsState()
+    val resumed = entry?.lifecycle?.currentStateAsState()?.value?.isAtLeast(Lifecycle.State.RESUMED) ?: true
+    BackHandler(enabled = !resumed && nav.previousBackStackEntry != null) { entry?.let(nav::popFrom) }
 }
 
 /** The camera page is black, so its status bar icons are light. */
@@ -220,7 +263,7 @@ private fun HomeScreen(container: AppContainer, nav: NavHostController, haze: Ha
     LaunchedEffect(Unit) { container.notices.collect { snack.show(it) } }
     val shift = with(LocalDensity.current) { 24.dp.roundToPx() }
 
-    Box(Modifier.fillMaxSize().background(c.bg).hazeSource(haze)) {
+    Box(Modifier.fillMaxSize().page().hazeSource(haze)) {
         AnimatedContent(
             targetState = tab,
             transitionSpec = {
@@ -263,7 +306,7 @@ private fun HomeNavBar(container: AppContainer, nav: NavHostController, haze: Ha
     val onHome = entry?.destination?.hasRoute<HomeRoute>() ?: true
     val tab by container.selection.tab.collectAsStateWithLifecycle()
     val sessions by container.fleet.sessions.collectAsStateWithLifecycle()
-    val pendingSomewhere = sessions.values.any { list -> list.sessions.any { it.state == SessionState.Pending } }
+    val pendingSomewhere = sessions.values.any { list -> list.sessions.any(::needsYou) }
     AnimatedVisibility(onHome, modifier, enter = Motion.navBarIn, exit = Motion.navBarOut) {
         GlassNavBar(
             tabs = listOf(
@@ -303,6 +346,8 @@ private fun SettingsTab(container: AppContainer) {
 
 @Composable
 private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHostController) {
+    // The home page's entry: a tap that opens a page counts only while home is resumed.
+    val home = LocalLifecycleOwner.current
     val vm = viewModel(key = "sessions:$machineId") { SessionsViewModel(machineId, container.fleet, container.connection, container.profileNames) }
     val state by vm.state.collectAsStateWithLifecycle()
     val snack = remember { SnackState() }
@@ -310,8 +355,8 @@ private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHost
     SessionsScreen(
         state = state,
         onRefresh = vm::refresh,
-        onOpenChat = { nav.navigate(ChatRoute(machineId, it.id)) },
-        onCreate = { nav.navigate(CreateRoute(machineId, it.profile.id)) },
+        onOpenChat = { nav.navigateFrom(home, ChatRoute(machineId, it.id)) },
+        onCreate = { nav.navigateFrom(home, CreateRoute(machineId, it.profile.id)) },
         onOpenGit = { container.selection.openGit(machineId, it.cwd) },
         onRename = vm::rename,
         onStop = vm::stop,
@@ -319,11 +364,35 @@ private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHost
         onToggle = vm::toggle,
         onToggleDir = vm::toggleDir,
         snack = snack,
+        onOpenAgent = { s, a -> nav.navigateFrom(home, agentRoute(machineId, s.id, a)) },
+    )
+}
+
+private fun agentRoute(machineId: String, sessionId: String, a: Subagent) =
+    AgentRoute(machineId, sessionId, a.id.orEmpty(), a.description, a.type, a.startedAt.toEpochMilli().coerceAtLeast(0))
+
+@Composable
+private fun AgentRouteContent(container: AppContainer, r: AgentRoute, nav: NavHostController, entry: NavBackStackEntry) {
+    val vm = viewModel { ChatViewModel(r.machineId, r.sessionId, container.connection, container.fleet, container.scope, cache = container.chatCache, agentId = r.agentId) }
+    val state by vm.state.collectAsStateWithLifecycle()
+    val snack = remember { SnackState() }
+    LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
+    AgentScreen(
+        state = state,
+        header = AgentHeader(r.description, r.type, r.startedAt.takeIf { it > 0 }),
+        snack = snack,
+        actions = ChatActions(
+            onBack = { nav.popFrom(entry) },
+            onLoadOlder = vm::loadOlder,
+            onToolOutput = vm::loadToolOutput,
+            onImage = vm::loadImage,
+        ),
     )
 }
 
 @Composable
 private fun GitTab(container: AppContainer, machineId: String, nav: NavHostController) {
+    val home = LocalLifecycleOwner.current
     val dirs by container.selection.gitDirs.collectAsStateWithLifecycle()
     val wanted = dirs[machineId]
     val vm = viewModel(key = "git:$machineId") {
@@ -342,8 +411,8 @@ private fun GitTab(container: AppContainer, machineId: String, nav: NavHostContr
             onPickDir = vm::setDir,
             onTab = vm::setTab,
             onLoadMore = vm::loadMore,
-            onOpenCommit = { hash -> state.dir?.let { nav.navigate(CommitRoute(machineId, it, hash)) } },
-            onOpenDiff = { path, staged -> state.dir?.let { nav.navigate(DiffRoute(machineId, it, path, staged = staged)) } },
+            onOpenCommit = { hash -> state.dir?.let { nav.navigateFrom(home, CommitRoute(machineId, it, hash)) } },
+            onOpenDiff = { path, staged -> state.dir?.let { nav.navigateFrom(home, DiffRoute(machineId, it, path, staged = staged)) } },
             onLoadBranches = vm::loadBranches,
             onRequest = vm::request,
             onConfirm = vm::confirm,
@@ -355,7 +424,7 @@ private fun GitTab(container: AppContainer, machineId: String, nav: NavHostContr
 }
 
 @Composable
-private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHostController) {
+private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHostController, entry: NavBackStackEntry) {
     val context = LocalContext.current
     val vm = viewModel { ChatViewModel(r.machineId, r.sessionId, container.connection, container.fleet, container.scope, cache = container.chatCache) }
     val state by vm.state.collectAsStateWithLifecycle()
@@ -382,7 +451,7 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
         state = state,
         snack = snack,
         actions = ChatActions(
-            onBack = nav::popBackStack,
+            onBack = { nav.popFrom(entry) },
             onOpenGit = { cwd ->
                 container.selection.openGit(r.machineId, cwd)
                 nav.popBackStack(HomeRoute, inclusive = false)
@@ -402,6 +471,10 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
                 else askCamera.launch(Manifest.permission.CAMERA)
             },
             onRemoveImage = vm::removeImage,
+            onToolOutput = vm::loadToolOutput,
+            onImage = vm::loadImage,
+            onOpenTerm = { nav.navigateFrom(entry, TermRoute(r.machineId, r.sessionId)) },
+            onOpenAgent = { a -> if (a.id != null) nav.navigateFrom(entry, agentRoute(r.machineId, r.sessionId, a)) },
         ),
     )
 }

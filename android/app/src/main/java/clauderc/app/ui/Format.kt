@@ -2,6 +2,7 @@ package clauderc.app.ui
 
 import clauderc.app.protocol.Profile
 import clauderc.app.protocol.ProfileKind
+import clauderc.app.protocol.Session
 import clauderc.app.protocol.SessionContext
 import clauderc.app.protocol.SessionState
 import java.time.Duration
@@ -74,6 +75,24 @@ fun stateText(state: SessionState): String = when (state) {
     SessionState.Idle -> "空闲"
     SessionState.Pending -> "待确认"
     SessionState.Stopped -> "已停止"
+}
+
+/**
+ * Whether the session asked the user for a reply: Claude Code reads its last message as blocked
+ * (a "needs input:" line, measured with 2.1.326), yet nothing waits for a decision.
+ */
+fun needsReply(s: Session): Boolean = s.state == SessionState.Idle && s.jobState == "blocked"
+
+/** Whether the session waits for the user, for a decision or for a reply; the 会话 tab shows a dot then. */
+fun needsYou(s: Session): Boolean = s.state == SessionState.Pending || needsReply(s)
+
+/** A session's state word: [stateText], with Claude Code's own reading of an idle session where it says more. */
+fun sessionStateText(s: Session): String = when {
+    s.state != SessionState.Idle -> stateText(s.state)
+    s.jobState == "blocked" -> "需要你回复"
+    s.jobState == "done" -> "已完成"
+    s.jobState == "failed" -> "失败"
+    else -> stateText(s.state)
 }
 
 /** The group title: the user's name, else 「默认」, 「其他」 or the API host. */

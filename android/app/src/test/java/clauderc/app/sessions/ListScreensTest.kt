@@ -7,6 +7,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -14,6 +15,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.machines.MachineRow
 import clauderc.app.machines.MachinesScreen
@@ -21,8 +24,14 @@ import clauderc.app.machines.MachinesUiState
 import clauderc.app.net.RelayLink
 import clauderc.app.net.ConnectionState
 import clauderc.app.protocol.Session
+import clauderc.app.protocol.SessionContext
+import clauderc.app.protocol.SessionList
+import clauderc.app.protocol.SessionState
 import clauderc.app.testing.machine
+import clauderc.app.testing.sampleProfiles
 import clauderc.app.testing.sampleSessions
+import clauderc.app.testing.session
+import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -122,6 +131,40 @@ class ListScreensTest {
         assertEquals(listOf("s-work"), stopped.map { it.id })
     }
 
+    /** The row's second line is the state and Claude Code's one-line progress; the context moved up beside the time. */
+    @Test fun rowsShowStateAndProgress() {
+        var accent = Color.Unspecified
+        val list = SessionList(
+            sessions = listOf(
+                session("s-ask", "collector 切换", SessionState.Idle, "default", minutesAgo = 3, context = SessionContext(370_000, 1_000_000))
+                    .copy(jobState = "blocked", detail = "是否现在开始 collector 和 feed 切换？"),
+                session("s-run", "诺连节点", SessionState.Working, "default", minutesAgo = 0).copy(jobState = "working", detail = "正在查 22:04 订阅更新改了什么"),
+                session("s-done", "实验报告", SessionState.Idle, "default", minutesAgo = 120).copy(jobState = "done"),
+            ),
+            profiles = sampleProfiles,
+        )
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                accent = Clauderc.colors.accent
+                SessionsScreen(
+                    state = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(list, emptyMap())),
+                    onRefresh = {}, onOpenChat = {}, onCreate = {}, onOpenGit = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
+                )
+            }
+        }
+        compose.onNodeWithText("上下文 37% · ", substring = true).assertIsDisplayed()
+        val ask = compose.onNodeWithText("需要你回复 · 是否现在开始 collector 和 feed 切换？").assertIsDisplayed()
+        // The clickable row merges its texts: the name, the time and this line.
+        val text = ask.fetchSemanticsNode().config[SemanticsProperties.Text].first { it.text.startsWith("需要你回复") }
+        val word = text.spanStyles.single { it.start == 0 }
+        assertEquals("需要你回复", text.text.substring(word.start, word.end))
+        assertEquals(accent, word.item.color)
+        compose.onNodeWithText("工作中 · 正在查 22:04 订阅更新改了什么").assertIsDisplayed()
+        // Without progress the line is the state alone.
+        compose.onNodeWithTag("sessionList").performScrollToNode(hasText("已完成"))
+        compose.onNodeWithText("已完成").assertIsDisplayed()
+    }
+
     @Test fun stoppedSessionMenuOffersRemoveInsteadOfStop() {
         sessions()
         compose.onNodeWithTag("sessionList").performScrollToNode(hasText("landing 页"))
@@ -165,5 +208,49 @@ class ListScreensTest {
             }
         }
         compose.onNode(hasText("启动") and !hasContentDescription("x")).assertIsNotEnabled()
+    }
+
+    @Test fun runningSubagentsAreIndentedUnderTheirSessionAndOpenTheirPage() {
+        val agents = listOf(
+            clauderc.app.protocol.Subagent("a1", "Explore", "读一遍 relay 的连接管理", running = true, startedAt = clauderc.app.testing.T0),
+            clauderc.app.protocol.Subagent("a2", "general-purpose", "已经跑完的", running = false, startedAt = clauderc.app.testing.T0),
+        )
+        val list = sampleSessions.copy(
+            sessions = sampleSessions.sessions.map {
+                when (it.id) {
+                    "s-work" -> it.copy(agents = agents)
+                    "s-stop" -> it.copy(agents = agents)
+                    else -> it
+                }
+            },
+        )
+        val opened = mutableListOf<Pair<String, String?>>()
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                SessionsScreen(
+                    state = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(list, emptyMap())),
+                    onRefresh = {}, onOpenChat = {}, onCreate = {}, onOpenGit = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
+                    onOpenAgent = { s, a -> opened += s.id to a.id },
+                )
+            }
+        }
+        compose.onNodeWithTag("sessionList").performScrollToNode(hasText("读一遍 relay 的连接管理"))
+        val title = compose.onNodeWithText("修复重连", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val row = compose.onNodeWithText("读一遍 relay 的连接管理")
+        row.assertIsDisplayed()
+        compose.onNodeWithText("Explore").assertIsDisplayed()
+        compose.onNodeWithText("已经跑完的").assertDoesNotExist()
+        val desc = compose.onNodeWithText("读一遍 relay 的连接管理", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("under its session", desc.top >= title.bottom)
+        assertTrue("indented past the session's title (${desc.left} > ${title.left})", desc.left > title.left)
+        val spin = compose.onNode(
+            hasContentDescription("加载中") and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.hasTestTag("agentRows")),
+            useUnmergedTree = true,
+        ).fetchSemanticsNode().boundsInRoot
+        assertEquals("the spinner lines up with the session's title", title.left, spin.left, 0.5f)
+        row.performClick()
+        assertEquals(listOf("s-work" to "a1"), opened)
+        // The stopped session lists none, though its data still names one.
+        assertEquals(1, compose.onAllNodesWithText("读一遍 relay 的连接管理").fetchSemanticsNodes().size)
     }
 }
