@@ -110,6 +110,13 @@ func statusEvent(t *testing.T, p *wsClient) protocol.Machine {
 	return m
 }
 
+// machineEvent is the machine a machine.status event carries.
+func machineEvent(env protocol.Envelope) protocol.Machine {
+	var m protocol.Machine
+	json.Unmarshal(env.Body, &m)
+	return m
+}
+
 func assertJSON(t *testing.T, got []byte, want string) {
 	t.Helper()
 	var g, w any
@@ -144,15 +151,26 @@ func TestQuickReconnectEndsOnline(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		cur.CloseNow()
 		cur = dial()
+		// The new connection's online event may come well after the old
+		// one's offline event, so wait for it rather than for a quiet
+		// moment; then anything that still follows must not be an offline.
 		var last protocol.Machine
-		for {
+		deadline := time.After(5 * time.Second)
+		for !last.Online {
 			select {
 			case env := <-p.msgs:
-				json.Unmarshal(env.Body, &last)
-				continue
-			case <-time.After(50 * time.Millisecond):
+				last = machineEvent(env)
+			case <-deadline:
+				t.Fatalf("round %d: no online event, last %+v", i, last)
 			}
-			break
+		}
+		for drained := false; !drained; {
+			select {
+			case env := <-p.msgs:
+				last = machineEvent(env)
+			case <-time.After(50 * time.Millisecond):
+				drained = true
+			}
 		}
 		if !last.Online {
 			t.Fatalf("round %d: last event %+v, want online", i, last)
