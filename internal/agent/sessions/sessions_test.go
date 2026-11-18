@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -344,6 +346,58 @@ func TestBlockedWithoutToolCallIsIdle(t *testing.T) {
 	}
 }
 
+// A blocked session with nothing pending in its transcript is pending when
+// its screen shows a dialog, and only then; the screen is only checked for
+// such sessions.
+func TestBlockedWithDialogIsPending(t *testing.T) {
+	sample := t.TempDir()
+	fakeclaude.Setup(t, sample)
+	agents := `[
+  {"pid": 7, "id": "dlg00001", "cwd": "/w/a", "kind": "background", "startedAt": 1794529871000, "sessionId": "8f0c2a5e-0000-4000-8000-0000000000b1", "name": "mcp", "status": "waiting", "state": "blocked"},
+  {"pid": 8, "id": "blk00002", "cwd": "/w/b", "kind": "background", "startedAt": 1794529871000, "sessionId": "8f0c2a5e-0000-4000-8000-0000000000b2", "name": "plain", "status": "idle", "state": "blocked"},
+  {"pid": 9, "id": "wrk00003", "cwd": "/w/c", "kind": "background", "startedAt": 1794529871000, "sessionId": "8f0c2a5e-0000-4000-8000-0000000000b3", "name": "busy", "status": "busy", "state": "working"}
+]`
+	if err := os.WriteFile(filepath.Join(sample, "agents.json"), []byte(agents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var asked []string
+	h := sessions.New(sessions.Options{
+		Source: discovery.Source{ClaudePath: fakeclaude.Path(), ClaudeDir: sample},
+		Push:   agent.PusherFunc(func(protocol.Envelope) {}),
+		Dialog: func(_ context.Context, id string) bool {
+			mu.Lock()
+			defer mu.Unlock()
+			asked = append(asked, id)
+			return id == "dlg00001"
+		},
+	})
+	t.Cleanup(h.Close)
+	res := h.Handle(context.Background(), request("r1", "c1", protocol.MethodSessionsSubscribe))
+	if res.Error != nil {
+		t.Fatalf("subscribe: %+v", res.Error)
+	}
+	var list protocol.SessionList
+	if err := json.Unmarshal(res.Body, &list); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]protocol.SessionState{
+		"dlg00001": protocol.StatePending,
+		"blk00002": protocol.StateIdle,
+		"wrk00003": protocol.StateWorking,
+	}
+	for _, s := range list.Sessions {
+		if s.State != want[s.ID] {
+			t.Errorf("%s state %q, want %q", s.ID, s.State, want[s.ID])
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(asked, ",") != "dlg00001,blk00002" {
+		t.Errorf("screens checked for %v, want the two blocked sessions", asked)
+	}
+}
+
 // Design D5 in the list: blocked without an unanswered tool call falls
 // through to the status, so a busy one is working.
 func TestStateFollowsDesignD5(t *testing.T) {
@@ -396,6 +450,77 @@ func TestStateFollowsDesignD5(t *testing.T) {
 	for _, s := range list.Sessions {
 		if s.State != want[s.ID] {
 			t.Errorf("%s state %q, want %q", s.ID, s.State, want[s.ID])
+		}
+	}
+}
+
+// A running session lists its subagents that still run; a stopped one none,
+// though the sample's meta files never say finished. The sample is the
+// sanitized real transcript of transcript/testdata/agents.jsonl.
+func TestRunningSubagents(t *testing.T) {
+	f := newFixture(t)
+	agents := `[
+  {"pid": 7, "id": "run00001", "cwd": "/w/a", "kind": "background", "startedAt": 1794529871000, "sessionId": "8f0c2a5e-0000-4000-8000-0000000000c1", "name": "run", "status": "busy", "state": "working"},
+  {"pid": null, "id": "stp00001", "cwd": "/w/a", "kind": "background", "startedAt": 1794529871000, "sessionId": "8f0c2a5e-0000-4000-8000-0000000000c2", "name": "stopped", "status": "idle", "state": "done"},
+  {"pid": 8, "id": "run00002", "cwd": "/w/a", "kind": "background", "startedAt": 1794529871000, "sessionId": "8f0c2a5e-0000-4000-8000-0000000000c3", "name": "plain", "status": "idle", "state": "idle"}
+]`
+	if err := os.WriteFile(filepath.Join(f.sample, "agents.json"), []byte(agents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	proj := filepath.Join(f.sample, "projects", "-w-a")
+	src := filepath.Join("..", "transcript", "testdata")
+	copyTo := func(from, to string) {
+		t.Helper()
+		raw, err := os.ReadFile(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(to), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(to, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"8f0c2a5e-0000-4000-8000-0000000000c1", "8f0c2a5e-0000-4000-8000-0000000000c2"} {
+		copyTo(filepath.Join(src, "agents.jsonl"), filepath.Join(proj, id+".jsonl"))
+		for _, a := range []string{"ab360a15e1da6a482", "abf8fcd189003562d"} {
+			name := "agent-" + a + ".meta.json"
+			copyTo(filepath.Join(src, "agents", "subagents", name), filepath.Join(proj, id, "subagents", name))
+		}
+	}
+	copyTo(filepath.Join(src, "answered-bash.jsonl"), filepath.Join(proj, "8f0c2a5e-0000-4000-8000-0000000000c3.jsonl"))
+
+	res := f.h.Handle(context.Background(), request("r1", "c1", protocol.MethodSessionsSubscribe))
+	if res.Error != nil {
+		t.Fatalf("subscribe: %+v", res.Error)
+	}
+	var list protocol.SessionList
+	if err := json.Unmarshal(res.Body, &list); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][]protocol.Subagent{}
+	for _, s := range list.Sessions {
+		got[s.ID] = s.Agents
+	}
+	if a := got["run00001"]; len(a) != 1 || a[0].ID != "ab360a15e1da6a482" || a[0].Description != "梳理 Go 端未提交改动" || a[0].Type != "general-purpose" || !a[0].Running {
+		t.Errorf("running session agents = %+v, want the Go agent only", a)
+	}
+	if a := got["stp00001"]; len(a) != 0 {
+		t.Errorf("stopped session agents = %+v, want none", a)
+	}
+	if a := got["run00002"]; len(a) != 0 {
+		t.Errorf("session without Agent calls has agents %+v", a)
+	}
+
+	// Once its meta says finished, the next poll drops it.
+	meta := filepath.Join(proj, "8f0c2a5e-0000-4000-8000-0000000000c1", "subagents", "agent-ab360a15e1da6a482.meta.json")
+	if err := os.WriteFile(meta, []byte(`{"agentType":"general-purpose","toolUseId":"chatcmpl-tool-8a7bea8a8b0bea75","finished":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range f.nextEvents(t, "c1")["c1"].Sessions {
+		if len(s.Agents) != 0 {
+			t.Errorf("%s still lists %+v after it finished", s.ID, s.Agents)
 		}
 	}
 }

@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-040",
+  "method": "chat.toolOutput",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"content": "1\t# proj\n2\thello\n3\tworld", "isError": false, "lines": 3}
+}

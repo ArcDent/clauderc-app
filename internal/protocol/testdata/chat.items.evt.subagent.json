@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.items",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "agentId": "ab360a15e1da6a482",
+    "items": [
+      {"seq": 1, "kind": "notice", "title": "任务", "text": "读一遍 internal/relay 里连接的建立、心跳和断开，说明重连在哪里触发。只读，不要改代码。"},
+      {"seq": 2, "kind": "tool", "tool": {"toolUseId": "toolu_01Grep", "toolName": "Grep", "summary": "搜索 reconnect", "input": {"pattern": "reconnect"}}}
+    ]
+  }
+}

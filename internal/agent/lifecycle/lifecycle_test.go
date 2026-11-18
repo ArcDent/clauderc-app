@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -72,6 +73,10 @@ type session struct {
 
 func (f *fixture) setAgents(t *testing.T, sessions ...session) {
 	t.Helper()
+	writeJSON(t, filepath.Join(f.claudeDir, "agents.json"), agentEntries(sessions...))
+}
+
+func agentEntries(sessions ...session) []map[string]any {
 	entries := []map[string]any{}
 	for _, s := range sessions {
 		e := map[string]any{"id": s.id, "sessionId": s.sessionID, "cwd": s.cwd, "kind": "background",
@@ -81,7 +86,7 @@ func (f *fixture) setAgents(t *testing.T, sessions ...session) {
 		}
 		entries = append(entries, e)
 	}
-	writeJSON(t, filepath.Join(f.claudeDir, "agents.json"), entries)
+	return entries
 }
 
 // job writes jobs/<id>/state.json.
@@ -299,6 +304,22 @@ func TestCreateClaudeFailures(t *testing.T) {
 	}
 }
 
+// A directory Claude Code has not been trusted in is named with what to do,
+// instead of the fixed message.
+func TestCreateUntrustedDir(t *testing.T) {
+	f := newFixture(t)
+	f.job(t, "dflt0001", []string{"--model", "haiku"}, nil, "2026-11-13T09:00:00.000Z")
+	src := f.src
+	src.ClaudePath = writeScript(t, "echo 'Workspace not trusted.' >&2; exit 1\n")
+	work := t.TempDir()
+	_, err := lifecycle.New(lifecycle.Options{Source: src}).Create(context.Background(), protocol.SessionCreateRequest{ProfileID: "default", Cwd: work})
+	want := "这个目录还没被信任：" + work + "。请先在目标机上进入这个目录运行一次 claude，接受信任提示后再试"
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || pe.Message != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+}
+
 // The enroll key never reaches claude, nor what a session runs.
 func TestClaudeGetsNoEnrollKey(t *testing.T) {
 	t.Setenv("CLAUDERC_ENROLL_KEY", "enroll-secret")
@@ -381,25 +402,57 @@ func TestRemove(t *testing.T) {
 
 const wakeUUID = "8f0c2a5e-0000-4000-8000-000000000042"
 
+// holder stands in for the chat package's hold: it records the short ids
+// it attached to and how many holds were released, and runs attached on
+// each hold, as the attach runs the stopped session.
+type holder struct {
+	mu       sync.Mutex
+	held     []string
+	released int
+	attached func()
+	err      error
+}
+
+func (h *holder) hold(ctx context.Context, id string) (func(), error) {
+	h.mu.Lock()
+	h.held = append(h.held, id)
+	h.mu.Unlock()
+	if h.err != nil {
+		return nil, h.err
+	}
+	if h.attached != nil {
+		h.attached()
+	}
+	return func() {
+		h.mu.Lock()
+		h.released++
+		h.mu.Unlock()
+	}, nil
+}
+
+func (h *holder) state() ([]string, int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.held), h.released
+}
+
 func TestWake(t *testing.T) {
 	f := newFixture(t)
 	work := t.TempDir()
 	f.setAgents(t, session{"stp00001", wakeUUID, work, false})
-	f.job(t, "stp00001", []string{"--settings", anySettings, "--model", "opus"},
-		map[string]string{"ANTHROPIC_MODEL": "claude-opus-test"}, "2026-11-13T08:00:00.000Z")
-
+	hd := &holder{}
 	done := make(chan error, 1)
-	go func() { done <- f.h.Wake(context.Background(), wakeUUID) }()
+	go func() { done <- f.h.Wake(context.Background(), wakeUUID, hd.hold) }()
 
-	// Once the resume call is recorded, the CLI lists the session as running.
+	// Once attached, the CLI lists the session as running.
 	deadline := time.Now().Add(5 * time.Second)
-	for len(f.launches(t)) == 0 {
+	for held, _ := hd.state(); len(held) == 0; held, _ = hd.state() {
 		if time.Now().After(deadline) {
-			t.Fatal("no resume call within 5 seconds")
+			t.Fatal("no attach within 5 seconds")
 		}
 		select {
 		case err := <-done:
-			t.Fatalf("Wake returned %v before resuming", err)
+			t.Fatalf("Wake returned %v before attaching", err)
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -418,28 +471,60 @@ func TestWake(t *testing.T) {
 		t.Fatal("Wake did not return after the session came back")
 	}
 
+	held, released := hd.state()
+	wantEqual(t, "attached", held, []string{"stp00001"})
+	if released != 1 {
+		t.Errorf("released %d holds, want 1", released)
+	}
+	// No --bg --resume, and nothing to stop or remove.
+	if launches := f.launches(t); len(launches) != 0 {
+		t.Errorf("calls besides agents = %+v, want none", launches)
+	}
+}
+
+// A session that shows up in the working directory while waking is a copy
+// started instead: it is stopped and removed, and Wake says so.
+func TestWakeRemovesCopy(t *testing.T) {
+	f := newFixture(t)
+	work := t.TempDir()
+	orig := session{"stp00001", wakeUUID, work, false}
+	before := session{"old00001", "uuid-old", work, true} // there before waking
+	f.setAgents(t, orig, before)
+	copyOf := func(running bool) session { return session{"cpy00001", "uuid-copy", work, running} }
+	hd := &holder{attached: func() { f.setAgents(t, orig, before, copyOf(true)) }}
+	// claude stop takes effect at once.
+	writeJSON(t, filepath.Join(f.claudeDir, "agents.stopped.json"), agentEntries(orig, before, copyOf(false)))
+	src := f.src
+	src.ClaudePath = writeScript(t, `if [ "$1" = stop ]; then cp "$FAKE_CLAUDE_DIR/agents.stopped.json" "$FAKE_CLAUDE_DIR/agents.json"; fi
+exec "`+fakeclaude.Path()+`" "$@"
+`)
+	h := lifecycle.New(lifecycle.Options{Source: src, WakeTimeout: 5 * time.Second, PollInterval: 20 * time.Millisecond})
+
+	err := h.Wake(context.Background(), wakeUUID, hd.hold)
+	var pe *protocol.Error
+	if !errors.As(err, &pe) || !strings.Contains(pe.Message, "另起了会话") {
+		t.Fatalf("error = %v, want one saying a copy was started", err)
+	}
 	launches := f.launches(t)
-	if len(launches) != 1 {
-		t.Fatalf("calls besides agents = %+v, want one resume", launches)
+	if len(launches) != 2 {
+		t.Fatalf("calls besides agents = %+v, want stop and rm of the copy", launches)
 	}
-	c := launches[0]
-	wantEqual(t, "args", c.Args, []string{"--bg", "--resume", wakeUUID})
-	if c.Cwd != realDir(t, work) {
-		t.Errorf("cwd = %q, want %q", c.Cwd, work)
-	}
-	if !slices.Contains(c.Env, "ANTHROPIC_MODEL=claude-opus-test") {
-		t.Errorf("env %q lacks the session's providerEnv", c.Env)
+	wantEqual(t, "first call", launches[0].Args, []string{"stop", "cpy00001"})
+	wantEqual(t, "second call", launches[1].Args, []string{"rm", "cpy00001"})
+	if _, released := hd.state(); released != 1 {
+		t.Errorf("released %d holds, want 1", released)
 	}
 }
 
 func TestWakeRunningSession(t *testing.T) {
 	f := newFixture(t)
 	f.setAgents(t, session{"run00001", wakeUUID, t.TempDir(), true})
-	if err := f.h.Wake(context.Background(), wakeUUID); err != nil {
+	hd := &holder{}
+	if err := f.h.Wake(context.Background(), wakeUUID, hd.hold); err != nil {
 		t.Fatal(err)
 	}
-	if launches := f.launches(t); len(launches) != 0 {
-		t.Errorf("a running session was resumed: %+v", launches)
+	if held, _ := hd.state(); len(held) != 0 {
+		t.Errorf("a running session was attached to: %q", held)
 	}
 }
 
@@ -447,26 +532,38 @@ func TestWakeFailures(t *testing.T) {
 	t.Run("unknown session", func(t *testing.T) {
 		f := newFixture(t)
 		f.setAgents(t)
-		if err := f.h.Wake(context.Background(), wakeUUID); codeOf(err) != protocol.CodeSessionNotFound {
+		if err := f.h.Wake(context.Background(), wakeUUID, (&holder{}).hold); codeOf(err) != protocol.CodeSessionNotFound {
 			t.Errorf("error = %v, want %s", err, protocol.CodeSessionNotFound)
 		}
 	})
 	t.Run("working directory gone", func(t *testing.T) {
 		f := newFixture(t)
 		f.setAgents(t, session{"stp00001", wakeUUID, filepath.Join(t.TempDir(), "gone"), false})
-		if err := f.h.Wake(context.Background(), wakeUUID); codeOf(err) != protocol.CodeDirNotFound {
+		hd := &holder{}
+		if err := f.h.Wake(context.Background(), wakeUUID, hd.hold); codeOf(err) != protocol.CodeDirNotFound {
 			t.Errorf("error = %v, want %s", err, protocol.CodeDirNotFound)
 		}
-		if launches := f.launches(t); len(launches) != 0 {
-			t.Errorf("claude was called: %+v", launches)
+		if held, _ := hd.state(); len(held) != 0 {
+			t.Errorf("attached although the directory is gone: %q", held)
+		}
+	})
+	t.Run("attach fails", func(t *testing.T) {
+		f := newFixture(t)
+		f.setAgents(t, session{"stp00001", wakeUUID, t.TempDir(), false})
+		if err := f.h.Wake(context.Background(), wakeUUID, (&holder{err: errors.New("pty")}).hold); codeOf(err) != protocol.CodeInternal {
+			t.Errorf("error = %v, want %s", err, protocol.CodeInternal)
 		}
 	})
 	t.Run("never comes back", func(t *testing.T) {
 		f := newFixture(t)
 		f.setAgents(t, session{"stp00001", wakeUUID, t.TempDir(), false})
 		h := lifecycle.New(lifecycle.Options{Source: f.src, WakeTimeout: 200 * time.Millisecond, PollInterval: 20 * time.Millisecond})
-		if err := h.Wake(context.Background(), wakeUUID); codeOf(err) != protocol.CodeTimeout {
+		hd := &holder{}
+		if err := h.Wake(context.Background(), wakeUUID, hd.hold); codeOf(err) != protocol.CodeTimeout {
 			t.Errorf("error = %v, want %s", err, protocol.CodeTimeout)
+		}
+		if _, released := hd.state(); released != 1 {
+			t.Errorf("released %d holds, want 1", released)
 		}
 	})
 }

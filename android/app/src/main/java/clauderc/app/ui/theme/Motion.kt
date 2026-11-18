@@ -11,6 +11,7 @@ import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.InfiniteRepeatableSpec
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.animation.expandVertically
@@ -31,7 +32,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -55,11 +59,15 @@ object Motion {
     fun <T> exit(): FiniteAnimationSpec<T> = tween(t.durS, easing = t.easeEmphIn)
     fun <T> fade(): FiniteAnimationSpec<T> = tween(t.durS)
 
-    /** Small parts over the composer and the snackbar: fade, move [px] into place and take their room. */
+    /**
+     * Small parts over the composer and the snackbar: fade, move [px] into place and take their room. One
+     * coming up from the bottom is drawn whole from the first frame, over what is above it, while its room
+     * opens under it; one coming down from the top unrolls inside its room.
+     */
     fun liftIn(px: Int, edge: Alignment.Vertical = Alignment.Bottom): EnterTransition =
-        fadeIn(enter()) + slideInVertically(enter()) { px } + expandVertically(enter(), expandFrom = edge)
+        fadeIn(enter()) + slideInVertically(enter()) { px } + expandVertically(enter(), expandFrom = edge, clip = edge != Alignment.Bottom)
     fun liftOut(px: Int, edge: Alignment.Vertical = Alignment.Bottom): ExitTransition =
-        fadeOut(exit()) + slideOutVertically(exit()) { px } + shrinkVertically(exit(), shrinkTowards = edge)
+        fadeOut(exit()) + slideOutVertically(exit()) { px } + shrinkVertically(exit(), shrinkTowards = edge, clip = edge != Alignment.Bottom)
 
     /** Panels and sheets come up from the bottom edge. */
     val panelIn: EnterTransition = slideInVertically(enter()) { it }
@@ -83,6 +91,20 @@ object Motion {
     /** The tool row chevron and the group fold arrow turn like the mockup's transform transition. */
     fun <T> turn(): FiniteAnimationSpec<T> = tween(t.durS, easing = t.easeEmph)
 
+    /** A long tool detail folding back after 「收起」 moves on screen as a whole, so it starts and ends slow (durL). */
+    fun <T> settle(): FiniteAnimationSpec<T> = tween(t.durL, easing = t.easeReveal)
+
+    /**
+     * Rows newly shown in a tool detail fade in from the top down, each 16ms after the one above and at
+     * most 12 apart; this is row [i]'s progress [millis] after they started (demo.html fadeRows).
+     */
+    fun rowIn(i: Int, millis: Float): Float = t.easeEmph.transform(((millis - minOf(i, 12) * 16) / t.durM).coerceIn(0f, 1f))
+    val rowsInMillis: Int get() = t.durM + 12 * 16
+
+    /** On 「收起」 the extra rows fade out from the bottom up, each 8ms after the one below and at most 6 apart. */
+    fun rowOut(j: Int, millis: Float): Float = t.easeEmphIn.transform(((millis - minOf(j, 6) * 8) / t.durS).coerceIn(0f, 1f))
+    val rowsOutMillis: Int get() = t.durS + 6 * 8
+
     /**
      * The nav bar's indicator keeps pace with the tab swap: the edge on the side of travel leads,
      * the other follows 70ms later, so it stretches a little and settles without bouncing.
@@ -97,6 +119,29 @@ object Motion {
     /** Pressed small controls shrink in 90ms and spring back on release with the nav bar's curve. */
     fun <T> pressIn(): FiniteAnimationSpec<T> = tween(90, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f))
     fun <T> pressOut(): FiniteAnimationSpec<T> = tween(t.durS, easing = t.easeSpring)
+
+    /** 清玻 presses like a drop of liquid: it spreads to [LensWide] x [LensFlat] in 120ms. */
+    fun <T> lensIn(): FiniteAnimationSpec<T> = tween(120, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f))
+
+    /** On release the drop overshoots once the other way, to [over], and settles, in 320ms all told. */
+    fun lensOut(over: Float): FiniteAnimationSpec<Float> = keyframes {
+        durationMillis = 320
+        over at 160 using LensEasing
+        1f at 320 using LensEasing
+    }
+
+    /** 贴纸 pops the picked nav icon in 460ms on the spring curve (ci-pop). */
+    fun <T> iconPop(): FiniteAnimationSpec<T> = tween(460, easing = t.easeSpring)
+
+    /** 贴纸 sinks onto its hard shadow and pops back up on the spring curve, both in durS. */
+    fun <T> push(): FiniteAnimationSpec<T> = tween(t.durS, easing = t.easeSpring)
+
+    const val LensWide = 1.04f
+    const val LensFlat = 0.93f
+    /** 清玻's overshoot on release: a little narrow and tall. */
+    const val LensBackWide = 0.985f
+    const val LensBackFlat = 1.03f
+    private val LensEasing = CubicBezierEasing(0.25f, 0.8f, 0.4f, 1f)
 
     // Loops: one turn of the spinner and one pulse of the pending beacon, both read off [LoopClock].
     const val SPIN_MILLIS = 900
@@ -139,6 +184,16 @@ class LoopClock {
 
 /** Provided by [ClaudercTheme]; the default never moves, so a loop outside the theme stands still. */
 val LocalLoopClock = staticCompositionLocalOf { LoopClock() }
+
+/**
+ * Draws a list into a layer of its own while it stands still. The phone sends the whole screen to the GPU
+ * again for every frame, so a loop elsewhere, the status line, a spinner or a text cursor, used to redraw
+ * every message with it; now it redraws only itself, a change inside the list only its own part, and a
+ * page sliding in or out moves the layer as a picture. A scrolling list changes every frame anyway, so it
+ * draws straight while it scrolls.
+ */
+fun Modifier.stillLayer(list: LazyListState): Modifier =
+    graphicsLayer { compositingStrategy = if (list.isScrollInProgress) CompositingStrategy.Auto else CompositingStrategy.Offscreen }
 
 /**
  * The back gesture scrubs the pop by finger progress, so while [dragging] the curve is a straight

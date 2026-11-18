@@ -34,7 +34,7 @@ class ProtocolSamplesTest {
         "sessions.changed.evt" to SessionList.serializer(),
         "chat.open.req" to ChatOpenRequest.serializer(),
         "chat.open.res" to ChatOpenResponse.serializer(),
-        "chat.close.req" to SessionIdRequest.serializer(),
+        "chat.close.req" to ChatCloseRequest.serializer(),
         "chat.close.res" to Empty.serializer(),
         "chat.send.req" to ChatSendRequest.serializer(),
         "chat.send.res" to ChatSendResponse.serializer(),
@@ -50,6 +50,10 @@ class ProtocolSamplesTest {
         "chat.setPermissionMode.res" to Empty.serializer(),
         "chat.commands.req" to SessionIdRequest.serializer(),
         "chat.commands.res" to ChatCommandsResponse.serializer(),
+        "chat.toolOutput.req" to ChatToolOutputRequest.serializer(),
+        "chat.toolOutput.res" to ToolResult.serializer(),
+        "chat.image.req" to ChatImageRequest.serializer(),
+        "chat.image.res" to ChatImageResponse.serializer(),
         "chat.items.evt" to ChatItemsEvent.serializer(),
         "chat.pending.evt" to ChatPendingEvent.serializer(),
         "chat.state.evt" to ChatStateEvent.serializer(),
@@ -87,6 +91,13 @@ class ProtocolSamplesTest {
         "git.switch.res" to Empty.serializer(),
         "dir.busy.req" to DirRequest.serializer(),
         "dir.busy.res" to DirBusyResponse.serializer(),
+        "term.open.req" to SessionIdRequest.serializer(),
+        "term.open.res" to TermScreen.serializer(),
+        "term.key.req" to TermKeyRequest.serializer(),
+        "term.key.res" to Empty.serializer(),
+        "term.close.req" to SessionIdRequest.serializer(),
+        "term.close.res" to Empty.serializer(),
+        "term.screen.evt" to TermScreen.serializer(),
     )
 
     private val testdata: File by lazy {

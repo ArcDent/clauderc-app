@@ -25,6 +25,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -32,10 +36,13 @@ import androidx.compose.ui.text.style.TextAlign
 import clauderc.app.protocol.UsageResponse
 import clauderc.app.protocol.UsageStale
 import clauderc.app.ui.contextPercent
+import clauderc.app.ui.needsReply
+import clauderc.app.ui.sessionStateText
 import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -62,12 +69,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import clauderc.app.machines.NavClearance
+import androidx.compose.animation.animateContentSize
+import androidx.compose.ui.unit.sp
+import clauderc.app.protocol.Subagent
+import clauderc.app.ui.components.Spinner
 import clauderc.app.protocol.Session
 import clauderc.app.protocol.SessionState
 import clauderc.app.ui.TimeText
 import clauderc.app.ui.baseName
 import clauderc.app.ui.components.AppBar
-import clauderc.app.ui.components.CardBlock
+import clauderc.app.ui.components.GroupBlock
 import clauderc.app.ui.components.ClaudercDialog
 import clauderc.app.ui.components.ClaudercSheet
 import clauderc.app.ui.components.FieldLabel
@@ -76,21 +87,23 @@ import clauderc.app.ui.components.Hero
 import clauderc.app.ui.components.MenuItem
 import clauderc.app.ui.components.SheetHead
 import clauderc.app.ui.components.SnackHost
+import clauderc.app.ui.components.LoadingCover
+import clauderc.app.ui.components.LoadingArt
 import clauderc.app.ui.components.SnackState
 import clauderc.app.ui.components.StatusGlyph
 import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.TextTone
 import clauderc.app.ui.components.UnderlineField
-import clauderc.app.ui.components.cardDivider
-import clauderc.app.ui.components.isCardStyle
-import clauderc.app.ui.components.rowStart
-import clauderc.app.ui.stateText
+import clauderc.app.ui.components.groupDivider
+import clauderc.app.data.UiStyle
+import clauderc.app.ui.components.sticker
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
+import clauderc.app.ui.theme.stillLayer
 
 /** Sessions sit 32dp in under their directory's folder icon. */
 private val DirIndent = 32.dp
@@ -123,6 +136,8 @@ fun SessionsScreen(
     onToggle: (SessionGroup) -> Unit = {},
     onToggleDir: (SessionGroup, DirGroup) -> Unit = { _, _ -> },
     snack: SnackState = remember { SnackState() },
+    /** Opens a running subagent's page from its row under its session. */
+    onOpenAgent: (Session, Subagent) -> Unit = { _, _ -> },
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
@@ -144,6 +159,8 @@ fun SessionsScreen(
                     Text("已离线 · 最后在线 ${TimeText.clock(machine.lastSeenAt)}", fontSize = Clauderc.fontSizes.label, color = c.fg2)
                 }
             }
+            // The machine's first session list deals cards over the page until it arrives.
+            LoadingCover(machine != null && state.groups == null, LoadingArt.Deal, Modifier.fillMaxSize(), label = "正在读取会话") {
             PullToRefreshBox(
                 isRefreshing = state.refreshing,
                 onRefresh = onRefresh,
@@ -159,7 +176,8 @@ fun SessionsScreen(
                     )
                 },
             ) {
-                LazyColumn(Modifier.fillMaxSize().testTag("sessionList"), contentPadding = PaddingValues(bottom = NavClearance)) {
+                val list = rememberLazyListState()
+                LazyColumn(Modifier.fillMaxSize().stillLayer(list).testTag("sessionList"), state = list, contentPadding = PaddingValues(bottom = NavClearance)) {
                     item {
                         Hero(machine?.name ?: "会话", bottom = sp.sp2) {
                             if (machine?.claudeVersion?.isNotEmpty() == true) Text("claude ${machine.claudeVersion}")
@@ -185,8 +203,8 @@ fun SessionsScreen(
                             }
                             if (group.sessions.isEmpty()) {
                                 item(key = "e:" + group.profile.id) {
-                                    if (isCardStyle) {
-                                        CardBlock(padding = sp.sp4) { Text("没有会话", fontSize = Clauderc.fontSizes.label, color = c.fg3) }
+                                    if (Clauderc.look.cards) {
+                                        GroupBlock(padding = sp.sp4) { Text("没有会话", fontSize = Clauderc.fontSizes.label, color = c.fg3) }
                                     } else {
                                         Text(
                                             "没有会话",
@@ -201,15 +219,17 @@ fun SessionsScreen(
                             if (group.sessions.isNotEmpty()) {
                                 item(key = "g:" + group.profile.id) {
                                     Fold(visible = !group.collapsed) {
-                                        CardBlock {
+                                        GroupBlock(ruled = true) {
                                             group.dirs.forEachIndexed { i, dir ->
                                                 key(dir.cwd) {
-                                                    DirRow(dir, onToggle = { onToggleDir(group, dir) }, modifier = Modifier.cardDivider(i > 0))
+                                                    DirRow(dir, onToggle = { onToggleDir(group, dir) }, modifier = Modifier.groupDivider(i > 0))
                                                     Fold(visible = !dir.collapsed) {
                                                         Column {
                                                             dir.sessions.forEach { s ->
                                                                 key(s.id) {
-                                                                    SessionRow(s, enabled = online, onOpen = { onOpenChat(s) }, onMenu = { overlay = Overlay.Menu(s) }, modifier = Modifier.cardDivider())
+                                                                    val agents = runningAgents(s)
+                                                                    SessionRow(s, enabled = online, onOpen = { onOpenChat(s) }, onMenu = { overlay = Overlay.Menu(s) }, modifier = Modifier.groupDivider(), tight = agents.isNotEmpty())
+                                                                    AgentRows(agents, enabled = online, onOpen = { onOpenAgent(s, it) })
                                                                 }
                                                             }
                                                         }
@@ -223,6 +243,7 @@ fun SessionsScreen(
                         }
                     }
                 }
+            }
             }
         }
         SnackHost(snack, Modifier.align(Alignment.BottomCenter), bottom = 88.dp)
@@ -285,7 +306,13 @@ private fun GroupHeader(group: SessionGroup, enabled: Boolean, onRename: () -> U
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     Row(
-        Modifier.fillMaxWidth().padding(start = sp.page, end = sp.sp2, top = if (isCardStyle) sp.sp5 else sp.sp6, bottom = if (isCardStyle) sp.sp2 else sp.sp1),
+        // .gh: 贴纸 sits it closer to its card, 格栅 lines it up with the rule 16dp in.
+        Modifier.fillMaxWidth().padding(
+            start = if (Clauderc.style == UiStyle.Grid) sp.sp4 else sp.page,
+            end = if (Clauderc.style == UiStyle.Grid) sp.sp1 else sp.sp2,
+            top = if (Clauderc.look.cards) sp.sp5 else sp.sp6,
+            bottom = if (Clauderc.look.cards) sp.sp2 else sp.sp1,
+        ),
         horizontalArrangement = Arrangement.spacedBy(sp.sp2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -301,11 +328,12 @@ private fun GroupHeader(group: SessionGroup, enabled: Boolean, onRename: () -> U
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val grid = Clauderc.style == UiStyle.Grid
             Text(
                 group.title,
-                fontSize = if (group.titleIsHost) Clauderc.fontSizes.mono else Clauderc.fontSizes.label,
-                fontFamily = if (group.titleIsHost) MonoFamily else null,
-                fontWeight = FontWeight.Medium,
+                fontSize = if (grid) 12.sp else if (group.titleIsHost) Clauderc.fontSizes.mono else Clauderc.fontSizes.label,
+                fontFamily = if (group.titleIsHost || grid) MonoFamily else null,
+                fontWeight = if (Clauderc.style == UiStyle.Sticker) FontWeight.Bold else FontWeight.Medium,
             )
             if (group.canRename) Icon(Symbols.Edit, contentDescription = null, tint = c.fg3, modifier = Modifier.size(16.dp))
         }
@@ -364,7 +392,7 @@ private fun DirRow(dir: DirGroup, onToggle: () -> Unit, modifier: Modifier = Mod
         modifier
             .fillMaxWidth()
             .clickable(role = Role.Button, onClickLabel = if (dir.collapsed) "展开目录" else "折叠目录", onClick = onToggle)
-            .padding(start = rowStart, end = sp.sp4, top = 10.dp, bottom = 10.dp),
+            .padding(start = Clauderc.look.rowStart, end = sp.sp4, top = 10.dp, bottom = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(sp.sp3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -408,42 +436,113 @@ private fun UsageBlock(usage: UsageResponse) {
     val measurer = rememberTextMeasurer()
     // Every row gives its reset time the room of the widest, so the bars line up.
     val resetWidth = with(LocalDensity.current) { (resets.maxOfOrNull { measurer.measure(it, caption).size.width } ?: 0).toDp() }
+    val ui = Clauderc.style
     val fill = when {
         stale -> c.fg3
-        isCardStyle -> c.accent
+        ui == UiStyle.Sticker -> c.accent
+        ui == UiStyle.Grid -> c.fg
         else -> c.fg2
     }
-    CardBlock(Modifier.padding(bottom = sp.sp2), padding = sp.sp4) {
+    // 格栅 sets the whole block in monospace.
+    val mono = if (ui == UiStyle.Grid) MonoFamily else null
+    val labelSize = if (ui == UiStyle.Grid) 12.sp else Clauderc.fontSizes.label
+    GroupBlock(Modifier.padding(bottom = sp.sp2), padding = sp.sp4) {
         Column(
-            Modifier.padding(horizontal = if (isCardStyle) 0.dp else sp.page),
+            Modifier.padding(horizontal = Clauderc.look.blockGutter),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             rows.forEachIndexed { i, (label, w) ->
                 val pct = w.utilization.roundToInt().coerceIn(0, 100)
                 Row(horizontalArrangement = Arrangement.spacedBy(sp.sp3), verticalAlignment = Alignment.CenterVertically) {
-                    Text(label, modifier = Modifier.width(44.dp), fontSize = Clauderc.fontSizes.label, color = if (stale) c.fg3 else c.fg2, maxLines = 1)
-                    Box(Modifier.weight(1f).height(3.dp).clip(RoundedCornerShape(2.dp)).background(c.line)) {
-                        Box(Modifier.fillMaxWidth(pct / 100f).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(fill))
-                    }
+                    Text(label, modifier = Modifier.width(44.dp), fontSize = labelSize, fontFamily = mono, color = if (stale) c.fg3 else c.fg2, maxLines = 1)
+                    UsageBar(pct / 100f, fill, Modifier.weight(1f))
                     Text(
                         "$pct%",
                         modifier = Modifier.width(40.dp),
-                        fontSize = Clauderc.fontSizes.label,
-                        fontWeight = FontWeight.Medium,
+                        fontSize = labelSize,
+                        fontFamily = mono,
+                        fontWeight = if (ui == UiStyle.Sticker) FontWeight.ExtraBold else FontWeight.Medium,
                         color = if (stale) c.fg3 else c.fg,
                         textAlign = TextAlign.End,
                         maxLines = 1,
                     )
-                    Text(resets[i], modifier = Modifier.width(resetWidth), style = caption, color = c.fg3, maxLines = 1)
+                    Text(resets[i], modifier = Modifier.width(resetWidth), style = caption, fontFamily = mono, color = c.fg3, maxLines = 1)
                 }
             }
-            if (note != null) Text(note, fontSize = Clauderc.fontSizes.caption, color = c.fg3)
+            if (note != null) Text(note, fontSize = Clauderc.fontSizes.caption, fontFamily = mono, color = c.fg3)
         }
     }
 }
 
+/**
+ * One limit's bar (.u-bar). 清玻: a 3dp hairline track. 格栅: a 6dp square bar filled solid. 贴纸: a
+ * 14dp ink-outlined capsule on a 2dp hard shadow, filled flat and closed off with an ink stroke.
+ */
 @Composable
-private fun SessionRow(s: Session, enabled: Boolean, onOpen: () -> Unit, onMenu: () -> Unit, modifier: Modifier = Modifier) {
+private fun UsageBar(share: Float, fill: Color, modifier: Modifier) {
+    val c = Clauderc.colors
+    when (Clauderc.style) {
+        UiStyle.Clear -> Box(modifier.height(3.dp).clip(RoundedCornerShape(2.dp)).background(c.line)) {
+            Box(Modifier.fillMaxWidth(share).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(fill))
+        }
+        UiStyle.Grid -> Box(modifier.height(6.dp).background(c.surface)) {
+            Box(Modifier.fillMaxWidth(share).fillMaxHeight().background(fill))
+        }
+        UiStyle.Sticker -> Box(modifier.height(14.dp).sticker(c.bg, c.ink, 7.dp, drop = 2.dp).padding(2.dp)) {
+            val ink = c.ink
+            Box(
+                Modifier.fillMaxWidth(share).fillMaxHeight().background(fill).drawWithContent {
+                    drawContent()
+                    if (share in 0.001f..0.999f) drawRect(ink, Offset(size.width, 0f), Size(2.dp.toPx(), size.height))
+                },
+            )
+        }
+    }
+}
+
+/** The subagents of [s] that run and can be opened; a stopped session has none. */
+fun runningAgents(s: Session): List<Subagent> =
+    if (s.state == SessionState.Stopped) emptyList() else s.agents.orEmpty().filter { it.running && it.id != null }
+
+/**
+ * A session's running subagents, indented under it: the spinner lines up with the session's title, then
+ * the description and the type. The block grows in and shrinks out as subagents start and end.
+ */
+@Composable
+private fun AgentRows(agents: List<Subagent>, enabled: Boolean, onOpen: (Subagent) -> Unit) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    // Kept while the block shrinks away, so the last rows leave with it.
+    var shown by remember { mutableStateOf(agents) }
+    if (agents.isNotEmpty()) shown = agents
+    Fold(visible = agents.isNotEmpty()) {
+        Column(Modifier.fillMaxWidth().animateContentSize(Motion.enter()).padding(bottom = 6.dp).testTag("agentRows")) {
+            shown.forEach { a ->
+                key(a.id) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = enabled, role = Role.Button, onClickLabel = "打开子代理") { onOpen(a) }
+                            .padding(start = Clauderc.look.rowStart + DirIndent + GlyphWidth + sp.sp4, end = sp.sp4, top = 7.dp, bottom = 7.dp),
+                        horizontalArrangement = Arrangement.spacedBy(sp.sp3),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Spinner(size = 12.dp, color = c.fg3)
+                        Text(a.description.ifEmpty { a.type }, Modifier.weight(1f), fontSize = Clauderc.fontSizes.label, color = c.fg2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(a.type, fontFamily = MonoFamily, fontSize = 11.sp, color = c.fg3, maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The width of a session row's status symbol. */
+private val GlyphWidth = 10.dp
+
+/** [tight] leaves out most of the bottom gap, for the subagent rows that follow. */
+@Composable
+private fun SessionRow(s: Session, enabled: Boolean, onOpen: () -> Unit, onMenu: () -> Unit, modifier: Modifier = Modifier, tight: Boolean = false) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     Row(modifier.fillMaxWidth().padding(end = sp.sp2).semantics { isTraversalGroup = true }, verticalAlignment = Alignment.CenterVertically) {
@@ -451,12 +550,12 @@ private fun SessionRow(s: Session, enabled: Boolean, onOpen: () -> Unit, onMenu:
             Modifier
                 .weight(1f)
                 .clickable(enabled = enabled, role = Role.Button, onClick = onOpen)
-                .padding(start = rowStart + DirIndent, top = 14.dp, bottom = 14.dp),
+                .padding(start = Clauderc.look.rowStart + DirIndent, top = 14.dp, bottom = if (tight) 4.dp else 14.dp),
             horizontalArrangement = Arrangement.spacedBy(sp.sp4),
         ) {
             // A change of state crossfades: the old symbol leaves in durS while the new one comes in over durM.
             AnimatedContent(
-                glyphOf(s.state),
+                if (needsReply(s)) Glyph.Need else glyphOf(s.state),
                 Modifier.padding(top = 6.dp),
                 transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit()) using null },
                 label = "glyph",
@@ -471,15 +570,20 @@ private fun SessionRow(s: Session, enabled: Boolean, onOpen: () -> Unit, onMenu:
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(TimeText.relative(s.lastActiveAt), fontSize = Clauderc.fontSizes.caption, color = c.fg3, maxLines = 1)
+                    val since = TimeText.relative(s.lastActiveAt)
+                    // 格栅 sets the time and the second line in small monospace.
+                    val grid = Clauderc.style == UiStyle.Grid
+                    Text(contextPercent(s.context)?.let { "上下文 $it% · $since" } ?: since, fontSize = if (grid) 11.5.sp else Clauderc.fontSizes.caption, fontFamily = if (grid) MonoFamily else null, color = c.fg3, maxLines = 1)
                 }
-                // The directory is the row above, so the second line is the state and the context.
+                // The directory is the row above, so the second line is the state and Claude Code's one-line progress, as in its agent view.
                 Text(
                     buildAnnotatedString {
-                        if (s.state == SessionState.Pending) withStyle(SpanStyle(color = c.accent)) { append(stateText(s.state)) } else append(stateText(s.state))
-                        contextPercent(s.context)?.let { append(" · 上下文 $it%") }
+                        val word = sessionStateText(s)
+                        if (s.state == SessionState.Pending || needsReply(s)) withStyle(SpanStyle(color = c.accent)) { append(word) } else append(word)
+                        s.detail?.takeIf { it.isNotBlank() }?.let { append(" · ${it.trim()}") }
                     },
-                    fontSize = Clauderc.fontSizes.label,
+                    fontSize = if (Clauderc.style == UiStyle.Grid) 11.5.sp else Clauderc.fontSizes.label,
+                    fontFamily = if (Clauderc.style == UiStyle.Grid) MonoFamily else null,
                     color = c.fg2,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -505,7 +609,7 @@ private fun SessionMenu(
             Text(
                 buildAnnotatedString {
                     withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm)) { append(baseName(session.cwd)) }
-                    append(" · ${stateText(session.state)}")
+                    append(" · ${sessionStateText(session)}")
                 },
                 fontSize = Clauderc.fontSizes.label,
                 color = Clauderc.colors.fg2,

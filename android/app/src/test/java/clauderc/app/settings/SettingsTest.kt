@@ -23,9 +23,10 @@ import clauderc.app.ClaudercApp
 import clauderc.app.MainActivity
 import clauderc.app.data.AccentChoice
 import clauderc.app.data.ThemeMode
+import androidx.compose.ui.unit.dp
 import clauderc.app.data.UiStyle
-import clauderc.app.ui.theme.CardDarkColors
-import clauderc.app.ui.theme.CardLightColors
+import clauderc.app.ui.theme.StickerDarkColors
+import clauderc.app.ui.theme.StickerLightColors
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -49,7 +50,7 @@ class SettingsTest {
     // The settings data store lives as long as the test process, so every test starts and ends at the defaults.
     private fun resetLook() {
         runBlocking {
-            theme.setStyle(UiStyle.Minimal)
+            theme.setStyle(UiStyle.Clear)
             theme.setMode(ThemeMode.System)
             theme.setAccent(AccentChoice.Blue)
         }
@@ -89,35 +90,37 @@ class SettingsTest {
     private fun backgroundPixel(): Int {
         val image = compose.onRoot().captureToImage()
         val px = IntArray(1)
-        image.readPixels(px, startX = image.width - 2, startY = 2, width = 1, height = 1)
+        // 9dp in from the top left: between 贴纸's paper dots, and away from its accent wash at the top right.
+        val at = with(compose.density) { 9.dp.toPx() }.toInt()
+        image.readPixels(px, startX = at, startY = at, width = 1, height = 1)
         return px[0]
     }
 
     @Test fun bothStylesHaveFourTabs() {
         compose.onAllNodes(tabs).assertCountEquals(4)
         openSettings()
-        pick("卡片")
+        pick("贴纸")
         compose.onAllNodes(tabs).assertCountEquals(4)
     }
 
-    @Test fun cardAndDarkRetintTheApp() {
+    @Test fun stickerAndDarkRetintTheApp() {
         openSettings()
         compose.onNodeWithText("样式").assertIsDisplayed()
         compose.onAllNodesWithText("主题色").assertCountEquals(0)
 
-        pick("卡片")
+        pick("贴纸")
         waitFor("主题色")
-        assertEquals("card light background", CardLightColors.bg.toArgb(), backgroundPixel())
+        assertEquals("贴纸 light background", StickerLightColors.bg.toArgb(), backgroundPixel())
 
         pick("深色")
         // The pick is written to DataStore on a background thread, which waitForIdle does not wait for.
-        compose.waitUntil("card dark background", 5_000) { backgroundPixel() == CardDarkColors.bg.toArgb() }
+        compose.waitUntil("贴纸 dark background", 5_000) { backgroundPixel() == StickerDarkColors.bg.toArgb() }
     }
 
     @Config(sdk = [30])
     @Test fun noWallpaperAccentBeforeAndroid12() {
         openSettings()
-        pick("卡片")
+        pick("贴纸")
         waitFor("主题色")
         compose.onAllNodes(swatches).assertCountEquals(8)
         compose.onAllNodes(hasContentDescription("跟随壁纸")).assertCountEquals(0)
@@ -125,24 +128,26 @@ class SettingsTest {
 
     @Test fun wallpaperAccentFollowsTheSystemColours() {
         openSettings()
-        pick("卡片")
+        pick("贴纸")
         waitFor("主题色")
         compose.onAllNodes(swatches).assertCountEquals(9)
         compose.onNodeWithContentDescription("跟随壁纸").performClick()
         compose.waitForIdle()
 
-        // The empty machine page's 「添加」 is a solid accent button in the card style.
+        // The empty machine page's 「添加」 is a solid accent button in 贴纸.
         compose.onNodeWithText("目标机").performClick()
         waitFor("还没有目标机")
         val button = compose.onNodeWithText("添加").captureToImage()
         val px = IntArray(1)
-        button.readPixels(px, startX = 2, startY = button.height / 2, width = 1, height = 1)
+        // 6dp in: inside 贴纸's 2dp ink outline and clear of the label.
+        val x = with(compose.density) { 6.dp.toPx() }.toInt()
+        button.readPixels(px, startX = x, startY = button.height / 2, width = 1, height = 1)
         assertEquals(dynamicLightColorScheme(compose.activity).primary.toArgb(), px[0])
     }
 
     @Test fun picksSurviveRecreatingTheActivity() {
         openSettings()
-        pick("卡片")
+        pick("贴纸")
         waitFor("主题色")
         pick("深色")
         compose.onNodeWithContentDescription("绿色").performClick()
@@ -151,7 +156,7 @@ class SettingsTest {
         compose.activityRule.scenario.recreate()
         // The open tab lives in the app container, so the new activity comes back on 设置.
         waitFor("深浅色")
-        compose.onNodeWithText("卡片").assertIsSelected()
+        compose.onNodeWithText("贴纸").assertIsSelected()
         compose.onNodeWithText("深色").assertIsSelected()
         compose.onNodeWithContentDescription("绿色").assertIsSelected()
     }

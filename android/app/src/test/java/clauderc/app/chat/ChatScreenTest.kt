@@ -1,13 +1,24 @@
 package clauderc.app.chat
 
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onChildAt
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -21,10 +32,12 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.protocol.Answer
 import clauderc.app.protocol.ChatItem
 import clauderc.app.protocol.Command
+import clauderc.app.protocol.Hunk
 import clauderc.app.protocol.ItemKind
 import clauderc.app.protocol.Option
 import clauderc.app.protocol.Pending
@@ -32,8 +45,11 @@ import clauderc.app.protocol.PendingKind
 import clauderc.app.protocol.Question
 import clauderc.app.protocol.SessionState
 import clauderc.app.protocol.ToolCall
+import clauderc.app.protocol.ToolImage
 import clauderc.app.protocol.ToolResult
 import clauderc.app.testing.session
+import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.ClaudercColors
 import clauderc.app.ui.theme.ClaudercTheme
 import java.io.ByteArrayOutputStream
 import kotlinx.serialization.json.buildJsonObject
@@ -131,6 +147,29 @@ class ChatScreenTest {
         compose.onNodeWithText("envelope.go 先别提交\n等我对完一遍。").assertIsDisplayed()
     }
 
+    /** The job-list line leaves the bubble and shows as written in grey; grey lines start where a reply's text starts. */
+    @Test fun markerLineIsGreyTextAlignedWithTheReply() {
+        val reply = "删除前我会单独复述范围，等你第二次确认。\n\nneeds input: 是否现在开始 collector 和 feed 切换？\n\n喵呜~"
+        val items = mergeItems(
+            emptyList(),
+            listOf(
+                ChatItem(1, ItemKind.NOTICE, title = "协议文档 发来", text = "envelope.go 先别提交"),
+                ChatItem(2, ItemKind.INTERRUPTED),
+                ChatItem(3, ItemKind.ASSISTANT, text = reply),
+            ),
+        )
+        show(baseState().copy(items = items, hasMore = false))
+        val bubble = compose.onNodeWithText("删除前我会单独复述范围，等你第二次确认。\n\n喵呜~").assertIsDisplayed()
+        compose.onNode(hasText("needs input:", substring = true) and hasText("确认。", substring = true)).assertDoesNotExist()
+        val mark = compose.onNodeWithText("needs input: 是否现在开始 collector 和 feed 切换？").assertIsDisplayed()
+        // A Text's semantics bounds sit inside its padding, so the bubble's left is where its text starts.
+        val textStart = bubble.fetchSemanticsNode().boundsInRoot.left
+        assertEquals(with(compose.density) { 32.dp.toPx() }, textStart, 1f)
+        for (grey in listOf(mark, compose.onNodeWithText("已中断"), compose.onNodeWithText("协议文档 发来"))) {
+            assertEquals(textStart, grey.fetchSemanticsNode().boundsInRoot.left, 1f)
+        }
+    }
+
     @Test fun sendMessageIsAGreyBlockNotAToolRow() {
         val tool = ToolCall(
             "toolu_01S", "SendMessage", "SendMessage",
@@ -191,14 +230,72 @@ class ChatScreenTest {
         assertEquals(1, allowed)
     }
 
-    @Test fun singleChoiceSubmitsOnTapAndCustomAnswerWorks() {
+    @Test fun singleChoiceSubmitsOnTapAndOtherSubmitsWithTheArrow() {
         val answers = mutableListOf<List<Answer>>()
         val q = Pending("toolu_01C", PendingKind.QUESTION, questions = listOf(Question("你喜欢哪种颜色", options = listOf(Option("红"), Option("绿"), Option("蓝")))))
         show(baseState().copy(pending = q), ChatActions(onAnswer = { answers += it }))
         compose.onNodeWithText("绿").performClick()
-        compose.onNodeWithText("其他回答").performTextInput("都不喜欢")
+        assertEquals(listOf(listOf(Answer(selected = listOf(1)))), answers)
+        // 「其他」 is a choice like the rest: picked, it opens a field, and only the arrow sends.
+        compose.onNodeWithText("写下你的回答").assertDoesNotExist()
+        compose.onNodeWithText("其他").performClick()
+        assertEquals(1, answers.size)
+        compose.onNodeWithText("写下你的回答").performTextInput("都不喜欢")
         compose.onNodeWithContentDescription("发送回答").performClick()
-        assertEquals(listOf(listOf(Answer(selected = listOf(1))), listOf(Answer(custom = "都不喜欢"))), answers)
+        assertEquals(listOf(Answer(custom = "都不喜欢")), answers.last())
+    }
+
+    @Test fun inASingleChoiceQuestionOtherAndTheOptionsExcludeEachOther() {
+        val answers = mutableListOf<List<Answer>>()
+        val q = Pending(
+            "toolu_01E", PendingKind.QUESTION,
+            questions = listOf(
+                Question("你喜欢哪种颜色？", options = listOf(Option("红"), Option("绿"))),
+                Question("你喜欢哪种动物？", options = listOf(Option("猫"), Option("狗"))),
+            ),
+        )
+        show(baseState().copy(pending = q), ChatActions(onAnswer = { answers += it }))
+        val red = compose.onNodeWithText("红")
+        val other = compose.onAllNodesWithText("其他")[0]
+        red.performClick()
+        red.assertIsSelected()
+        other.performScrollTo().performClick()
+        other.assertIsSelected()
+        red.assertIsNotSelected()
+        compose.onAllNodesWithText("写下你的回答")[0].performTextInput("都不喜欢")
+        red.performScrollTo().performClick()
+        other.assertIsNotSelected()
+        compose.onNodeWithText("狗").performScrollTo().performClick()
+        compose.onNodeWithText("提交").performScrollTo().performClick()
+        // What was typed while 「其他」 was picked does not go out.
+        assertEquals(listOf(listOf(Answer(selected = listOf(0)), Answer(selected = listOf(1)))), answers)
+    }
+
+    @Test fun inAMultiSelectQuestionOtherIsTickedAlongWithTheOptions() {
+        val answers = mutableListOf<List<Answer>>()
+        val q = Pending("toolu_01F", PendingKind.QUESTION, questions = listOf(Question("为哪些消息补样例？", multiSelect = true, options = listOf(Option("请求"), Option("响应"), Option("事件")))))
+        show(baseState().copy(pending = q), ChatActions(onAnswer = { answers += it }))
+        compose.onNodeWithText("请求").performClick()
+        compose.onNodeWithText("事件").performClick()
+        compose.onNodeWithText("其他").performScrollTo().performClick()
+        compose.onNodeWithText("请求").assertIsOn()
+        compose.onNodeWithText("其他").assertIsOn()
+        compose.onNodeWithText("写下你的回答").performTextInput("还有错误码")
+        compose.onNodeWithText("提交").performScrollTo().performClick()
+        assertEquals(listOf(listOf(Answer(selected = listOf(0, 2), custom = "还有错误码"))), answers)
+    }
+
+    @Test fun dialogShowsItsOptionsAndSendsThePick() {
+        val answers = mutableListOf<List<Answer>>()
+        val options = listOf("Use this MCP server", "Use this and all future MCP servers in this project", "Continue without using this MCP server")
+        val d = Pending("dialog-3f9a1c0b7e21", PendingKind.DIALOG, questions = listOf(Question("New MCP server found in this project: remote-ssh", options = options.map { Option(it) })))
+        show(baseState().copy(state = SessionState.Pending, pending = d), ChatActions(onAnswer = { answers += it }))
+        compose.onNodeWithText("等你选择").assertIsDisplayed()
+        compose.onNodeWithText("New MCP server found in this project: remote-ssh").assertIsDisplayed()
+        options.forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+        compose.onAllNodesWithText("其他").assertCountEquals(0)
+        compose.onNodeWithText(options[1]).performClick()
+        assertEquals(listOf(listOf(Answer(selected = listOf(1)))), answers)
     }
 
     @Test fun multiSelectAndSeveralQuestionsSubmitTogether() {
@@ -367,5 +464,195 @@ class ChatScreenTest {
         compose.onNodeWithContentDescription("打开 git").assertIsNotEnabled()
         compose.onNodeWithTag("chatList").performScrollToIndex(20)
         compose.onNodeWithText("第 80 条").assertIsDisplayed()
+    }
+
+    // plans.md 3: the diff views of Edit, Write and Read.
+
+    private fun tool(id: String, name: String, summary: String, result: ToolResult) =
+        ToolCall(id, name, summary, buildJsonObject { put("file_path", summary.substringAfter(' ')) }, result)
+
+    private fun showTools(vararg tools: ToolCall, actions: ChatActions = ChatActions()): ClaudercColors {
+        var colors: ClaudercColors? = null
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                colors = Clauderc.colors
+                ChatScreen(baseState().copy(items = tools.mapIndexed { i, t -> ChatItem(i + 1L, ItemKind.TOOL, tool = t) }, hasMore = false), actions)
+            }
+        }
+        compose.waitForIdle()
+        return colors!!
+    }
+
+    /** The color at the left edge of the [i]th diff row, under its line number. */
+    private fun rowColor(i: Int): Color {
+        val px = compose.onAllNodesWithTag("patchRow")[i].captureToImage().toPixelMap()
+        return px[2, px.height / 2]
+    }
+
+    private fun assertColor(want: Color, got: Color, what: String) =
+        assertTrue("$what: want $want, got $got", listOf(want.red - got.red, want.green - got.green, want.blue - got.blue).all { kotlin.math.abs(it) < 0.02f })
+
+    private val edit = tool(
+        "toolu_E", "Edit", "编辑 envelope.go",
+        ToolResult(
+            "The file envelope.go has been updated successfully.",
+            patch = listOf(Hunk(8, 3, 8, 3, listOf(" // ErrVersion is returned when an envelope is not version 1.", "-var ErrVersion = errors.New(\"unsupported\")", "+var ErrVersion = errors.New(\"version must be 1\")", " "))),
+        ),
+    )
+
+    @Test fun anEditShowsItsDiffOpenInTheDiffColorsNumberedFromTheHunk() {
+        val c = showTools(edit)
+        // Open from the start, with the counts at the end of the row.
+        compose.onNodeWithText("+1").assertIsDisplayed()
+        compose.onNodeWithText("−1").assertIsDisplayed()
+        assertEquals(4, compose.onAllNodesWithTag("patchRow").fetchSemanticsNodes().size)
+        // Line numbers: the context line and the deleted one from the old start, the added one from the new start.
+        assertEquals(listOf("8", "9", "9", "10"), (0..3).map { i -> compose.onAllNodesWithTag("patchRow", useUnmergedTree = true)[i].onChildAt(0).fetchSemanticsNode().config[SemanticsProperties.Text].first().text })
+        assertColor(c.delBg, rowColor(1), "deleted row")
+        assertColor(c.addBg, rowColor(2), "added row")
+        compose.onNodeWithText("var ErrVersion = errors.New(\"unsupported\")", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test fun aWriteIsAllGreenAddedLines() {
+        val write = tool("toolu_W", "Write", "写入 errors.go", ToolResult("File created successfully at: errors.go", patch = listOf(Hunk(0, 0, 1, 3, listOf("+package protocol", "+", "+type Error struct{}")))))
+        val c = showTools(write)
+        compose.onNodeWithText("+3").assertIsDisplayed()
+        assertEquals(3, compose.onAllNodesWithText("+", useUnmergedTree = true).fetchSemanticsNodes().size)
+        (0..2).forEach { assertColor(c.addBg, rowColor(it), "row $it") }
+    }
+
+    @Test fun aReadSaysHowManyLinesItReadAndOpensOnTap() {
+        val read = tool("toolu_R", "Read", "读取 README.md", ToolResult("1\t# proj\n2\t\n3\thello", lines = 3))
+        showTools(read)
+        compose.onNodeWithText("3 行").assertIsDisplayed()
+        compose.onAllNodesWithTag("patchRow").assertCountEquals(0)
+        compose.onNodeWithText("README.md").performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithTag("patchRow").assertCountEquals(3)
+        compose.onNodeWithText("hello", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test fun pastSixRowsOnly6ShowUntilExpandAllAndCollapseTakesThemBack() {
+        val write = tool("toolu_W", "Write", "写入 envelope.go", ToolResult(patch = listOf(Hunk(0, 0, 1, 20, List(20) { "+line ${it + 1}" }))))
+        showTools(write)
+        compose.onAllNodesWithTag("patchRow").assertCountEquals(6)
+        compose.onNodeWithText("展开全部 · 共 20 行").performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithTag("patchRow").assertCountEquals(20)
+        compose.onNodeWithText("收起").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithTag("patchRow").assertCountEquals(6)
+        compose.onNodeWithText("展开全部 · 共 20 行").assertIsDisplayed()
+    }
+
+    @Test fun aCutResultFetchesTheWholeTextOnceAndShowsIt() {
+        val cut = ToolResult((1..10).joinToString("\n") { "$it\tline $it" }, lines = 30, truncated = true)
+        val whole = ToolResult((1..30).joinToString("\n") { "$it\tline $it" }, lines = 30)
+        val asked = mutableListOf<String>()
+        var state by mutableStateOf(baseState().copy(items = listOf(ChatItem(1, ItemKind.TOOL, tool = tool("toolu_big", "Read", "读取 design.md", cut))), hasMore = false))
+        val actions = ChatActions(onToolOutput = { asked += it; state = state.copy(fetchingResults = setOf(it)) })
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, actions) } }
+        compose.onNodeWithText("design.md").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("展开全部 · 共 30 行").performClick()
+        compose.onNodeWithText("正在取全文").assertIsDisplayed()
+        compose.onNodeWithTag("patchMore").performClick()
+        assertEquals(listOf("toolu_big"), asked)
+        state = state.copy(fetchingResults = emptySet(), fullResults = mapOf("toolu_big" to whole))
+        compose.waitForIdle()
+        compose.onAllNodesWithTag("patchRow").assertCountEquals(30)
+        compose.onNodeWithText("line 30", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("收起").assertExists()
+        assertEquals(1, asked.size)
+    }
+
+    @Test fun aRunOfCallsIsOneRowThatOpensIntoTheCallsOneByOne() {
+        fun call(id: String, name: String, summary: String, k: String, v: String) =
+            ChatItem(0, ItemKind.TOOL, tool = ToolCall(id, name, summary, buildJsonObject { put(k, v) }, ToolResult("")))
+        val run = listOf(
+            call("t1", "Grep", "搜索 Envelope", "pattern", "Envelope"),
+            call("t2", "Read", "读取 go.mod", "file_path", "/p/go.mod"),
+            call("t3", "Read", "读取 AGENTS.md", "file_path", "/p/AGENTS.md"),
+            call("t4", "Bash", "运行 ls src", "command", "ls src"),
+            call("t5", "Bash", "运行 go test", "command", "go test"),
+        ).mapIndexed { i, it -> it.copy(seq = i + 1L) }
+        show(baseState().copy(items = run, hasMore = false))
+        compose.onNodeWithText("搜索 1 个模式，读取 2 个文件，列出 1 个目录，运行 1 条命令").assertIsDisplayed()
+        compose.onNodeWithText("└ go test").assertIsDisplayed()
+        compose.onNodeWithText("AGENTS.md").assertDoesNotExist()
+        compose.onNodeWithTag("toolGroup").performClick()
+        compose.waitForIdle()
+        listOf("Envelope", "go.mod", "AGENTS.md", "ls src", "go test").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+        compose.onNodeWithTag("toolGroup").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("AGENTS.md").assertDoesNotExist()
+        compose.onNodeWithText("└ go test").assertIsDisplayed()
+    }
+
+    // plans.md 7: pictures in tool results and from clauderc show.
+
+    private fun pngThumb(w: Int, h: Int): String {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(46, 139, 122)) }
+        val out = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+        return java.util.Base64.getEncoder().encodeToString(out.toByteArray())
+    }
+
+    private val shot = ToolImage("toolu_I.0", "image/png", width = 720, height = 1560, size = 217_088, thumb = pngThumb(166, 360))
+
+    private fun readImage(img: ToolImage = shot) =
+        ChatItem(1, ItemKind.TOOL, tool = ToolCall("toolu_I", "Read", "读取 chat.png", buildJsonObject { put("file_path", "/p/chat.png") }, ToolResult(images = listOf(img))))
+
+    @Test fun aPictureOpensFullScreenFetchingItOnce() {
+        val asked = mutableListOf<String>()
+        var state by mutableStateOf(baseState().copy(items = listOf(readImage()), hasMore = false))
+        val actions = ChatActions(onImage = { asked += it; state = state.copy(fetchingImages = state.fetchingImages + it) })
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, actions) } }
+        compose.onNodeWithTag("toolThumb").assertIsDisplayed()
+        compose.onNodeWithTag("toolThumb").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("imageViewer").assertIsDisplayed()
+        compose.onNodeWithText("正在取原图").assertIsDisplayed()
+        compose.onNodeWithText("720 × 1560 · PNG · 212 KB").assertIsDisplayed()
+        compose.onNode(hasText("chat.png") and hasAnyAncestor(hasTestTag("imageViewer")), useUnmergedTree = true).assertIsDisplayed()
+        assertEquals(listOf("toolu_I.0"), asked)
+
+        val whole = java.util.Base64.getDecoder().decode(pngThumb(720, 1560))
+        state = state.copy(fetchingImages = emptySet(), wholeImages = mapOf("toolu_I.0" to whole))
+        // Decoded off the main thread, then the line fades out.
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("正在取原图").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithContentDescription("关闭").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("imageViewer").assertDoesNotExist()
+        compose.onNodeWithTag("toolThumb").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("imageViewer").assertIsDisplayed()
+        compose.onNodeWithText("正在取原图").assertDoesNotExist()
+        assertEquals("the same picture again sends nothing", 1, asked.size)
+    }
+
+    @Test fun aPictureThatCannotBeFetchedSaysSo() {
+        var state by mutableStateOf(baseState().copy(items = listOf(readImage()), hasMore = false))
+        val actions = ChatActions(onImage = { state = state.copy(failedImages = state.failedImages + it) })
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, actions) } }
+        compose.onNodeWithTag("toolThumb").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("图片取不到").assertIsDisplayed()
+    }
+
+    @Test fun aPictureWithoutThumbnailSaysOpenToSee() {
+        val webp = ToolImage("toolu_W.0", "image/webp", size = 1_258_291)
+        show(baseState().copy(items = listOf(readImage(webp)), hasMore = false))
+        compose.onNodeWithText("点开查看").assertIsDisplayed()
+        compose.onNodeWithText("WebP · 1.2 MB").assertIsDisplayed()
+    }
+
+    @Test fun clauderShowIsThePictureAndItsNameWithoutTheCommand() {
+        val hero = ToolImage("show-0123456789abcdef", "image/png", name = "readme-hero.png", width = 1440, height = 810, size = 497_664, thumb = pngThumb(360, 203))
+        val show = ToolCall("toolu_S", "Bash", "运行 clauderc show readme-hero.png", buildJsonObject { put("command", "clauderc show readme-hero.png") }, ToolResult("[clauderc show 0123456789abcdef] readme-hero.png", images = listOf(hero)))
+        show(baseState().copy(items = listOf(ChatItem(1, ItemKind.TOOL, tool = show)), hasMore = false))
+        compose.onNodeWithTag("toolThumb").assertIsDisplayed()
+        compose.onNodeWithText("readme-hero.png").assertIsDisplayed()
+        compose.onNodeWithText("clauderc show readme-hero.png").assertDoesNotExist()
     }
 }

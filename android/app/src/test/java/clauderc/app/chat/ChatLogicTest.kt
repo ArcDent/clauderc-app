@@ -3,6 +3,8 @@ package clauderc.app.chat
 import clauderc.app.data.Fleet
 import clauderc.app.protocol.Answer
 import clauderc.app.protocol.ChatAnswerRequest
+import clauderc.app.protocol.ChatImageRequest
+import clauderc.app.protocol.ChatImageResponse
 import clauderc.app.protocol.ChatItem
 import clauderc.app.protocol.ChatItemsEvent
 import clauderc.app.protocol.ChatModelsResponse
@@ -14,7 +16,9 @@ import clauderc.app.protocol.ChatSendResponse
 import clauderc.app.protocol.ChatSetModelRequest
 import clauderc.app.protocol.ChatSetPermissionModeRequest
 import clauderc.app.protocol.ChatStateEvent
+import clauderc.app.protocol.ChatToolOutputRequest
 import clauderc.app.protocol.ErrorCode
+import clauderc.app.protocol.Hunk
 import clauderc.app.protocol.ItemKind
 import clauderc.app.protocol.Machine
 import clauderc.app.protocol.MachinesListResponse
@@ -23,10 +27,13 @@ import clauderc.app.protocol.ModelOption
 import clauderc.app.protocol.Option
 import clauderc.app.protocol.Pending
 import clauderc.app.protocol.PendingKind
+import clauderc.app.protocol.ProtocolJson
 import clauderc.app.protocol.Question
 import clauderc.app.protocol.SessionList
 import clauderc.app.protocol.SessionState
 import clauderc.app.protocol.ToolCall
+import clauderc.app.protocol.ToolImage
+import clauderc.app.protocol.ToolResult
 import clauderc.app.testing.FakeRelay
 import clauderc.app.testing.decode
 import clauderc.app.testing.eventually
@@ -38,6 +45,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -152,6 +160,58 @@ class ChatLogicTest {
         assertTrue(vm.state.value.outgoing.isEmpty())
         assertEquals("先停一下", vm.state.value.restore?.text)
         assertEquals("消息没有送达，请重试", withTimeout(1_000) { vm.messages.first() })
+    }
+
+    /** A view model kept in [store], so clearing the store closes the page as navigation does. */
+    private fun pageIn(store: androidx.lifecycle.ViewModelStore, cache: ChatCache) =
+        androidx.lifecycle.ViewModelProvider(store, object : androidx.lifecycle.ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = viewModel(cache) as T
+        })[ChatViewModel::class.java]
+
+    @Test fun aMessageSentJustBeforeLeavingStillShowsOnReturn() = runTest(dispatcher) {
+        val cache = ChatCache()
+        val store = androidx.lifecycle.ViewModelStore()
+        val first = pageIn(store, cache)
+        val gate = hold(Method.CHAT_SEND)
+        assertTrue(first.send("跑一下测试"))
+        val sent = first.state.value.outgoing.single()
+        store.clear()
+
+        val again = viewModel(cache)
+        assertEquals(listOf(sent), again.state.value.outgoing)
+        assertEquals("still under the last item", again.state.value.items.last().seq, sent.afterSeq)
+        // Another session never shows it.
+        val other = ChatViewModel("m-1", "s-other", relay, Fleet(relay, scope), scope, compress = { it }, cache = cache, background = dispatcher)
+        assertTrue(other.state.value.outgoing.isEmpty())
+
+        relay.event(Method.CHAT_ITEMS, "m-1", ChatItemsEvent.serializer(), ChatItemsEvent("s-need", listOf(text(102, ItemKind.USER, "跑一下测试"))))
+        gate.complete(Unit)
+        val s = again.state.value
+        assertTrue(s.outgoing.isEmpty())
+        assertEquals(1, s.items.count { it.text == "跑一下测试" })
+        assertEquals("the item takes over the bubble's key", outgoingKey(sent), s.keys[102])
+    }
+
+    @Test fun aSendThatFailsAfterLeavingIsReportedByTheNextPage() = runTest(dispatcher) {
+        val cache = ChatCache()
+        val store = androidx.lifecycle.ViewModelStore()
+        val first = pageIn(store, cache)
+        first.addImage("shot.png", 100) { tinyPng() }
+        assertEquals(1, first.state.value.attachments.size)
+        val gate = hold(Method.CHAT_SEND) { throw clauderc.app.net.RemoteException(ErrorCode.NOT_DELIVERED, "没出现在会话里") }
+        assertTrue(first.send("看这张图"))
+        store.clear()
+        gate.complete(Unit)
+
+        val again = viewModel(cache)
+        val s = again.state.value
+        assertTrue(s.outgoing.isEmpty())
+        assertEquals("看这张图", s.restore?.text)
+        assertEquals(1, s.attachments.size)
+        assertEquals("消息没有送达，请重试", withTimeout(1_000) { again.messages.first() })
+        // Reported once: a later page has nothing to take back.
+        assertNull(viewModel(cache).state.value.restore)
     }
 
     @Test fun switchesAnswersAndInterruptShowBeforeTheAgentReplies() = runTest(dispatcher) {
@@ -291,6 +351,31 @@ class ChatLogicTest {
         assertEquals(ChatAnswerRequest("s-need", "toolu_01C", answers = listOf(Answer(custom = "都不喜欢"))), relay.sent(Method.CHAT_ANSWER).last().decode(ChatAnswerRequest.serializer()))
     }
 
+    @Test fun markerLinesAreSplitOffOnlyOnTheirOwnLineOutsideCode() {
+        // At the end.
+        assertEquals("测试通过。" to listOf("result: 颜色测试已完成"), splitMarkers("测试通过。\n\nresult: 颜色测试已完成"))
+        // With a sign-off after it, which stays in the reply.
+        assertEquals(
+            "等你第二次确认。\n\n喵呜~" to listOf("needs input: 是否现在开始 collector 和 feed 切换？"),
+            splitMarkers("等你第二次确认。\n\nneeds input: 是否现在开始 collector 和 feed 切换？\n\n喵呜~"),
+        )
+        // Inside a code block and in the middle of a line it is part of the text.
+        val code = "示例：\n```\nfailed: 这行在代码块里\n```"
+        assertEquals(code to emptyList<String>(), splitMarkers(code))
+        val inline = "我会在最后写一行 needs input: 这样的话"
+        assertEquals(inline to emptyList<String>(), splitMarkers(inline))
+        // A reply that is only the line leaves an empty bubble text.
+        assertEquals("" to listOf("failed: 仓库不存在"), splitMarkers("failed: 仓库不存在"))
+    }
+
+    @Test fun dialogPickGoesOutAsOneSelectedOption() = runTest(dispatcher) {
+        val vm = viewModel()
+        val d = Pending("dialog-3f9a1c0b7e21", PendingKind.DIALOG, questions = listOf(Question("New MCP server found in this project: remote-ssh", options = listOf(Option("Use this MCP server"), Option("Use this and all future MCP servers in this project"), Option("Continue without using this MCP server")))))
+        relay.event(Method.CHAT_PENDING, "m-1", ChatPendingEvent.serializer(), ChatPendingEvent("s-need", d))
+        vm.answerQuestions(listOf(Answer(selected = listOf(1))))
+        assertEquals(ChatAnswerRequest("s-need", "dialog-3f9a1c0b7e21", answers = listOf(Answer(selected = listOf(1)))), relay.sent(Method.CHAT_ANSWER).last().decode(ChatAnswerRequest.serializer()))
+    }
+
     @Test fun pendingClearedElsewhereClosesThePanelWithAHint() = runTest(dispatcher) {
         val vm = viewModel()
         relay.event(Method.CHAT_PENDING, "m-1", ChatPendingEvent.serializer(), ChatPendingEvent("s-need", null))
@@ -360,7 +445,174 @@ class ChatLogicTest {
         assertTrue(relay.sent(Method.CHAT_SEND).isEmpty())
     }
 
+    @Test fun editHunksBecomeNumberedRowsWithAGapBetween() {
+        val edit = ToolResult(
+            patch = listOf(
+                Hunk(8, 3, 8, 4, listOf(" // ErrVersion", "-var A = 1", "+var A = 2", "+var B = 3", " type Envelope struct {")),
+                Hunk(15, 1, 24, 2, listOf(" }", "+// end")),
+            ),
+        )
+        val rows = patchRows(edit)!!
+        assertEquals(
+            listOf(
+                PatchRow(RowKind.SAME, 8, "// ErrVersion"), PatchRow(RowKind.DEL, 9, "var A = 1"), PatchRow(RowKind.ADD, 9, "var A = 2"),
+                PatchRow(RowKind.ADD, 10, "var B = 3"), PatchRow(RowKind.SAME, 11, "type Envelope struct {"),
+                PatchRow(RowKind.GAP), PatchRow(RowKind.SAME, 24, "}"), PatchRow(RowKind.ADD, 25, "// end"),
+            ),
+            rows,
+        )
+        assertEquals(7, patchTotal(edit, rows))
+        assertEquals(PatchStat(added = 3, deleted = 1), patchStat(edit, rows))
+        assertTrue(opensByDefault(edit))
+    }
+
+    @Test fun aWriteIsAllAddedAndAReadIsItsNumberedLines() {
+        val write = ToolResult(patch = listOf(Hunk(0, 0, 1, 3, listOf("+package protocol", "+", "+type Error struct{}"))))
+        val wrows = patchRows(write)!!
+        assertEquals(listOf(1, 2, 3), wrows.map { it.line })
+        assertTrue(wrows.all { it.kind == RowKind.ADD })
+        assertEquals(PatchStat(added = 3), patchStat(write, wrows))
+
+        val read = ToolResult("1\t# proj\n2\t\n3\thello\n\n<system-reminder>\nnot part of the file\n</system-reminder>", lines = 3)
+        val rrows = patchRows(read)!!
+        assertEquals(listOf(PatchRow(RowKind.SAME, 1, "# proj"), PatchRow(RowKind.SAME, 2, ""), PatchRow(RowKind.SAME, 3, "hello")), rrows)
+        assertEquals(PatchStat(read = 3), patchStat(read, rrows))
+        assertFalse(opensByDefault(read))
+        // Older Claude Code numbered lines with an arrow.
+        assertEquals(PatchRow(RowKind.SAME, 12, "x := 1"), patchRows(ToolResult("    12→x := 1", lines = 1))!!.single())
+        // Anything else keeps its plain detail.
+        assertEquals(null, patchRows(ToolResult("Found 1 file\ninternal/protocol/envelope.go")))
+        assertEquals(null, patchRows(null))
+    }
+
+    @Test fun aCutDiffKnowsItsTotalOnlyWhenAllLinesAreAdded() {
+        val write = ToolResult(patch = listOf(Hunk(0, 0, 1, 900, List(80) { "+line $it" })), truncated = true)
+        assertEquals(900, patchTotal(write, patchRows(write)!!))
+        assertEquals(PatchStat(added = 900), patchStat(write, patchRows(write)!!))
+        val edit = ToolResult(patch = listOf(Hunk(1, 400, 1, 420, List(80) { " line $it" })), truncated = true)
+        assertEquals(null, patchTotal(edit, patchRows(edit)!!))
+        assertEquals(null, patchStat(edit, patchRows(edit)!!))
+        val read = ToolResult((1..80).joinToString("\n") { "$it\tline" }, lines = 2000, truncated = true)
+        assertEquals(2000, patchTotal(read, patchRows(read)!!))
+    }
+
+    @Test fun theWholeResultIsFetchedOnceAndKeptByToolUseId() = runTest(dispatcher) {
+        val whole = ToolResult((1..900).joinToString("\n") { "$it\tline" }, lines = 900)
+        val gate = hold(Method.CHAT_TOOL_OUTPUT) { ProtocolJson.encodeToJsonElement(ToolResult.serializer(), whole) }
+        val vm = viewModel()
+        vm.loadToolOutput("toolu_big")
+        vm.loadToolOutput("toolu_big")
+        assertEquals(setOf("toolu_big"), vm.state.value.fetchingResults)
+        gate.complete(Unit)
+        assertEquals(ChatToolOutputRequest("s-need", "toolu_big"), relay.sent(Method.CHAT_TOOL_OUTPUT).single().decode(ChatToolOutputRequest.serializer()))
+        assertEquals(whole, vm.state.value.fullResults["toolu_big"])
+        assertTrue(vm.state.value.fetchingResults.isEmpty())
+        vm.loadToolOutput("toolu_big")
+        assertEquals(1, relay.sent(Method.CHAT_TOOL_OUTPUT).size)
+    }
+
+    @Test fun aFailedFetchIsReportedAndCanBeTriedAgain() = runTest(dispatcher) {
+        relay.fail(Method.CHAT_TOOL_OUTPUT, ErrorCode.NOT_FOUND, "会话记录里找不到这次工具调用")
+        val vm = viewModel()
+        val messages = mutableListOf<String>()
+        backgroundScope.launch { vm.messages.collect { messages += it } }
+        vm.loadToolOutput("toolu_gone")
+        assertEquals(listOf("会话记录里找不到这次工具调用"), messages)
+        assertTrue(vm.state.value.fetchingResults.isEmpty())
+        assertTrue(vm.state.value.fullResults.isEmpty())
+        vm.loadToolOutput("toolu_gone")
+        assertEquals(2, relay.sent(Method.CHAT_TOOL_OUTPUT).size)
+    }
+
+    private fun call(id: String, name: String, input: Map<String, String>) =
+        ToolCall(id, name, "", buildJsonObject { input.forEach { (k, v) -> put(k, v) } }, ToolResult(""))
+
+    /** The acceptance run: Grep, Read, Read, `ls src`, `go test`. */
+    private val run = listOf(
+        call("t1", "Grep", mapOf("pattern" to "Envelope")),
+        call("t2", "Read", mapOf("file_path" to "/p/go.mod")),
+        call("t3", "Read", mapOf("file_path" to "/p/AGENTS.md")),
+        call("t4", "Bash", mapOf("command" to "ls src")),
+        call("t5", "Bash", mapOf("command" to "go test")),
+    )
+
+    private fun tools(seq: Long, calls: List<ToolCall>) = calls.mapIndexed { i, t -> ChatItem(seq + i, ItemKind.TOOL, tool = t) }
+
+    @Test fun searchesReadsListingsAndCommandsInARowMergeIntoOneEntry() {
+        val runs = chatRuns(tools(1, run))
+        assertEquals(1, runs.size)
+        assertEquals(5, runs.single().size)
+        assertEquals("搜索 1 个模式，读取 2 个文件，列出 1 个目录，运行 1 条命令", groupSummary(run))
+    }
+
+    @Test fun aReplyEditOrWriteEndsTheRunAndOneCallStaysAlone() {
+        val split = chatRuns(tools(1, run.take(2)) + ChatItem(3, ItemKind.ASSISTANT, text = "看一下") + tools(4, run.drop(2)))
+        assertEquals(listOf(2, 1, 3), split.map { it.size })
+        val edit = call("e1", "Edit", mapOf("file_path" to "/p/x.go"))
+        val write = call("w1", "Write", mapOf("file_path" to "/p/y.go"))
+        assertEquals(listOf(1, 1, 1, 1, 1), chatRuns(tools(1, listOf(run[0], edit, run[1], write, run[4]))).map { it.size })
+        assertEquals(listOf(1), chatRuns(tools(1, listOf(run[1]))).map { it.size })
+        // Slash commands and clauderc show are rows of their own.
+        val show = call("s1", "Bash", mapOf("command" to "clauderc show /tmp/a.png"))
+        val slash = ToolCall("command-9", "/compact", "/compact")
+        assertEquals(listOf(1, 1, 1), chatRuns(tools(1, listOf(run[1], show, run[2]))).map { it.size })
+        val byPath = call("s2", "Bash", mapOf("command" to "cd /p && /usr/local/bin/clauderc show a.png"))
+        assertEquals(listOf(1, 1, 1), chatRuns(tools(1, listOf(run[1], byPath, run[2]))).map { it.size })
+        assertEquals(listOf(1, 1), chatRuns(tools(1, listOf(slash, run[2]))).map { it.size })
+        // So is a read of a picture, shown under its row.
+        val shot = ToolCall("i1", "Read", "读取 chat.png", result = ToolResult(images = listOf(ToolImage("i1.0", "image/png", size = 10))))
+        assertEquals(listOf(1, 1, 1), chatRuns(tools(1, listOf(run[1], shot, run[2]))).map { it.size })
+    }
+
+    @Test fun summaryCountsOnlyWhatIsThere() {
+        assertEquals("读取 2 个文件", groupSummary(run.subList(1, 3)))
+        assertEquals("列出 1 个目录，运行 1 条命令", groupSummary(run.subList(3, 5)))
+        assertEquals("搜索 2 个模式", groupSummary(listOf(run[0], call("g", "Glob", mapOf("pattern" to "*.go")))))
+    }
+
+    @Test fun aPictureIsFetchedOnceAndAFailureIsMarked() = runTest(dispatcher) {
+        relay.respond(Method.CHAT_IMAGE, ChatImageResponse.serializer(), ChatImageResponse("image/png", "AQID"))
+        val vm = viewModel()
+        vm.loadImage("toolu_I.0")
+        vm.loadImage("toolu_I.0")
+        assertEquals(ChatImageRequest("s-need", "toolu_I.0"), relay.sent(Method.CHAT_IMAGE).single().decode(ChatImageRequest.serializer()))
+        assertTrue(vm.state.value.wholeImages["toolu_I.0"]!!.contentEquals(byteArrayOf(1, 2, 3)))
+
+        relay.fail(Method.CHAT_IMAGE, ErrorCode.NOT_FOUND)
+        vm.loadImage("toolu_X.0")
+        assertEquals(setOf("toolu_X.0"), vm.state.value.failedImages)
+        assertTrue(vm.state.value.fetchingImages.isEmpty())
+    }
+
     private fun tinyPng(): ByteArray = java.util.Base64.getDecoder().decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
     )
+
+    /** Round 3: the reply drawn on the screen types under the last item, and the written reply takes over its bubble. */
+    @Test fun theScreensReplyGivesItsBubbleToTheWrittenReply() = runTest(dispatcher) {
+        val vm = viewModel()
+        fun screen(partial: String?, activity: String? = "Whirring… (20s · ↓ 2.4k tokens)", state: SessionState = SessionState.Working) =
+            relay.event(Method.CHAT_STATE, "m-1", ChatStateEvent.serializer(), ChatStateEvent("s-need", state, activity = activity, partial = partial))
+        screen("这周主要做了")
+        val p = vm.state.value.partial!!
+        assertEquals("这周主要做了", p.text)
+        assertEquals(101L, p.afterSeq)
+        assertEquals("Whirring… (20s · ↓ 2.4k tokens)", vm.state.value.activity)
+        screen("这周主要做了三件事。\n\n第一")
+        assertEquals("the same bubble grows", p.key, vm.state.value.partial!!.key)
+        relay.event(Method.CHAT_ITEMS, "m-1", ChatItemsEvent.serializer(), ChatItemsEvent("s-need", listOf(text(102, body = "这周主要做了**三件事**。\n\n第一，聊天记录改成变了才读。"))))
+        assertNull(vm.state.value.partial)
+        assertEquals("the reply takes over its key", p.key, vm.state.value.keys[102])
+        // The agent may send the screen once more before it reads the transcript: that echo is dropped.
+        screen("这周主要做了三件事。 第一，聊天记录")
+        assertNull(vm.state.value.partial)
+        // After a tool call, the next reply is a bubble of its own.
+        relay.event(Method.CHAT_ITEMS, "m-1", ChatItemsEvent.serializer(), ChatItemsEvent("s-need", listOf(ChatItem(103, ItemKind.TOOL, tool = bash))))
+        screen("测试都过了")
+        assertTrue(vm.state.value.partial!!.key != p.key)
+        // When the turn ends, the status line and the preview go.
+        screen(null, null, SessionState.Idle)
+        assertNull(vm.state.value.partial)
+        assertNull(vm.state.value.activity)
+    }
 }

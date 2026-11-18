@@ -4,8 +4,10 @@
 #
 # Environment:
 #   FAKE_CLAUDE_DIR    sample directory; `agents ...` prints its agents.json
-#                      (or [] when the file is missing). If agents.delay
-#                      exists there, `agents` first sleeps that many seconds.
+#                      (or [] when the file is missing). Without --all it
+#                      prints agents-active.json instead when that exists.
+#                      If agents.delay exists there, `agents` first sleeps
+#                      that many seconds.
 #   FAKE_CLAUDE_LOG    if set, every call creates <LOG>/<6-digit seq>/ with
 #                      args  each argument followed by a NUL byte
 #                      env   NAME=value lines for PATH, HOME, PWD, USER,
@@ -60,7 +62,13 @@ agents)
 		# Detach sleep from stdout so killing this shell ends the output.
 		sleep "$(cat "$FAKE_CLAUDE_DIR/agents.delay")" </dev/null >/dev/null 2>&1
 	fi
-	if [ -f "$FAKE_CLAUDE_DIR/agents.json" ]; then
+	all=
+	for a in "$@"; do
+		[ "$a" = --all ] && all=1
+	done
+	if [ -z "$all" ] && [ -f "$FAKE_CLAUDE_DIR/agents-active.json" ]; then
+		cat "$FAKE_CLAUDE_DIR/agents-active.json"
+	elif [ -f "$FAKE_CLAUDE_DIR/agents.json" ]; then
 		cat "$FAKE_CLAUDE_DIR/agents.json"
 	else
 		printf '%s\n' '[]'

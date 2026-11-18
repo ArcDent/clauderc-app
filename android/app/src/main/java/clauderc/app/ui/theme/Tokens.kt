@@ -47,7 +47,41 @@ data class ClaudercColors(
     val glassSheen: Color,
     val glassShadow: Color,
     val isDark: Boolean,
+    // The --k- variables of the three styles; a style that has no such variable leaves it transparent.
+    /** 贴纸: the ink of outlines and hard shadows (--k-ink). */
+    val ink: Color = Color.Transparent,
+    /** 贴纸: the sticker colours after the accent, one per row of icons (--k-p2 .. --k-p5). */
+    val hue2: Color = Color.Transparent,
+    val hue3: Color = Color.Transparent,
+    val hue4: Color = Color.Transparent,
+    val hue5: Color = Color.Transparent,
+    /** 贴纸: the fill of cards (--k-glass). */
+    val panel: Color = Color.Transparent,
+    /** 贴纸: the fill of the nav bar and the composer (--k-float). */
+    val float: Color = Color.Transparent,
+    /** 贴纸: the dots of the paper, one every 18dp (--k-dot). */
+    val dot: Color = Color.Transparent,
+    /** 清玻: the tint of the glass bars and sheets over the content (--k-pane). */
+    val pane: Color = Color.Transparent,
+    /** 清玻: the bright rim along the glass edges (--k-rimc). */
+    val rim: Color = Color.Transparent,
+    /** 清玻: the hairline around the glass (--k-edgec). */
+    val edge: Color = Color.Transparent,
+    /** 清玻: the lens that marks the picked tab (--k-lens). */
+    val lens: Color = Color.Transparent,
 ) {
+    /** 贴纸: the highlighter under titles, the second sticker colour dimmed in the dark (--k-hl). */
+    val highlight: Color get() = hue2.copy(alpha = if (isDark) 0.36f else 0.8f)
+
+    /** 贴纸: the colour of the [index]th icon down a list: the accent, then the four sticker colours. */
+    fun hue(index: Int): Color = when (index.mod(5)) {
+        0 -> accent
+        1 -> hue2
+        2 -> hue3
+        3 -> hue4
+        else -> hue5
+    }
+
     /** Lane colors of the git timeline cycle through --c-lane-1..3. */
     fun lane(index: Int): Color = when (index.mod(3)) {
         0 -> lane1
@@ -129,55 +163,119 @@ val DarkColors = ClaudercColors(
     isDark = true,
 )
 
-// The card style (:root[data-style="card"]): a light grey page with large rounded cards and a single
-// accent. accent and lane2 are the default blue; the theme swaps in the colour picked in 设置.
-// Variables the card blocks leave out keep the minimal style's value, so glass, scrim and camera are shared.
-val CardLightColors = LightColors.copy(
-    bg = hex(0xF2F2F6),
+// The three styles (:root[data-style="clear" | "grid" | "sticker"]). Variables a style's blocks leave
+// out keep the minimal value of the same brightness, so scrim, camera and the nav bar's glass are shared.
+
+/** 清玻: the minimal colours, plus the glass of the bars and sheets that float over the content. */
+val ClearLightColors = LightColors.copy(
+    pane = rgba(255, 255, 255, 0.64f),
+    rim = rgba(255, 255, 255, 0.95f),
+    edge = rgba(0, 0, 0, 0.07f),
+    lens = rgba(255, 255, 255, 0.72f),
+)
+
+val ClearDarkColors = DarkColors.copy(
+    pane = rgba(22, 22, 22, 0.6f),
+    rim = rgba(255, 255, 255, 0.16f),
+    edge = rgba(255, 255, 255, 0.08f),
+    lens = rgba(255, 255, 255, 0.13f),
+)
+
+/** 格栅: harder black, white and grey for the Swiss grid. */
+val GridLightColors = LightColors.copy(
+    bg = hex(0xFFFFFF),
     sheet = hex(0xFFFFFF),
     card = hex(0xFFFFFF),
-    surface = hex(0xEBEBF0),
-    surface2 = hex(0xDCDCE2),
-    line = hex(0xE8E8ED),
-    fg = hex(0x111114),
-    fg2 = hex(0x67676E),
-    fg3 = hex(0xA2A2A9),
+    surface = hex(0xF1F1F1),
+    surface2 = hex(0xE0E0E0),
+    line = hex(0xE6E6E6),
+    fg = hex(0x0A0A0A),
+    fg2 = hex(0x555555),
+    fg3 = hex(0x9A9A9A),
+    lane1 = hex(0x0A0A0A),
+    lane3 = hex(0xA0A0A0),
+)
+
+val GridDarkColors = DarkColors.copy(
+    bg = hex(0x0A0A0A),
+    sheet = hex(0x141414),
+    card = hex(0x0A0A0A),
+    surface = hex(0x171717),
+    surface2 = hex(0x282828),
+    line = hex(0x1E1E1E),
+    fg = hex(0xF2F2F2),
+    fg2 = hex(0x9A9A9A),
+    fg3 = hex(0x5E5E5E),
+    lane1 = hex(0xF2F2F2),
+    lane3 = hex(0x5E5E5E),
+)
+
+/**
+ * 贴纸: dotted cream paper, ink outlines with hard offset shadows and round stickers for icons.
+ * accent and lane2 are the default blue; the theme swaps in the colour picked in 设置.
+ */
+val StickerLightColors = LightColors.copy(
+    bg = hex(0xFFF6E9),
+    sheet = hex(0xFFFDF8),
+    card = hex(0xFFFFFF),
+    surface = hex(0xFFFFFF),
+    surface2 = rgba(30, 27, 46, 0.14f),
+    line = rgba(30, 27, 46, 0.12f),
+    fg = hex(0x1E1B2E),
+    fg2 = hex(0x5E5870),
+    fg3 = hex(0xA49DB0),
     accent = hex(0x007AFF),
     onAccent = hex(0xFFFFFF),
     danger = hex(0xE5352B),
-    addBg = hex(0xE7F6EA),
-    addFg = hex(0x1B7A33),
-    delBg = hex(0xFDECEB),
+    addBg = hex(0xE3F8E8),
+    addFg = hex(0x17732F),
+    delBg = hex(0xFFE7E5),
     delFg = hex(0xC4271E),
-    inverse = hex(0x2C2C2E),
-    onInverse = hex(0xF5F5F7),
-    lane1 = hex(0x111114),
+    inverse = hex(0x1E1B2E),
+    onInverse = hex(0xFFF6E9),
+    lane1 = hex(0x1E1B2E),
     lane2 = hex(0x007AFF),
-    lane3 = hex(0xB4B4BB),
+    lane3 = hex(0xB9B2C4),
+    ink = hex(0x1E1B2E),
+    hue2 = hex(0xFFD84D),
+    hue3 = hex(0xFF9EC4),
+    hue4 = hex(0x8EE3C8),
+    hue5 = hex(0xC7B2FF),
+    panel = rgba(255, 255, 255, 0.9f),
+    float = rgba(255, 255, 255, 0.82f),
+    dot = rgba(30, 27, 46, 0.11f),
 )
 
-val CardDarkColors = DarkColors.copy(
-    bg = hex(0x0B0B0D),
-    sheet = hex(0x1C1C1F),
-    card = hex(0x1C1C1F),
-    surface = hex(0x2A2A2E),
-    surface2 = hex(0x3A3A3F),
-    line = hex(0x2A2A2E),
-    fg = hex(0xF3F3F6),
-    fg2 = hex(0xA0A0A8),
-    fg3 = hex(0x66666E),
+val StickerDarkColors = DarkColors.copy(
+    bg = hex(0x1C1A27),
+    sheet = hex(0x2E2A3E),
+    card = hex(0x353048),
+    surface = hex(0x353048),
+    surface2 = rgba(255, 255, 255, 0.14f),
+    line = rgba(255, 255, 255, 0.1f),
+    fg = hex(0xF6F1FF),
+    fg2 = hex(0xB4ACC6),
+    fg3 = hex(0x6E6782),
     accent = hex(0x007AFF),
     onAccent = hex(0xFFFFFF),
     danger = hex(0xFF6B61),
-    addBg = hex(0x0E2414),
-    addFg = hex(0x7FD48F),
-    delBg = hex(0x2A1210),
+    addBg = hex(0x12301C),
+    addFg = hex(0x86DE9A),
+    delBg = hex(0x3A1614),
     delFg = hex(0xFF8A80),
-    inverse = hex(0xE8E8ED),
-    onInverse = hex(0x111114),
-    lane1 = hex(0xF3F3F6),
+    inverse = hex(0xF6F1FF),
+    onInverse = hex(0x15131D),
+    lane1 = hex(0xF6F1FF),
     lane2 = hex(0x007AFF),
-    lane3 = hex(0x6E6E76),
+    lane3 = hex(0x6E6782),
+    ink = hex(0x000000),
+    hue2 = hex(0xFFD84D),
+    hue3 = hex(0xFF8DBA),
+    hue4 = hex(0x74D9B8),
+    hue5 = hex(0xB9A0FF),
+    panel = rgba(53, 48, 72, 0.96f),
+    float = rgba(53, 48, 72, 0.9f),
+    dot = rgba(255, 255, 255, 0.07f),
 )
 
 /** --fs-* */

@@ -9,9 +9,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.em
+import clauderc.app.protocol.ChatItem
 import clauderc.app.protocol.Command
 import clauderc.app.protocol.PermissionMode
 import clauderc.app.protocol.ToolCall
+import clauderc.app.protocol.ToolImage
+import clauderc.app.protocol.ToolResult
 import clauderc.app.ui.theme.MonoFamily
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -98,6 +101,10 @@ fun pickCommand(value: TextFieldValue, word: SlashWord, name: String): TextField
 }
 
 /** Whether a typed message runs /model, which the phone answers with its own model picker; the agent refuses it anyway. */
+/** Whether [text] is one of the panel commands among [commands], with nothing after it. */
+fun isPanelCommand(commands: List<Command>, text: String): Boolean =
+    commands.any { it.panel == true && "/" + it.name == text.trim() }
+
 fun isModelCommand(text: String): Boolean =
     text.trim().split(Regex("\\s+")).first().equals("/model", ignoreCase = true)
 
@@ -132,6 +139,172 @@ fun toolDetail(tool: ToolCall): List<Pair<String, String>> {
     tool.result?.let { out += "输出" to it.content.ifEmpty { "没有输出" } }
     return out
 }
+
+enum class RowKind { SAME, ADD, DEL, GAP }
+
+/** One line of a tool row's diff view; [line] is the old line number for a deleted line, the new one otherwise. */
+data class PatchRow(val kind: RowKind, val line: Int = 0, val text: String = "")
+
+/**
+ * The diff view of a tool result, as Claude Code shows it: an Edit's hunks with a gap row between
+ * them, a Write's lines all added, a Read's lines as read. Null for any other result, which keeps
+ * its plain detail.
+ */
+fun patchRows(result: ToolResult?): List<PatchRow>? {
+    result ?: return null
+    result.patch?.takeIf { it.isNotEmpty() }?.let { hunks ->
+        val rows = mutableListOf<PatchRow>()
+        hunks.forEachIndexed { i, h ->
+            if (i > 0) rows += PatchRow(RowKind.GAP)
+            var old = h.oldStart
+            var new = h.newStart
+            for (l in h.lines) {
+                val text = l.drop(1)
+                rows += when (l.firstOrNull()) {
+                    '-' -> PatchRow(RowKind.DEL, old++, text)
+                    '+' -> PatchRow(RowKind.ADD, new++, text)
+                    else -> PatchRow(RowKind.SAME, new++, text).also { old++ }
+                }
+            }
+        }
+        return rows
+    }
+    if (result.lines == null) return null
+    // A Read result is "<line>\t<text>" per line, older Claude Code wrote "<line>→<text>";
+    // what follows the numbered lines, such as a system reminder, is not part of the file.
+    val rows = result.content.lineSequence().map { readLine.matchEntire(it) }.takeWhile { it != null }
+        .map { PatchRow(RowKind.SAME, it!!.groupValues[1].toInt(), it.groupValues[2]) }.toList()
+    return rows.ifEmpty { null }
+}
+
+private val readLine = Regex("""^\s*(\d+)[\t→](.*)$""")
+
+/**
+ * How many lines the diff view has in all, gap rows not counted, or null when that is not known:
+ * a diff cut to 8 KB that is not all added lines.
+ */
+fun patchTotal(result: ToolResult, rows: List<PatchRow>): Int? = when {
+    result.lines != null -> result.lines
+    result.truncated != true -> rows.count { it.kind != RowKind.GAP }
+    result.patch.orEmpty().all { it.oldLines == 0 } -> result.patch.orEmpty().sumOf { it.newLines }
+    else -> null
+}
+
+/** The figures at the end of a diff tool row: lines added and deleted, or lines read; null when not known. */
+data class PatchStat(val added: Int = 0, val deleted: Int = 0, val read: Int? = null)
+
+fun patchStat(result: ToolResult, rows: List<PatchRow>): PatchStat? = when {
+    result.lines != null -> PatchStat(read = result.lines)
+    result.truncated != true -> PatchStat(rows.count { it.kind == RowKind.ADD }, rows.count { it.kind == RowKind.DEL })
+    else -> patchTotal(result, rows)?.let { PatchStat(added = it) }
+}
+
+/**
+ * Whether a tool call joins a merged row: a search, a read or a command; not a slash command,
+ * `clauderc show` or a call whose result has pictures, which are shown under it.
+ */
+fun isMergeable(tool: ToolCall?): Boolean = when {
+    tool == null || isCommand(tool) || !tool.result?.images.isNullOrEmpty() -> false
+    tool.toolName == "Grep" || tool.toolName == "Glob" || tool.toolName == "Read" -> true
+    tool.toolName == "Bash" -> !runsShow(tool)
+    else -> false
+}
+
+/** Whether a command runs `clauderc show`, however it is written: by name, by full path, after a `cd`. */
+private fun runsShow(tool: ToolCall): Boolean = tool.input.stringField("command").orEmpty().contains("clauderc show ")
+
+/**
+ * The items as the chat list draws them: two or more mergeable tool calls in a row become one
+ * entry, as the CLI merges them; anything else, a reply, an edit or a write, ends the run.
+ */
+fun chatRuns(items: List<ChatItem>): List<List<ChatItem>> {
+    val runs = mutableListOf<MutableList<ChatItem>>()
+    for (item in items) {
+        val run = runs.lastOrNull()
+        if (run != null && isMergeable(item.tool) && isMergeable(run.last().tool)) run += item else runs += mutableListOf(item)
+    }
+    return runs
+}
+
+/** A merged row's counts, as the CLI words them: 「搜索 1 个模式，读取 2 个文件，列出 1 个目录，运行 1 条命令」. */
+fun groupSummary(tools: List<ToolCall>): String {
+    val n = IntArray(groupWords.size)
+    for (t in tools) {
+        n[
+            when {
+                t.toolName == "Grep" || t.toolName == "Glob" -> 0
+                t.toolName == "Read" -> 1
+                listing.containsMatchIn(t.input.stringField("command").orEmpty().trimStart()) -> 2
+                else -> 3
+            },
+        ]++
+    }
+    return groupWords.indices.filter { n[it] > 0 }.joinToString("，") { "${groupWords[it].first} ${n[it]} ${groupWords[it].second}" }
+}
+
+private val groupWords = listOf("搜索" to "个模式", "读取" to "个文件", "列出" to "个目录", "运行" to "条命令")
+private val listing = Regex("""^ls(\s|$)""")
+
+/** Whether a finished tool call is `clauderc show`: its pictures stand for it, without the command. */
+fun isShow(tool: ToolCall): Boolean = tool.toolName == "Bash" && runsShow(tool) && !tool.result?.images.isNullOrEmpty()
+
+/** 「PNG」 for image/png and so on. */
+fun imageType(mediaType: String): String = when (mediaType) {
+    "image/png" -> "PNG"
+    "image/jpeg" -> "JPEG"
+    "image/gif" -> "GIF"
+    "image/webp" -> "WebP"
+    else -> mediaType.substringAfter('/').uppercase()
+}
+
+/** 「212 KB」, 「1.2 MB」. */
+fun byteSize(n: Long): String = when {
+    n < 1024 -> "$n B"
+    n < 1024 * 1024 -> "${(n + 512) / 1024} KB"
+    else -> String.format(java.util.Locale.ROOT, "%.1f MB", n / (1024.0 * 1024.0))
+}
+
+/** The line under a picture's name in the viewer: 「720 × 1560 · PNG · 212 KB」, without the size when it is not known. */
+fun imageLabel(img: ToolImage): String = listOfNotNull(
+    if ((img.width ?: 0) > 0 && (img.height ?: 0) > 0) "${img.width} × ${img.height}" else null,
+    imageType(img.mediaType).ifEmpty { null },
+    if (img.size > 0) byteSize(img.size) else null,
+).joinToString(" · ")
+
+/** The thumbnail's size in pixels: the picture's, scaled to 360 on its longest side; null when not known. */
+fun thumbPixels(img: ToolImage): Pair<Int, Int>? {
+    val w = img.width ?: return null
+    val h = img.height ?: return null
+    if (w <= 0 || h <= 0) return null
+    val edge = maxOf(w, h)
+    return if (edge <= THUMB_EDGE) w to h else maxOf(1, w * THUMB_EDGE / edge) to maxOf(1, h * THUMB_EDGE / edge)
+}
+
+private const val THUMB_EDGE = 360
+
+/** Edits and writes show their diff when they come in; reads and the rest start folded. */
+fun opensByDefault(result: ToolResult?): Boolean = result?.patch?.isNotEmpty() == true
+
+/**
+ * Splits off the status lines a background session writes on their own line for Claude Code's
+ * job list, "result:", "needs input:" or "failed:", outside fenced code. Returns the reply
+ * without them, blank lines around them squeezed, and the lines as written, in order.
+ */
+fun splitMarkers(text: String): Pair<String, List<String>> {
+    if (markerPrefixes.none { text.contains(it) }) return text to emptyList()
+    val kept = mutableListOf<String>()
+    val marks = mutableListOf<String>()
+    var fenced = false
+    for (line in text.lines()) {
+        val t = line.trim()
+        if (t.startsWith("```")) fenced = !fenced
+        if (!fenced && markerPrefixes.any { t.startsWith(it) }) marks += t else kept += line
+    }
+    if (marks.isEmpty()) return text to emptyList()
+    return kept.joinToString("\n").replace(Regex("\n{3,}"), "\n\n").trim() to marks
+}
+
+private val markerPrefixes = listOf("result:", "needs input:", "failed:")
 
 /**
  * A light Markdown pass for assistant text: `code`, **bold** and fenced

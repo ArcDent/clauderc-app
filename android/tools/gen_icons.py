@@ -9,7 +9,8 @@ BASE = "https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsoutlined
 OUTLINE = """account_tree add alt_route arrow_back arrow_upward check check_box check_box_outline_blank
 chevron_right close cloud_off computer contrast delete description dns download edit error expand_more folder
 forum image more_vert palette photo_camera power_settings_new radio_button_checked radio_button_unchecked
-refresh settings style upload wallpaper warning""".split()
+refresh settings style upload wallpaper warning terminal keyboard_arrow_left keyboard_arrow_up keyboard_arrow_down
+keyboard_arrow_right backspace keyboard_return""".split()
 FILLED = ["computer", "forum", "account_tree", "settings"]
 
 

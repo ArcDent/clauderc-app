@@ -10,6 +10,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -86,11 +87,13 @@ class StateMotionTest {
 
         compose.runOnUiThread { state = state.copy(items = listOf(shown, ChatItem(2, ItemKind.ASSISTANT, text = "好，我先读一下现有的测试。\n然后补上缺的几条。"))) }
         // The emphasized curve covers most of the way early, so the grow is caught a quarter in, as in MotionTest.
+        // Round 3: it also types out, so it is found as the lowest reply rather than by its text.
+        fun newest() = compose.onAllNodesWithTag("reply", useUnmergedTree = true).fetchSemanticsNodes().maxBy { it.boundsInRoot.bottom }.boundsInRoot.height
         run(durM / 4)
-        val mid = height("我先读一下")
-        compose.mainClock.advanceTimeBy(durM)
-        val end = height("我先读一下")
-        assertTrue("new reply halfway at $mid, grown to $end", mid > 0f && mid < end)
+        val mid = newest()
+        compose.mainClock.advanceTimeBy(3_000)
+        val end = newest()
+        assertTrue("new reply a quarter in at $mid, grown to $end", mid > 0f && mid < end)
     }
 
     @Test fun aSessionsSymbolCrossfadesWhenItsStateChanges() {

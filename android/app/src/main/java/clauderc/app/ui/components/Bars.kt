@@ -1,5 +1,6 @@
 package clauderc.app.ui.components
 
+import clauderc.app.data.UiStyle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -116,31 +117,52 @@ fun Hero(
     subtitle: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val sp = Clauderc.spacing
-    val card = isCardStyle
-    // The card style's titles are heavy and a little smaller, like its cards' bold numbers.
-    Column(modifier.fillMaxWidth().padding(start = sp.page, end = sp.page, top = sp.sp2, bottom = if (card) minOf(bottom, sp.sp4) else bottom)) {
-        Text(
-            title,
-            fontSize = if (card) 30.sp else Clauderc.fontSizes.display,
-            fontWeight = if (card) FontWeight.Bold else FontWeight.Light,
-            letterSpacing = if (card) (-0.01).em else (-0.02).em,
-            lineHeight = 1.2.em,
-            modifier = Modifier.semantics { heading() },
-        )
-        for (line in listOfNotNull(subtitle) + moreLines) {
-            Row(
-                Modifier.padding(top = sp.sp2),
-                horizontalArrangement = Arrangement.spacedBy(sp.sp2),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                androidx.compose.runtime.CompositionLocalProvider(
-                    androidx.compose.material3.LocalTextStyle provides androidx.compose.ui.text.TextStyle(
-                        fontSize = Clauderc.fontSizes.label,
-                        color = Clauderc.colors.fg2,
-                    ),
-                ) { line() }
-            }
+    val c = Clauderc.colors
+    val ui = Clauderc.style
+    val lines = listOfNotNull(subtitle) + moreLines
+    val heading: @Composable (Modifier) -> Unit = { m ->
+        when (ui) {
+            // 34sp semibold.
+            UiStyle.Clear -> Text(title, m.semantics { heading() }, fontSize = 34.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.02).em, lineHeight = 1.2.em)
+            // 28sp bold, a little tighter.
+            UiStyle.Grid -> Text(title, m.semantics { heading() }, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.01).em, lineHeight = 1.2.em)
+            // 34sp black, over a yellow highlighter stroke.
+            UiStyle.Sticker -> Text(
+                title,
+                m.semantics { heading() }.highlighter(c.highlight).padding(horizontal = 2.dp),
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = (-0.02).em,
+                lineHeight = 1.2.em,
+            )
         }
+    }
+    val line: @Composable (@Composable RowScope.() -> Unit, Modifier, Boolean) -> Unit = { content, m, mono ->
+        Row(m, horizontalArrangement = Arrangement.spacedBy(sp.sp2), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.material3.LocalTextStyle provides if (mono) {
+                    androidx.compose.ui.text.TextStyle(fontSize = 11.sp, fontFamily = MonoFamily, color = c.fg3)
+                } else {
+                    androidx.compose.ui.text.TextStyle(fontSize = Clauderc.fontSizes.label, color = c.fg2)
+                },
+            ) { content() }
+        }
+    }
+    if (ui == UiStyle.Grid) {
+        // 格栅: the first line sits to the title's right, on its baseline, in small grey monospace.
+        Column(modifier.fillMaxWidth().padding(start = sp.sp4, end = sp.sp4, top = sp.sp2, bottom = minOf(bottom, sp.sp4))) {
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(sp.sp2)) {
+                heading(Modifier.weight(1f))
+                lines.firstOrNull()?.let { line(it, Modifier.padding(bottom = 6.dp), true) }
+            }
+            for (more in lines.drop(1)) line(more, Modifier.padding(top = sp.sp1), true)
+        }
+        return
+    }
+    val sticker = ui == UiStyle.Sticker
+    Column(modifier.fillMaxWidth().padding(start = sp.page - if (sticker) 2.dp else 0.dp, end = sp.page, top = sp.sp2, bottom = if (sticker) minOf(bottom, sp.sp4) else bottom)) {
+        heading(Modifier)
+        for (more in lines) line(more, Modifier.padding(top = sp.sp2, start = if (sticker) 2.dp else 0.dp), false)
     }
 }
 
@@ -149,7 +171,7 @@ fun Hero(
 fun SectionHeading(text: String, modifier: Modifier = Modifier, trailing: (@Composable () -> Unit)? = null) {
     val sp = Clauderc.spacing
     Row(
-        modifier.fillMaxWidth().padding(start = sp.page, end = sp.page, top = sp.sp5, bottom = if (isCardStyle) sp.sp2 else sp.sp1),
+        modifier.fillMaxWidth().padding(start = sp.page, end = sp.page, top = sp.sp5, bottom = if (Clauderc.look.cards) sp.sp2 else sp.sp1),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(text, fontSize = Clauderc.fontSizes.caption, fontWeight = FontWeight.Medium, color = Clauderc.colors.fg3)

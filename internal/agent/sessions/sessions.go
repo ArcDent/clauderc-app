@@ -29,6 +29,10 @@ type Options struct {
 	Push   agent.Pusher
 	// Interval defaults to DefaultInterval.
 	Interval time.Duration
+	// Dialog reports whether running session id shows a dialog such as
+	// the MCP server approval; a blocked session that does is pending even
+	// with nothing pending in its transcript. Nil checks nothing.
+	Dialog func(ctx context.Context, id string) bool
 }
 
 // Handler implements agent.Handler and agent.ClientTracker for the session
@@ -46,6 +50,7 @@ type Handler struct {
 	done   chan struct{}      // closed once the poller has returned
 
 	contexts contexts
+	agents   agents
 }
 
 // New returns a Handler; call Close when done.
@@ -213,20 +218,32 @@ func (h *Handler) poll(ctx context.Context, done chan<- struct{}) {
 }
 
 // list reads the session list, settles each blocked session against its
-// transcript (design D5, D6) and adds each session's context window use.
+// transcript (design D5, D6) and adds each session's context window use
+// and, for a running session, its subagents that still run. A stopped
+// session has none, even when a meta file was left unfinished.
 func (h *Handler) list(ctx context.Context) (protocol.SessionList, error) {
 	list, targets, err := h.opts.Source.ListTargets(ctx)
 	if err != nil {
 		return list, err
 	}
 	seen := make(map[string]bool, len(targets))
+	running := map[string]bool{}
 	for i, t := range targets {
+		if t.Running {
+			list.Sessions[i].Agents = h.agents.get(h.opts.Source.ClaudeDir, t.SessionID)
+			running[t.SessionID] = true
+		}
 		if t.Blocked() {
-			list.Sessions[i].State = t.SessionState(transcript.HasPending(h.opts.Source.ClaudeDir, t.SessionID))
+			pending := transcript.HasPending(h.opts.Source.ClaudeDir, t.SessionID)
+			if !pending && h.opts.Dialog != nil {
+				pending = h.opts.Dialog(ctx, t.ID)
+			}
+			list.Sessions[i].State = t.SessionState(pending)
 		}
 		list.Sessions[i].Context = h.contexts.get(h.opts.Source.ClaudeDir, t.SessionID)
 		seen[t.SessionID] = true
 	}
 	h.contexts.keep(seen)
+	h.agents.keep(running)
 	return list, nil
 }

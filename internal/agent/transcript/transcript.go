@@ -60,6 +60,8 @@ type Transcript struct {
 	// line counts the lines fed so far.
 	line int
 	info Info
+	// agents follows the subagents of the Agent calls.
+	agents agentLog
 }
 
 // QueuedCommands returns how many slash commands were queued so far.
@@ -113,6 +115,11 @@ type record struct {
 	// Origin tells who wrote a user record the user did not type, such as
 	// a background task notification or another session.
 	Origin origin `json:"origin"`
+	// ToolUseResult is the structured result of the record's tool_result,
+	// such as an Edit's hunks; see structured.
+	ToolUseResult json.RawMessage `json:"toolUseResult"`
+	// Timestamp is kept as text: a malformed one must not drop the record.
+	Timestamp string `json:"timestamp"`
 }
 
 // origin is the origin of a user record or a queued command: a
@@ -172,6 +179,13 @@ func (t *Transcript) feed(line []byte) []int {
 	if json.Unmarshal(line, &r) != nil {
 		return nil
 	}
+	changed := t.record(&r)
+	return append(changed, t.syncAgents(t.agents.feed(&r))...)
+}
+
+// record applies one parsed line and returns the indexes of items it added
+// or changed.
+func (t *Transcript) record(r *record) []int {
 	switch r.Type {
 	case "permission-mode":
 		if r.PermissionMode != "" {
@@ -184,7 +198,7 @@ func (t *Transcript) feed(line []byte) []int {
 		}
 		return nil
 	case "user":
-		return t.userRecord(&r)
+		return t.userRecord(r)
 	case "assistant":
 		if r.Message == nil {
 			return nil
@@ -336,7 +350,7 @@ func (t *Transcript) userRecord(r *record) []int {
 			return t.notice(peerNotice(origin{}, text))
 		}
 	}
-	return t.user(r.Message.Content)
+	return t.user(r.Message.Content, r.ToolUseResult)
 }
 
 // metaNotice turns the cross-session notices Claude Code writes as isMeta
@@ -353,7 +367,10 @@ func (t *Transcript) metaNotice(content json.RawMessage) []int {
 	return nil
 }
 
-func (t *Transcript) user(content json.RawMessage) []int {
+// user handles a user record's content; toolUseResult is the record's
+// structured result, which belongs to its tool_result when there is only
+// one.
+func (t *Transcript) user(content, toolUseResult json.RawMessage) []int {
 	var s string
 	if json.Unmarshal(content, &s) == nil {
 		text := userText(s)
@@ -380,6 +397,12 @@ func (t *Transcript) user(content json.RawMessage) []int {
 	var changed []int
 	var texts []string
 	var images []protocol.Image
+	results := 0
+	for _, b := range blocks {
+		if b.Type == "tool_result" {
+			results++
+		}
+	}
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
@@ -407,7 +430,11 @@ func (t *Transcript) user(content json.RawMessage) []int {
 				continue
 			}
 			tc := *t.items[i].Tool
-			tc.Result = &protocol.ToolResult{Content: flatten(b.Content), IsError: b.IsError}
+			content := flatten(b.Content)
+			tc.Result = &protocol.ToolResult{Content: content, IsError: b.IsError, Images: toolImages(&tc, b.Content, content)}
+			if results == 1 {
+				structured(tc.Result, toolUseResult)
+			}
 			t.items[i].Tool = &tc
 			changed = append(changed, i)
 		}
@@ -702,6 +729,7 @@ func summary(name string, input json.RawMessage) string {
 	var in struct {
 		Command  string `json:"command"`
 		FilePath string `json:"file_path"`
+		Pattern  string `json:"pattern"`
 	}
 	_ = json.Unmarshal(input, &in)
 	switch {
@@ -709,6 +737,12 @@ func summary(name string, input json.RawMessage) string {
 		return "运行 " + firstLine(in.Command)
 	case name == "Read" && in.FilePath != "":
 		return "读取 " + path.Base(in.FilePath)
+	case (name == "Edit" || name == "MultiEdit") && in.FilePath != "":
+		return "编辑 " + path.Base(in.FilePath)
+	case name == "Write" && in.FilePath != "":
+		return "写入 " + path.Base(in.FilePath)
+	case (name == "Grep" || name == "Glob") && in.Pattern != "":
+		return "搜索 " + firstLine(in.Pattern)
 	}
 	return name
 }

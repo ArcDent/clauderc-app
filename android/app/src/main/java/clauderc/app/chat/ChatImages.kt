@@ -34,12 +34,24 @@ class ImageCache(
 
     companion object {
         val shared = ImageCache()
+
+        /** Whole pictures for the viewer: a few, each scaled down to fit a texture. */
+        val whole = ImageCache(capacity = 4, decode = ::decodeFitting)
     }
+}
+
+/** Decodes [b] at a power-of-two scale that keeps its longest side within 4096 pixels. */
+private fun decodeFitting(b: ByteArray): ImageBitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(b, 0, b.size, bounds)
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 4096) sample *= 2
+    return BitmapFactory.decodeByteArray(b, 0, b.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
 }
 
 /** A chat picture, null until it is decoded. [key] identifies the picture, e.g. its base64 text. */
 @Composable
-fun rememberChatImage(key: Any, bytes: () -> ByteArray?): ImageBitmap? =
-    produceState(ImageCache.shared.peek(key), key) {
-        if (value == null) value = ImageCache.shared.load(key, bytes)
+fun rememberChatImage(key: Any, cache: ImageCache = ImageCache.shared, bytes: () -> ByteArray?): ImageBitmap? =
+    produceState(cache.peek(key), key) {
+        if (value == null) value = cache.load(key, bytes)
     }.value

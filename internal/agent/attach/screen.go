@@ -15,6 +15,9 @@ type Screen struct {
 	cells      [][]rune // 0 marks the right half of a wide character
 	r, c       int
 	pending    []byte // an incomplete sequence or UTF-8 character
+	// hidden is set while the program hides the cursor; Claude Code hides
+	// it while it draws and shows it again at the input.
+	hidden bool
 }
 
 // NewScreen returns a blank screen of the given size.
@@ -48,6 +51,29 @@ func (s *Screen) Text() string {
 		lines[i] = strings.TrimRight(b.String(), " ")
 	}
 	return strings.Join(lines, "\n")
+}
+
+// View is the screen as text with its cursor.
+type View struct {
+	// Lines has one entry per row, trailing spaces removed.
+	Lines []string
+	// Row and Col place the cursor, 0-based; Col counts the characters of
+	// Lines[Row] before it, a wide character being one, and may lie past
+	// the line's end.
+	Row, Col int
+	// Cursor is false while the program hides the cursor.
+	Cursor bool
+}
+
+// View returns the screen and its cursor.
+func (s *Screen) View() View {
+	col := 0
+	for _, r := range s.cells[s.r][:min(s.c, s.cols)] {
+		if r != 0 {
+			col++
+		}
+	}
+	return View{Lines: strings.Split(s.Text(), "\n"), Row: s.r, Col: col, Cursor: !s.hidden}
 }
 
 // Write applies terminal output; sequences may be split across calls.
@@ -168,6 +194,9 @@ func (s *Screen) csi(params string, final byte) {
 		if (final == 'h' || final == 'l') && (params == "?1049" || params == "?47" || params == "?1047") {
 			s.clear(0, s.rows)
 			s.r, s.c = 0, 0
+		}
+		if (final == 'h' || final == 'l') && params == "?25" {
+			s.hidden = final == 'l'
 		}
 		return
 	}

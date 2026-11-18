@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.items",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "items": [
+      {"seq": 260, "kind": "tool", "tool": {"toolUseId": "toolu_01Agent", "toolName": "Agent", "summary": "Agent", "input": {"description": "读一遍 relay 的连接管理", "prompt": "读一遍 internal/relay 里连接的建立、心跳和断开，说明重连在哪里触发。只读，不要改代码。", "subagent_type": "Explore"}, "result": {"content": "Async agent launched successfully.", "isError": false}, "agent": {"id": "ab360a15e1da6a482", "type": "Explore", "description": "读一遍 relay 的连接管理", "running": true, "startedAt": "2026-11-12T09:28:41.512Z"}}},
+      {"seq": 261, "kind": "tool", "tool": {"toolUseId": "toolu_01Agent2", "toolName": "Agent", "summary": "Agent", "input": {"description": "跑一遍 relay 的测试"}, "agent": {"type": "", "description": "跑一遍 relay 的测试", "running": true, "startedAt": "2026-11-12T09:29:02Z"}}}
+    ]
+  }
+}

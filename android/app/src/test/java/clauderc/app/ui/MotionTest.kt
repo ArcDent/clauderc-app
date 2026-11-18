@@ -1,5 +1,6 @@
 package clauderc.app.ui
 
+import clauderc.app.data.UiStyle
 import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
@@ -170,30 +171,40 @@ class MotionTest {
         advanceTimeBy((enter * fraction).toLong())
     }
 
-    @Test fun slashPopupGrowsInRatherThanPopping() {
+    /** Round 3: the popup floats in whole over the messages, fading and rising, and takes no room from them. */
+    @Test fun slashPopupComesInWholeOverTheMessages() {
         compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(base, ChatActions()) } }
+        fun listBottom() = compose.onNodeWithTag("chatList").fetchSemanticsNode().boundsInRoot.bottom
+        val before = listBottom()
         compose.mainClock.autoAdvance = false
         compose.onNodeWithTag("composer").performTextInput("/")
-        partWay(0.5)
-        val mid = visibleHeight("slashPopup")
+        partWay(0.0)
+        val first = visibleHeight("slashPopup")
         compose.mainClock.advanceTimeBy(enter)
         val end = visibleHeight("slashPopup")
-        assertTrue("halfway $mid, settled $end", mid > 0f && mid < end)
+        assertTrue("first frame $first, settled $end", first > 0f && first == end)
+        assertEquals("the messages keep their room", before, listBottom())
     }
 
     @Test fun workingRowOfflineLineAndPanelAnimateIn() {
         var state by mutableStateOf(base)
-        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, ChatActions()) } }
+        // 格栅 stacks the input under the list, so the list's bottom moves with the rows that open over the input.
+        compose.setContent { ClaudercTheme(darkTheme = false, style = UiStyle.Grid) { ChatScreen(state, ChatActions()) } }
         compose.waitForIdle()
+        fun listBottom() = compose.onNodeWithTag("chatList").fetchSemanticsNode().boundsInRoot.bottom
+        val idleBottom = listBottom()
         compose.mainClock.autoAdvance = false
 
+        // Round 3: the working row is drawn whole from the first frame while its room opens under the messages.
         compose.runOnUiThread { state = base.copy(state = SessionState.Working, workingSinceMillis = 0) }
         partWay()
         compose.onNodeWithText("中断").assertExists()
         val workMid = compose.onNodeWithText("中断", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height
+        val roomMid = listBottom()
         compose.mainClock.advanceTimeBy(enter)
         val workEnd = compose.onNodeWithText("中断", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height
-        assertTrue("working row a quarter in $workMid, settled $workEnd", workMid < workEnd)
+        assertTrue("working row a quarter in $workMid, settled $workEnd", workMid > 0f && workMid == workEnd)
+        assertTrue("messages end at $idleBottom, then $roomMid a quarter in, then ${listBottom()}", idleBottom > roomMid && roomMid > listBottom())
 
         compose.runOnUiThread { state = state.copy(online = false, offlineText = "已离线 · 最后在线 14:36") }
         partWay()

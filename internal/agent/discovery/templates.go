@@ -72,16 +72,6 @@ func (s Source) LaunchTemplate(profileID string) (Template, bool) {
 	return t, ok
 }
 
-// ProviderEnv returns the providerEnv in jobs/<id>/state.json of the
-// session with short id id; nil when the record is missing or unreadable.
-func (s Source) ProviderEnv(id string) map[string]string {
-	t, ok := templateOf(protocol.Profile{}, s.readJob(id))
-	if !ok {
-		return nil
-	}
-	return t.ProviderEnv
-}
-
 // templateOf builds the template of profile p from one job record; ok is
 // false when its providerEnv is not a string map.
 func templateOf(p protocol.Profile, job jobState) (Template, bool) {

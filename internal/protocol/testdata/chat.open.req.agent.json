@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-016",
+  "method": "chat.open",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"sessionId": "a1b2c3", "agentId": "ab360a15e1da6a482"}
+}

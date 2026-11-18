@@ -45,6 +45,17 @@ type Session struct {
 	// Context is how full the context window was after the last reply;
 	// absent before the first reply.
 	Context *SessionContext `json:"context,omitempty"`
+	// JobState is Claude Code's own reading of the session, as its agent
+	// view shows it, passed through: working, blocked, done or failed.
+	// Blocked with State not pending means the session asked the user for
+	// a reply (a "needs input:" line). Absent when claude reports none.
+	JobState string `json:"jobState,omitempty"`
+	// Detail is the one-line progress Claude Code keeps beside JobState,
+	// e.g. the question of a session that needs a reply; absent when none.
+	Detail string `json:"detail,omitempty"`
+	// Agents are the subagents of a running session that still run, in
+	// the order they were started; absent when none.
+	Agents []Subagent `json:"agents,omitempty"`
 }
 
 // SessionContext is the context window use of a session.

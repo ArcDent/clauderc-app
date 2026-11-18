@@ -34,6 +34,12 @@ data class Session(
     @Serializable(with = InstantSerializer::class) val lastActiveAt: Instant,
     /** How full the context window was after the last reply; null before the first. */
     val context: SessionContext? = null,
+    /** Claude Code's own reading of the session, passed through: working, blocked, done or failed; null when none. Blocked while [state] is not pending means it asked for a reply. */
+    val jobState: String? = null,
+    /** The one-line progress Claude Code keeps beside [jobState]; null when none. */
+    val detail: String? = null,
+    /** Subagents of a running session that still run, in start order; null when none. */
+    val agents: List<Subagent>? = null,
 )
 
 @Serializable

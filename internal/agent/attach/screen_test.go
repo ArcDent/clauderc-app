@@ -102,6 +102,40 @@ func TestPickerOpenOnRecordedScreens(t *testing.T) {
 	}
 }
 
+// The MCP approval dialog of Claude Code 2.1.326, captured from a new
+// session in a directory with one server in .mcp.json.
+func TestParseDialog(t *testing.T) {
+	raw, err := os.ReadFile("testdata/mcp-dialog.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, ok := attach.ParseDialog("⏺ 前面的内容\n\n" + string(raw))
+	if !ok {
+		t.Fatal("dialog not detected")
+	}
+	want := attach.Dialog{
+		Title:   "New MCP server found in this project: probe",
+		Options: []string{"Use this MCP server", "Use this and all future MCP servers in this project", "Continue without using this MCP server"},
+		Cursor:  2,
+	}
+	if d.Title != want.Title || strings.Join(d.Options, "|") != strings.Join(want.Options, "|") || d.Cursor != want.Cursor {
+		t.Errorf("got %+v, want %+v", d, want)
+	}
+	noFooter := strings.Replace(string(raw), "Enter to confirm · Esc to cancel", "", 1)
+	for name, screen := range map[string]string{
+		"title in a message":  "❯ 屏幕上写着 New MCP server found in this project: probe 是什么意思\n  ⏸ manual mode on",
+		"title line only":     "⏺ 它会显示\n  New MCP server found in this project: probe\n\n❯ \n  ⏸ manual mode on",
+		"no footer":           noFooter,
+		"recorded prompt":     recorded(t, "mode-default"),
+		"recorded picker":     recorded(t, "picker"),
+		"recorded mode cycle": recorded(t, "mode-auto"),
+	} {
+		if _, ok := attach.ParseDialog(screen); ok {
+			t.Errorf("%s: dialog detected", name)
+		}
+	}
+}
+
 // The "Switch model?" dialog is its title plus the "Yes, switch to" option
 // (RESULTS.md); the words alone in the conversation are not the dialog.
 func TestConfirmOpen(t *testing.T) {
@@ -121,5 +155,19 @@ func TestConfirmOpen(t *testing.T) {
 		if attach.ConfirmOpen(screen) {
 			t.Errorf("%s: dialog detected", name)
 		}
+	}
+}
+
+// The cursor is shown where the program leaves it once it shows it again;
+// Claude Code 2.1.326 leaves it at its input (test/e2e/claude TestTerminal).
+func TestViewCursorCountsCharacters(t *testing.T) {
+	s := attach.NewScreen(3, 20)
+	s.Write([]byte("\x1b[?25l中文ab\x1b[2;1Hx"))
+	if v := s.View(); v.Cursor || v.Row != 1 || v.Col != 1 {
+		t.Errorf("hidden cursor: %+v", v)
+	}
+	s.Write([]byte("\x1b[1;6H\x1b[?25h"))
+	if v := s.View(); !v.Cursor || v.Row != 0 || v.Col != 3 || v.Lines[0] != "中文ab" {
+		t.Errorf("after two wide characters and a: %+v, want col 3", v)
 	}
 }

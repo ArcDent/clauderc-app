@@ -41,7 +41,7 @@ import org.robolectric.annotation.GraphicsMode
 class PageOpaqueTest {
     @get:Rule val compose = createComposeRule()
 
-    private fun assertOpaque(style: UiStyle = UiStyle.Minimal, page: @Composable () -> Unit) {
+    private fun assertOpaque(style: UiStyle = UiStyle.Clear, page: @Composable () -> Unit) {
         // Spinners and the scan line never settle, so drive the clock by hand.
         compose.mainClock.autoAdvance = false
         compose.setContent {
@@ -71,19 +71,19 @@ class PageOpaqueTest {
 
     @Test fun pair() = assertOpaque { PairScreen(PairUiState.Scanning, {}, {}, scanner = { _, _ -> }) }
 
-    // The card style paints the same pages on its grey page colour.
-    @Test fun createSessionInCardStyle() = assertOpaque(UiStyle.Card) {
+    // 贴纸 paints the same pages on its paper colour.
+    @Test fun createSessionInSticker() = assertOpaque(UiStyle.Sticker) {
         CreateSessionScreen(
             CreateUiState(profileTitle = "官方", profileHost = "api.anthropic.com", dir = "~/github/infra", recent = listOf("~/github/infra", "~/notes")),
             onClose = {}, onSubmit = {}, onDir = {}, onPickDir = {}, onShowAllDirs = {}, onName = {}, onPrompt = {},
         )
     }
 
-    @Test fun chatInCardStyle() = assertOpaque(UiStyle.Card) { ChatScreen(ChatUiState(loading = false), ChatActions()) }
+    @Test fun chatInSticker() = assertOpaque(UiStyle.Sticker) { ChatScreen(ChatUiState(loading = false), ChatActions()) }
 
-    @Test fun commitInCardStyle() = assertOpaque(UiStyle.Card) { CommitScreen("7c2e0d4", Loadable(), onBack = {}, onOpenFile = {}) }
+    @Test fun commitInSticker() = assertOpaque(UiStyle.Sticker) { CommitScreen("7c2e0d4", Loadable(), onBack = {}, onOpenFile = {}) }
 
-    @Test fun diffInCardStyle() = assertOpaque(UiStyle.Card) { DiffScreen("envelope.go", "未暂存", Loadable(), onBack = {}) }
+    @Test fun diffInSticker() = assertOpaque(UiStyle.Sticker) { DiffScreen("envelope.go", "未暂存", Loadable(), onBack = {}) }
 
-    @Test fun pairInCardStyle() = assertOpaque(UiStyle.Card) { PairScreen(PairUiState.Scanning, {}, {}, scanner = { _, _ -> }) }
+    @Test fun pairInSticker() = assertOpaque(UiStyle.Sticker) { PairScreen(PairUiState.Scanning, {}, {}, scanner = { _, _ -> }) }
 }

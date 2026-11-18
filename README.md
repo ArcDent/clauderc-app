@@ -174,7 +174,6 @@ Linux 上想在没登录时也运行，再执行一次 `loginctl enable-linger $
 
 - 服务文件里写的是当前 Node.js 版本的 npm 全局目录下的程序路径。用 nvm 换了 Node.js 版本并在新版本下重装后，要再执行一次 `clauderc service install`，否则服务还在跑旧目录里的程序。
 - 服务的 PATH 里通常找不到 nvm 装的 claude，所以 `claude_path` 要写绝对路径。
-- `claude_path` 要指向 claude 本身，不能是会自动补参数的包装脚本。唤醒已停止的会话时，命令只能是 `claude --bg --resume <会话 id>`，多一个参数，Claude Code 就会另起一个新会话。
 - 某个档位如果靠 `ANTHROPIC_BASE_URL` 这类环境变量指定接口，要把这些变量配进服务的运行环境。因为新建和唤醒会话时，用的是目标机程序自己的环境变量，加上该档位最近一个会话记下的模型设置。macOS 写在 plist 的 `EnvironmentVariables` 里，Linux 写在单元文件的 `Environment=` 里。用 `--settings` 指定接口的档位不受影响。
 
 </details>

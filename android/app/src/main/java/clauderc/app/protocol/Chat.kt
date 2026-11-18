@@ -1,5 +1,6 @@
 package clauderc.app.protocol
 
+import java.time.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -43,6 +44,8 @@ object PermissionMode {
 object PendingKind {
     const val PERMISSION = "permission"
     const val QUESTION = "question"
+    /** A Claude Code dialog such as the MCP server approval: one single-choice question, answered with one pick. */
+    const val DIALOG = "dialog"
 }
 
 object Decision {
@@ -75,10 +78,77 @@ data class ToolCall(
     val summary: String = "",
     val input: JsonElement = JsonNull,
     val result: ToolResult? = null,
+    /** Set for an Agent call: the subagent it started. */
+    val agent: Subagent? = null,
 )
 
+/**
+ * A subagent a session started with the Agent tool. [id] names its transcript, which
+ * chat.open with it as agentId opens; null until Claude Code reports it. [running] is
+ * false once it finished, failed or was stopped.
+ */
 @Serializable
-data class ToolResult(val content: String = "", val isError: Boolean = false)
+data class Subagent(
+    val id: String? = null,
+    val type: String = "",
+    val description: String = "",
+    val running: Boolean = false,
+    @Serializable(with = InstantSerializer::class) val startedAt: Instant = Instant.EPOCH,
+)
+
+/**
+ * [patch] is set for Edit, MultiEdit and Write (a new file is one hunk of added lines);
+ * [lines] for Read of a text file, how many lines it read. [truncated] marks a result
+ * whose text or diff was cut to 8 KB; chat.toolOutput returns all of it. [images] are
+ * the pictures in the result, such as a Read of a PNG.
+ */
+@Serializable
+data class ToolResult(
+    val content: String = "",
+    val isError: Boolean = false,
+    val patch: List<Hunk>? = null,
+    val lines: Int? = null,
+    val truncated: Boolean? = null,
+    val images: List<ToolImage>? = null,
+)
+
+/**
+ * A picture in a tool result, or one Claude sent with `clauderc show`, which has its file [name]:
+ * [thumb], base64, is at most 360 pixels on its longest side, or null for a format the agent
+ * cannot read, such as WebP; chat.image fetches the picture by [id].
+ */
+@Serializable
+data class ToolImage(
+    val id: String,
+    val mediaType: String,
+    val name: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val size: Long = 0,
+    val thumb: String? = null,
+)
+
+/** Asks for a picture of a tool result by its id. */
+@Serializable
+data class ChatImageRequest(val sessionId: String, val id: String)
+
+/** The picture as it was; [data] is base64. */
+@Serializable
+data class ChatImageResponse(val mediaType: String, val data: String)
+
+/** Asks for the whole result of one tool call; the response body is a [ToolResult]. */
+@Serializable
+data class ChatToolOutputRequest(val sessionId: String, val toolUseId: String)
+
+/** One diff block as in Claude Code's structuredPatch; each line starts with " ", "-" or "+". */
+@Serializable
+data class Hunk(
+    val oldStart: Int = 0,
+    val oldLines: Int = 0,
+    val newStart: Int = 0,
+    val newLines: Int = 0,
+    val lines: List<String> = emptyList(),
+)
 
 @Serializable
 data class Pending(
@@ -101,7 +171,16 @@ data class Question(
 data class Option(val label: String, val description: String = "")
 
 @Serializable
-data class ChatOpenRequest(val sessionId: String, val before: Long? = null)
+data class ChatOpenRequest(
+    val sessionId: String,
+    val before: Long? = null,
+    /** Opens the session's subagent with this [Subagent.id] instead, read only. */
+    val agentId: String? = null,
+)
+
+/** chat.close; [agentId] closes a subagent's chat. */
+@Serializable
+data class ChatCloseRequest(val sessionId: String, val agentId: String? = null)
 
 /** Go embeds ChatStatus, so state, model and permissionMode sit at the top level. */
 @Serializable
@@ -112,6 +191,12 @@ data class ChatOpenResponse(
     val model: String = "",
     val permissionMode: String = "",
     val pending: Pending? = null,
+    /** True while the session is blocked on a panel or dialog the agent does not know. */
+    val unknownDialog: Boolean? = null,
+    /** Claude Code's status line while it works, e.g. 「Whirring… (20s · ↓ 2.4k tokens)」. */
+    val activity: String? = null,
+    /** The reply drawn on the computer's screen so far, not yet an item. */
+    val partial: String? = null,
 )
 
 @Serializable
@@ -143,7 +228,12 @@ data class ChatSetModelRequest(val sessionId: String, val model: String)
 data class ChatSetPermissionModeRequest(val sessionId: String, val mode: String)
 
 @Serializable
-data class Command(val name: String, val description: String = "")
+data class Command(
+    val name: String,
+    val description: String = "",
+    /** True for a built-in that opens a panel: sent as is, then the terminal view opens. */
+    val panel: Boolean? = null,
+)
 
 @Serializable
 data class ChatCommandsResponse(val commands: List<Command> = emptyList())
@@ -161,7 +251,12 @@ data class ModelOption(
 data class ChatModelsResponse(val models: List<ModelOption> = emptyList())
 
 @Serializable
-data class ChatItemsEvent(val sessionId: String, val items: List<ChatItem> = emptyList())
+data class ChatItemsEvent(
+    val sessionId: String,
+    val items: List<ChatItem> = emptyList(),
+    /** Set for a subagent's chat. */
+    val agentId: String? = null,
+)
 
 @Serializable
 data class ChatPendingEvent(val sessionId: String, val pending: Pending? = null)
@@ -172,4 +267,12 @@ data class ChatStateEvent(
     val state: SessionState = SessionState.Idle,
     val model: String = "",
     val permissionMode: String = "",
+    /** Set for a subagent's chat: working while it runs, idle once it ended. */
+    val agentId: String? = null,
+    /** True while the session is blocked on a panel or dialog the agent does not know. */
+    val unknownDialog: Boolean? = null,
+    /** Claude Code's status line while it works, e.g. 「Whirring… (20s · ↓ 2.4k tokens)」. */
+    val activity: String? = null,
+    /** The reply drawn on the computer's screen so far, not yet an item. */
+    val partial: String? = null,
 )

@@ -1,5 +1,8 @@
 package clauderc.app.git
 
+import clauderc.app.ui.components.LoadingArt
+import clauderc.app.ui.components.LoadingCover
+import clauderc.app.ui.components.StickerCorner
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.togetherWith
@@ -65,6 +68,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import clauderc.app.data.UiStyle
 import clauderc.app.machines.NavClearance
 import clauderc.app.protocol.Commit
 import clauderc.app.protocol.FileChange
@@ -93,9 +97,9 @@ import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.TextTone
 import clauderc.app.ui.components.UnderlineField
-import clauderc.app.ui.components.cardItem
-import clauderc.app.ui.components.isCardStyle
-import clauderc.app.ui.components.rowStart
+import clauderc.app.ui.components.StickerOnYellow
+import clauderc.app.ui.components.groupItem
+import clauderc.app.ui.components.sticker
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
@@ -140,21 +144,24 @@ fun GitScreen(state: GitUiState, actions: GitActions, snack: SnackState = rememb
             when {
                 dir == null -> Empty("还没有目录", null, "选择目录") { sheet = GitSheet.Repo }
                 state.notRepo -> Empty("不是 git 仓库", shortPath(dir), "换一个目录") { sheet = GitSheet.Repo }
-                else -> {
-                    Tabs(state, actions.onTab)
-                    BranchBar(state) { actions.onLoadBranches(); sheet = GitSheet.Branches }
-                    // The two tabs swap like the top-level pages: a 24dp shift and a fade.
-                    val shift = with(LocalDensity.current) { 24.dp.roundToPx() }
-                    AnimatedContent(
-                        targetState = state.tab,
-                        modifier = Modifier.weight(1f),
-                        transitionSpec = {
-                            val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                            Motion.tabIn(shift, dir).togetherWith(Motion.tabOut(shift, dir))
-                        },
-                        label = "gitTabs",
-                    ) { tab ->
-                        if (tab == GitTab.Log) Timeline(state, actions) else StatusPage(state, actions) { actions.onLoadBranches(); sheet = GitSheet.Branches }
+                // The first read of a directory draws a timeline over the page until the history arrives.
+                else -> LoadingCover(state.loading && state.status == null && state.commits.isEmpty(), LoadingArt.Trace, Modifier.weight(1f), label = "正在读取提交") {
+                    Column(Modifier.fillMaxSize()) {
+                        Tabs(state, actions.onTab)
+                        BranchBar(state) { actions.onLoadBranches(); sheet = GitSheet.Branches }
+                        // The two tabs swap like the top-level pages: a 24dp shift and a fade.
+                        val shift = with(LocalDensity.current) { 24.dp.roundToPx() }
+                        AnimatedContent(
+                            targetState = state.tab,
+                            modifier = Modifier.weight(1f),
+                            transitionSpec = {
+                                val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                                Motion.tabIn(shift, dir).togetherWith(Motion.tabOut(shift, dir))
+                            },
+                            label = "gitTabs",
+                        ) { tab ->
+                            if (tab == GitTab.Log) Timeline(state, actions) else StatusPage(state, actions) { actions.onLoadBranches(); sheet = GitSheet.Branches }
+                        }
                     }
                 }
             }
@@ -274,15 +281,16 @@ private fun Empty(title: String, path: String?, button: String, onClick: () -> U
 private fun Tabs(state: GitUiState, onTab: (GitTab) -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
-    val card = isCardStyle
+    val ui = Clauderc.style
+    // 清玻 underlines the picked tab; 格栅 and 贴纸 split the width evenly and fill the picked one.
+    val filled = ui != UiStyle.Clear
     val count = state.status?.let { it.staged.size + it.unstaged.size }
-    // Left edge and width of each tab, for the one indicator that slides between them: an underline,
-    // or in the card style the filled pill of a segmented control.
+    // Left edge and width of each tab, for the one indicator that slides between them.
     val spans = remember { mutableStateMapOf<GitTab, Pair<Int, Int>>() }
-    val track = if (card) {
-        Modifier.padding(start = sp.sp4, end = sp.sp4, top = sp.sp1).clip(CircleShape).background(c.card).padding(4.dp)
-    } else {
-        Modifier.padding(horizontal = sp.page)
+    val track = when (ui) {
+        UiStyle.Sticker -> Modifier.padding(start = sp.sp4, end = sp.sp4, top = sp.sp1).sticker(c.panel, c.ink, 999.dp).padding(4.dp)
+        UiStyle.Grid -> Modifier.padding(horizontal = sp.sp4)
+        UiStyle.Clear -> Modifier.padding(horizontal = sp.page)
     }
     Column {
         Box(track) {
@@ -291,21 +299,21 @@ private fun Tabs(state: GitUiState, onTab: (GitTab) -> Unit) {
                     val x by animateIntAsState(left, Motion.enter(), label = "underlineX")
                     val w by animateIntAsState(width, Motion.enter(), label = "underlineWidth")
                     val at = place.offset { IntOffset(x, 0) }.width(with(LocalDensity.current) { w.toDp() })
-                    if (card) {
-                        Box(at.fillMaxHeight().clip(CircleShape).background(c.accent).testTag("tabUnderline"))
-                    } else {
-                        Box(at.height(2.dp).background(c.fg).testTag("tabUnderline"))
+                    when (ui) {
+                        UiStyle.Sticker -> Box(at.fillMaxHeight().sticker(c.hue2, c.ink, 999.dp, drop = 0.dp).testTag("tabUnderline"))
+                        UiStyle.Grid -> Box(at.fillMaxHeight().padding(vertical = 6.dp).clip(RoundedCornerShape(2.dp)).background(c.fg).testTag("tabUnderline"))
+                        UiStyle.Clear -> Box(at.height(2.dp).background(c.fg).testTag("tabUnderline"))
                     }
                 }
             }
-            // The pill sits under the labels; the underline is drawn over their bottom edge.
-            if (card) Box(Modifier.matchParentSize()) { indicator(Modifier) }
-            Row(if (card) Modifier.fillMaxWidth() else Modifier, horizontalArrangement = Arrangement.spacedBy(if (card) 4.dp else sp.sp8)) {
+            // The fill sits under the labels; the underline is drawn over their bottom edge.
+            if (filled) Box(Modifier.matchParentSize()) { indicator(Modifier) }
+            Row(if (filled) Modifier.fillMaxWidth() else Modifier, horizontalArrangement = Arrangement.spacedBy(if (ui == UiStyle.Sticker) 4.dp else if (filled) 0.dp else sp.sp8)) {
                 listOf(GitTab.Log to "时间线", GitTab.Status to "改动").forEach { (tab, label) ->
                     val on = state.tab == tab
                     Column(
                         Modifier
-                            .then(if (card) Modifier.weight(1f).clip(CircleShape) else Modifier.width(IntrinsicSize.Max))
+                            .then(if (filled) Modifier.weight(1f).clip(if (ui == UiStyle.Grid) RoundedCornerShape(2.dp) else CircleShape) else Modifier.width(IntrinsicSize.Max))
                             .onPlaced { spans[tab] = it.positionInParent().x.roundToInt() to it.size.width }
                             .clickable(role = Role.Tab) { onTab(tab) }
                             .semantics { selected = on },
@@ -316,23 +324,29 @@ private fun Tabs(state: GitUiState, onTab: (GitTab) -> Unit) {
                                 append(label)
                                 if (tab == GitTab.Status && count != null && count > 0) append("($count)")
                             },
-                            modifier = Modifier.padding(vertical = if (card) 9.dp else 12.dp),
-                            fontSize = Clauderc.fontSizes.label,
-                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(top = if (ui == UiStyle.Sticker) 9.dp else 12.dp, bottom = if (ui == UiStyle.Sticker) 9.dp else if (filled) 14.dp else 12.dp),
+                            fontSize = if (ui == UiStyle.Grid) 13.sp else Clauderc.fontSizes.label,
+                            fontFamily = if (ui == UiStyle.Grid) MonoFamily else null,
+                            fontWeight = if (ui == UiStyle.Sticker) FontWeight.Bold else FontWeight.Medium,
                             color = when {
-                                on && card -> c.onAccent
+                                on && ui == UiStyle.Sticker -> StickerOnYellow
+                                on && ui == UiStyle.Grid -> c.bg
                                 on -> c.fg
-                                card -> c.fg2
+                                ui == UiStyle.Sticker -> c.fg2
                                 else -> c.fg3
                             },
                         )
-                        if (!card) Spacer(Modifier.height(2.dp))
+                        if (!filled) Spacer(Modifier.height(2.dp))
                     }
                 }
             }
-            if (!card) indicator(Modifier.align(Alignment.BottomStart))
+            if (!filled) indicator(Modifier.align(Alignment.BottomStart))
         }
-        if (!card) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+        when (ui) {
+            UiStyle.Clear -> Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+            UiStyle.Grid -> Box(Modifier.padding(horizontal = sp.sp4).fillMaxWidth().height(1.5.dp).background(c.fg))
+            UiStyle.Sticker -> Unit
+        }
     }
 }
 
@@ -379,7 +393,7 @@ private fun Timeline(state: GitUiState, actions: GitActions) {
     LazyColumn(Modifier.fillMaxSize().testTag("timeline"), state = list, contentPadding = PaddingValues(bottom = NavClearance)) {
         itemsIndexed(state.commits, key = { _, it -> it.hash }) { i, commit ->
             // One card for the whole graph in the card style; dividers would cut its lanes.
-            Box(Modifier.cardItem(first = i == 0, last = i == state.commits.lastIndex, divider = false)) {
+            Box(Modifier.groupItem(first = i == 0, last = i == state.commits.lastIndex, divider = false)) {
                 geometry.getOrNull(i)?.let { CommitRow(commit, it, textStart, state.status?.branch) { actions.onOpenCommit(commit.hash) } }
             }
         }
@@ -394,9 +408,6 @@ private fun Timeline(state: GitUiState, actions: GitActions) {
                     Text("继续加载更早的提交", fontSize = Clauderc.fontSizes.caption, color = c.fg3)
                 }
             }
-        }
-        if (state.commits.isEmpty() && state.loading) {
-            item { Box(Modifier.fillMaxWidth().padding(Clauderc.spacing.sp8), contentAlignment = Alignment.Center) { Spinner(color = c.fg3) } }
         }
     }
 }
@@ -480,7 +491,7 @@ private fun StatusPage(state: GitUiState, actions: GitActions, onBranches: () ->
                 Text("「$name」正在这个目录工作", fontSize = Clauderc.fontSizes.caption, color = c.fg2)
             }
         }
-        val card = isCardStyle
+        val card = Clauderc.look.cards
         Row(
             Modifier.padding(start = if (card) sp.sp4 else sp.page, end = if (card) sp.sp4 else sp.page, bottom = if (card) sp.sp3 else sp.sp4),
             horizontalArrangement = Arrangement.spacedBy(sp.sp2),
@@ -491,30 +502,29 @@ private fun StatusPage(state: GitUiState, actions: GitActions, onBranches: () ->
         }
         LazyColumn(Modifier.weight(1f).testTag("changes")) {
             item { SectionHeading("已暂存") }
-            if (st?.staged.isNullOrEmpty()) item { Hint("没有已暂存的文件", Modifier.cardItem(first = true, last = true)) }
+            if (st?.staged.isNullOrEmpty()) item { Hint("没有已暂存的文件", Modifier.groupItem(first = true, last = true)) }
             val staged = st?.staged.orEmpty()
             staged.forEachIndexed { i, f ->
                 item(key = "s:" + f.path) {
-                    FileRow(f, "取消暂存", { actions.onOpenDiff(f.path, true) }, Modifier.cardItem(i == 0, i == staged.lastIndex)) { actions.onRequest(GitOp.Unstage(f.path)) }
+                    FileRow(f, "取消暂存", { actions.onOpenDiff(f.path, true) }, Modifier.groupItem(i == 0, i == staged.lastIndex)) { actions.onRequest(GitOp.Unstage(f.path)) }
                 }
             }
             item { SectionHeading("未暂存") }
-            if (st?.unstaged.isNullOrEmpty()) item { Hint("工作目录是干净的", Modifier.cardItem(first = true, last = true)) }
+            if (st?.unstaged.isNullOrEmpty()) item { Hint("工作目录是干净的", Modifier.groupItem(first = true, last = true)) }
             val unstaged = st?.unstaged.orEmpty()
             unstaged.forEachIndexed { i, f ->
                 item(key = "u:" + f.path) {
-                    FileRow(f, "暂存", { actions.onOpenDiff(f.path, false) }, Modifier.cardItem(i == 0, i == unstaged.lastIndex)) { actions.onRequest(GitOp.Stage(f.path)) }
+                    FileRow(f, "暂存", { actions.onOpenDiff(f.path, false) }, Modifier.groupItem(i == 0, i == unstaged.lastIndex)) { actions.onRequest(GitOp.Stage(f.path)) }
                 }
             }
         }
         // The card style lifts the commit box onto its own card above the nav bar.
         val box = if (card) {
+            // 贴纸 floats the box over its paper as an ink-outlined sticker (.commit-box).
             Modifier
                 .fillMaxWidth()
-                .background(c.bg)
                 .padding(start = sp.sp4, end = sp.sp4, top = sp.sp2, bottom = 88.dp)
-                .clip(RoundedCornerShape(Clauderc.radii.card))
-                .background(c.card)
+                .sticker(c.float, c.ink, StickerCorner)
                 .padding(start = sp.sp4, end = sp.sp4, top = sp.sp3, bottom = sp.sp4)
         } else {
             Modifier
@@ -539,7 +549,7 @@ private fun StatusPage(state: GitUiState, actions: GitActions, onBranches: () ->
 private fun Hint(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
-        modifier.fillMaxWidth().padding(horizontal = rowStart, vertical = if (isCardStyle) Clauderc.spacing.sp4 else Clauderc.spacing.sp2),
+        modifier.fillMaxWidth().padding(horizontal = Clauderc.look.rowStart, vertical = if (Clauderc.look.cards) Clauderc.spacing.sp4 else Clauderc.spacing.sp2),
         fontSize = Clauderc.fontSizes.label,
         color = Clauderc.colors.fg3,
     )
@@ -559,7 +569,7 @@ private fun FileRow(f: FileStatus, action: String, onOpen: () -> Unit, modifier:
     val sp = Clauderc.spacing
     Row(modifier.fillMaxWidth().padding(end = sp.sp2).semantics { isTraversalGroup = true }, verticalAlignment = Alignment.CenterVertically) {
         Row(
-            Modifier.weight(1f).clickable(role = Role.Button, onClick = onOpen).padding(start = rowStart, top = 10.dp, bottom = 10.dp),
+            Modifier.weight(1f).clickable(role = Role.Button, onClick = onOpen).padding(start = Clauderc.look.rowStart, top = 10.dp, bottom = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(sp.sp4),
             verticalAlignment = Alignment.CenterVertically,
         ) {

@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-051",
+  "method": "chat.image",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "error": {"code": "notFound", "message": "会话记录里找不到这张图片"}
+}

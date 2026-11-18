@@ -34,7 +34,7 @@ val LocalFontSizes = staticCompositionLocalOf { ClaudercFontSizes() }
 val LocalSpacing = staticCompositionLocalOf { ClaudercSpacing() }
 val LocalRadii = staticCompositionLocalOf { ClaudercRadii() }
 val LocalMotion = staticCompositionLocalOf { ClaudercMotion() }
-val LocalUiStyle = staticCompositionLocalOf { UiStyle.Minimal }
+val LocalUiStyle = staticCompositionLocalOf { UiStyle.Clear }
 
 /** What is picked in 设置 right now, for the page that changes it. */
 val LocalAppearance = staticCompositionLocalOf { Appearance() }
@@ -47,16 +47,18 @@ object Clauderc {
     val radii: ClaudercRadii @Composable @ReadOnlyComposable get() = LocalRadii.current
     val motion: ClaudercMotion @Composable @ReadOnlyComposable get() = LocalMotion.current
     val style: UiStyle @Composable @ReadOnlyComposable get() = LocalUiStyle.current
+    val look: ClaudercLook @Composable @ReadOnlyComposable get() = LocalLook.current
 }
 
 /**
- * The colours of [style] in light or [dark]. The card style takes [accent] for its accent and the
- * second git lane, with dark text on light accents such as yellow; the minimal style keeps its cobalt.
+ * The colours of [style] in light or [dark]. 贴纸 takes [accent] for its accent and the second git
+ * lane, with dark text on light accents such as yellow; 清玻 and 格栅 keep the cobalt.
  */
 fun palette(style: UiStyle, dark: Boolean, accent: Color? = null): ClaudercColors = when (style) {
-    UiStyle.Minimal -> if (dark) DarkColors else LightColors
-    UiStyle.Card -> {
-        val base = if (dark) CardDarkColors else CardLightColors
+    UiStyle.Clear -> if (dark) ClearDarkColors else ClearLightColors
+    UiStyle.Grid -> if (dark) GridDarkColors else GridLightColors
+    UiStyle.Sticker -> {
+        val base = if (dark) StickerDarkColors else StickerLightColors
         if (accent == null) base else base.copy(accent = accent, onAccent = onAccent(accent), lane2 = accent)
     }
 }
@@ -81,12 +83,13 @@ val MonoFamily = FontFamily(
 @Composable
 fun ClaudercTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    style: UiStyle = UiStyle.Minimal,
+    style: UiStyle = UiStyle.Clear,
     accent: Color? = null,
     content: @Composable () -> Unit,
 ) {
     val c = palette(style, darkTheme, accent)
     val sizes = ClaudercFontSizes()
+    val spacing = ClaudercSpacing()
     val scheme = if (darkTheme) {
         darkColorScheme(
             primary = c.accent, onPrimary = c.onAccent, background = c.bg, onBackground = c.fg,
@@ -109,10 +112,11 @@ fun ClaudercTheme(
     CompositionLocalProvider(
         LocalColors provides c,
         LocalFontSizes provides sizes,
-        LocalSpacing provides ClaudercSpacing(),
+        LocalSpacing provides spacing,
         LocalRadii provides ClaudercRadii(),
         LocalMotion provides ClaudercMotion(),
         LocalUiStyle provides style,
+        LocalLook provides look(style, spacing),
         LocalLoopClock provides loops,
     ) {
         MaterialTheme(colorScheme = scheme) {

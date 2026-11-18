@@ -9,6 +9,7 @@
     "commands": [
       {"name": "model", "description": "Set the AI model for Claude Code"},
       {"name": "compact", "description": "Clear conversation history but keep a summary in context"},
+      {"name": "mcp", "description": "管理 MCP 服务器", "panel": true},
       {"name": "openspec-propose", "description": "Propose a new change with all artifacts generated in one step"}
     ]
   }

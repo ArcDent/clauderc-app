@@ -31,11 +31,14 @@ val sampleProfiles = listOf(
 /** The mockup's session list: two in 默认, two in 官方, none in anyrouter, one unreadable. */
 val sampleSessions = SessionList(
     sessions = listOf(
-        session("s-idle", "周报整理", SessionState.Idle, "default", minutesAgo = 18, cwd = "/Users/me/github/clauderc-app", context = SessionContext(16_000, 200_000)),
-        session("s-work", "修复重连", SessionState.Working, "default", minutesAgo = 0, cwd = "/Users/me/github/relay-svc", context = SessionContext(124_000, 200_000)),
+        session("s-idle", "周报整理", SessionState.Idle, "default", minutesAgo = 18, cwd = "/Users/me/github/clauderc-app", context = SessionContext(16_000, 200_000))
+            .copy(jobState = "blocked", detail = "周报要按周一到周五拆开写吗？"),
+        session("s-work", "修复重连", SessionState.Working, "default", minutesAgo = 0, cwd = "/Users/me/github/relay-svc", context = SessionContext(124_000, 200_000))
+            .copy(jobState = "working", detail = "正在查断线后为什么没有自动重连"),
         session("s-need", "clauderc 协议", SessionState.Pending, "default", minutesAgo = 2, cwd = "/Users/me/github/clauderc-app", context = SessionContext(254_185, 1_000_000)),
         session("s-q", "迁移脚本审查", SessionState.Pending, "api.anthropic.com", minutesAgo = 5, cwd = "/Users/me/github/infra", context = SessionContext(330_000, 1_000_000)),
-        session("s-stop", "landing 页", SessionState.Stopped, "api.anthropic.com", minutesAgo = 60 * 24, cwd = "/Users/me/github/site", context = SessionContext(142_000, 200_000)),
+        session("s-stop", "landing 页", SessionState.Stopped, "api.anthropic.com", minutesAgo = 60 * 24, cwd = "/Users/me/github/site", context = SessionContext(142_000, 200_000))
+            .copy(jobState = "done", detail = "landing 页已上线"),
         session("s-other", "scratch", SessionState.Idle, "other", minutesAgo = 60 * 72, cwd = "/Users/me/scratch"),
     ),
     profiles = sampleProfiles,

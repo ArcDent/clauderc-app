@@ -19,7 +19,10 @@ import androidx.compose.ui.node.LayoutModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.unit.Constraints
+import clauderc.app.data.UiStyle
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -39,7 +42,7 @@ data class PressIndication(val color: Color = Color.Unspecified) : IndicationNod
 }
 
 /** Runs [onPress] and [onRelease] for each press of [source]; release covers cancel too. */
-private fun CoroutineScope.onPresses(source: InteractionSource, onPress: suspend () -> Unit, onRelease: suspend () -> Unit): Job =
+internal fun CoroutineScope.onPresses(source: InteractionSource, onPress: suspend () -> Unit, onRelease: suspend () -> Unit): Job =
     launch {
         source.interactions.collect {
             when (it) {
@@ -66,25 +69,49 @@ private class PressLayerNode(private val source: InteractionSource, private val 
 }
 
 /**
- * Shrinks the whole element while [source] is pressed and springs it back on release. Goes before
- * clip and background so they shrink too; the clickable after them gets the same [source].
+ * Moves the whole element while [source] is pressed, the way the style presses: 格栅 shrinks it and
+ * springs it back, 清玻 spreads it like a drop of liquid and lets it overshoot once on release, 贴纸
+ * sinks it [PushDepth] onto its hard shadow (a [sticker] surface with the same source drops the
+ * shadow in step). Goes before clip and background so they move too; the clickable after them gets
+ * the same [source].
  */
 fun Modifier.pressShrink(source: InteractionSource): Modifier = this then PressShrinkElement(source)
+
+/** How far 贴纸 sinks a pressed element: as far as its buttons' hard shadow reaches. */
+val PushDepth = 3.dp
 
 private data class PressShrinkElement(val source: InteractionSource) : ModifierNodeElement<PressShrinkNode>() {
     override fun create() = PressShrinkNode(source)
     override fun update(node: PressShrinkNode) = node.follow(source)
 }
 
-private class PressShrinkNode(private var source: InteractionSource) : Modifier.Node(), LayoutModifierNode {
-    private val scale = Animatable(1f)
+private class PressShrinkNode(private var source: InteractionSource) :
+    Modifier.Node(), LayoutModifierNode, CompositionLocalConsumerModifierNode {
+    private val scaleX = Animatable(1f)
+    private val scaleY = Animatable(1f)
+    private val push = Animatable(0f)
     private var job: Job? = null
 
     override fun onAttach() {
         job = coroutineScope.onPresses(
             source,
-            onPress = { scale.animateTo(PressScale, Motion.pressIn()) },
-            onRelease = { scale.animateTo(1f, Motion.pressOut()) },
+            onPress = {
+                when (currentValueOf(LocalUiStyle)) {
+                    UiStyle.Grid -> both({ scaleX.animateTo(PressScale, Motion.pressIn()) }, { scaleY.animateTo(PressScale, Motion.pressIn()) })
+                    UiStyle.Clear -> both({ scaleX.animateTo(Motion.LensWide, Motion.lensIn()) }, { scaleY.animateTo(Motion.LensFlat, Motion.lensIn()) })
+                    UiStyle.Sticker -> push.animateTo(1f, Motion.push())
+                }
+            },
+            onRelease = {
+                when (currentValueOf(LocalUiStyle)) {
+                    UiStyle.Grid -> both({ scaleX.animateTo(1f, Motion.pressOut()) }, { scaleY.animateTo(1f, Motion.pressOut()) })
+                    UiStyle.Clear -> both({ scaleX.animateTo(1f, Motion.lensOut(Motion.LensBackWide)) }, { scaleY.animateTo(1f, Motion.lensOut(Motion.LensBackFlat)) })
+                    UiStyle.Sticker -> push.animateTo(0f, Motion.push())
+                }
+                // A style change between press and release leaves nothing behind.
+                if (push.value != 0f) push.snapTo(0f)
+                if (scaleX.value != 1f || scaleY.value != 1f) both({ scaleX.snapTo(1f) }, { scaleY.snapTo(1f) })
+            },
         )
     }
 
@@ -99,11 +126,18 @@ private class PressShrinkNode(private var source: InteractionSource) : Modifier.
 
     override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
         val placeable = measurable.measure(constraints)
+        val depth = PushDepth.toPx()
         return layout(placeable.width, placeable.height) {
             placeable.placeWithLayer(0, 0) {
-                scaleX = scale.value
-                scaleY = scale.value
+                scaleX = this@PressShrinkNode.scaleX.value
+                scaleY = this@PressShrinkNode.scaleY.value
+                translationY = push.value * depth
             }
         }
     }
+}
+
+private suspend fun both(a: suspend () -> Unit, b: suspend () -> Unit) = coroutineScope {
+    launch { a() }
+    launch { b() }
 }

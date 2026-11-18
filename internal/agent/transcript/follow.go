@@ -22,21 +22,63 @@ func (t *Transcript) Page(before int64, n int) ([]Item, bool) {
 	return append([]Item{}, t.items[start:end]...), start > 0
 }
 
-// Follower keeps a Transcript in step with a growing transcript file. Its
-// methods are safe for concurrent use.
-type Follower struct {
-	path string
-
-	mu      sync.Mutex
-	t       *Transcript
+// tail reads a growing file a whole line at a time.
+type tail struct {
+	path    string
 	off     int64  // file offset up to which bytes were consumed
 	partial []byte // bytes after the last newline, not yet a whole line
+	reads   int    // times the file was opened and read
+}
+
+// lines returns the whole lines appended since the last call; a trailing
+// partial line waits for its newline. A file that did not grow is not
+// opened.
+func (t *tail) lines() ([][]byte, error) {
+	fi, err := os.Stat(t.path)
+	if err != nil {
+		return nil, err
+	}
+	if fi.Size() == t.off {
+		return nil, nil
+	}
+	t.reads++
+	fh, err := os.Open(t.path)
+	if err != nil {
+		return nil, err
+	}
+	defer fh.Close()
+	if _, err := fh.Seek(t.off, io.SeekStart); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(fh)
+	if err != nil {
+		return nil, err
+	}
+	t.off += int64(len(data))
+	data = append(t.partial, data...)
+	last := bytes.LastIndexByte(data, '\n')
+	if last < 0 {
+		t.partial = data
+		return nil, nil
+	}
+	t.partial = append([]byte(nil), data[last+1:]...)
+	return bytes.SplitAfter(data[:last+1], []byte("\n")), nil
+}
+
+// Follower keeps a Transcript in step with a growing transcript file, and
+// its Agent calls with the meta files of their subagents. Its methods are
+// safe for concurrent use.
+type Follower struct {
+	mu   sync.Mutex
+	t    *Transcript
+	tail tail
+	dir  string // the session's subagents directory
 }
 
 // Open parses the complete lines of the file at path; a trailing partial
 // line waits for its newline.
 func Open(path string) (*Follower, error) {
-	f := &Follower{path: path, t: newTranscript()}
+	f := &Follower{t: newTranscript(), tail: tail{path: path}, dir: subagentsDir(path)}
 	if _, err := f.Poll(); err != nil {
 		return nil, err
 	}
@@ -48,31 +90,18 @@ func Open(path string) (*Follower, error) {
 func (f *Follower) Poll() ([]Item, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	fh, err := os.Open(f.path)
+	lines, err := f.tail.lines()
 	if err != nil {
 		return nil, err
 	}
-	defer fh.Close()
-	if _, err := fh.Seek(f.off, io.SeekStart); err != nil {
-		return nil, err
-	}
-	data, err := io.ReadAll(fh)
-	if err != nil {
-		return nil, err
-	}
-	f.off += int64(len(data))
-	data = append(f.partial, data...)
-	last := bytes.LastIndexByte(data, '\n')
-	if last < 0 {
-		f.partial = data
-		return nil, nil
-	}
-	f.partial = append([]byte(nil), data[last+1:]...)
 	changed := map[int]bool{}
-	for _, line := range bytes.SplitAfter(data[:last+1], []byte("\n")) {
+	for _, line := range lines {
 		for _, i := range f.t.feed(line) {
 			changed[i] = true
 		}
+	}
+	for _, i := range f.t.syncAgents(f.t.agents.applyMeta(f.dir)) {
+		changed[i] = true
 	}
 	idx := make([]int, 0, len(changed))
 	for i := range changed {
@@ -105,6 +134,15 @@ func (f *Follower) QueuedCommands() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.t.QueuedCommands()
+}
+
+// Reads counts the files Poll has read: the transcript each time it grew,
+// a meta file each time it changed. Files that stay the same are not read
+// again.
+func (f *Follower) Reads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.tail.reads + f.t.agents.meta.reads
 }
 
 // Info is Transcript.Info on the current state.

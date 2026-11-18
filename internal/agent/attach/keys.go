@@ -142,8 +142,9 @@ var (
 // (design D7). Single-select: Down to the option, Enter, which moves on.
 // Multi-select: Enter toggles each chosen option, Right moves on. A custom
 // answer moves to "Type something", right after the options, types the
-// text cleaned by cleanTyped and presses Enter. More than one question, or
-// a multi-select one, ends on a review page that Enter submits.
+// text cleaned by cleanTyped and presses Enter; in a multi-select question,
+// where it goes along with the options, it presses Up instead. More than one
+// question, or a multi-select one, ends on a review page that Enter submits.
 func AnswerKeys(questions []protocol.Question, answers []protocol.Answer) ([]Step, error) {
 	if len(questions) == 0 || len(answers) != len(questions) {
 		return nil, fmt.Errorf("%w: %d answers for %d questions", ErrAnswerCount, len(answers), len(questions))
@@ -184,7 +185,14 @@ func AnswerKeys(questions []protocol.Question, answers []protocol.Answer) ([]Ste
 		if custom != "" {
 			moveTo(len(q.Options))
 			key([]byte(custom))
-			key(keyEnter)
+			if q.MultiSelect {
+				// Typing ticks the row in a multi-select question and Enter would untick it,
+				// while Right only moves the cursor in the text. Up leaves the field, still
+				// ticked, so Right below moves on (Claude Code 2.1.327).
+				key(keyUp)
+			} else {
+				key(keyEnter)
+			}
 		}
 		if q.MultiSelect {
 			key(keyRight)
