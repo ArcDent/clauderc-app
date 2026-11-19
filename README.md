@@ -1,34 +1,29 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="design/screenshots/cover-dark.png">
+    <img alt="clauderc 的会话列表、权限确认、子代理和 git 时间线" src="design/screenshots/cover.png" width="100%">
+  </picture>
+</p>
+
 <h1 align="center">clauderc</h1>
 
-<p align="center">在手机上查看和操作电脑上的 Claude Code 后台会话</p>
+<h3 align="center">在手机上查看和操作电脑上的 Claude Code 后台会话</h3>
 
 <p align="center">
   <a href="#快速开始">快速开始</a> ·
-  <a href="#配置">配置</a>
-</p>
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="design/screenshots/sessions-dark.png">
-    <img alt="会话列表，按启动档位分组" src="design/screenshots/sessions.png" width="250">
-  </picture>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="design/screenshots/permission-dark.png">
-    <img alt="在手机上允许 claude 运行一条命令" src="design/screenshots/permission.png" width="250">
-  </picture>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="design/screenshots/git-log-dark.png">
-    <img alt="git 提交时间线" src="design/screenshots/git-log.png" width="250">
-  </picture>
+  <a href="#配置">配置</a> ·
+  <a href="../../releases/latest">下载</a>
 </p>
 
 ## 能做什么
 
-- 看对话、发消息，回答 claude 的权限请求和提问
-- 新建和停止会话，会话先按启动档位分组，档位里再按工作目录分组，档位就是会话启动时用的接口地址
-- 看电脑上登录的 Claude 账号用了多少 5 小时额度和每周额度，以及每个会话的上下文占了多少
-- 看 git 提交历史，暂存、提交、拉取和推送
-- 在设置里切换极简或卡片样式、浅色或深色，卡片样式还能换主题色或跟随壁纸取色
+- **对话**：看记录、发文字和图片，回答 claude 的权限请求和提问
+- **会话**：先按启动档位分组，再按工作目录分组，档位就是会话启动时用的接口地址
+- **管理**：新建、停止和移出会话，Fork 当前会话，或者在新的 worktree 里开会话
+- **后台**：看每个子代理在做什么，需要时打开终端视图直接按键
+- **额度**：看 Claude 账号的 5 小时额度、每周额度和每个会话的上下文，撞到限额时显示重置时间，可以到点自动发一句话
+- **git**：看提交时间线，暂存、提交、切换分支、拉取和推送
+- **外观**：清玻、格栅、贴纸三种样式，浅色或深色，贴纸样式还能换主题色或跟随壁纸取色
 
 ## 快速开始
 

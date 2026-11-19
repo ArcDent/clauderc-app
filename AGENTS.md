@@ -16,7 +16,7 @@ clauderc-app/
 ├── internal/relay/...      连接路由、存储、配对
 ├── android/                Kotlin + Compose 工程
 ├── design/ui-mockup/       界面高保真稿（HTML）
-├── design/screenshots/     README 用的 APP 截图，由 ./gradlew testDebugUnitTest -Pscreens 渲染后缩到 720 宽
+├── design/screenshots/     README 和 npm 页面的封面图，即 ./gradlew testDebugUnitTest -Pscreens 合成的 readme-cover*.png
 ├── test/e2e/               中转服务器、目标机、模拟手机一起跑的端到端测试，用假的 claude
 ├── test/e2e/claude/        对真实 Claude Code 的回归测试，带 e2e 构建标签，手动运行
 ├── npm/clauderc/           目标机 npm 主包的模板：package.json、node 启动脚本、npm 页面的说明
