@@ -197,7 +197,36 @@ data class ChatOpenResponse(
     val activity: String? = null,
     /** The reply drawn on the computer's screen so far, not yet an item. */
     val partial: String? = null,
+    /** Set while the session waits out a plan usage limit whose reset time is known. */
+    val limit: Limit? = null,
 )
+
+/** The plan usage limit a session ran into, as in Claude Code's 「You've hit your 5-hour limit · resets 10:40pm」. */
+@Serializable
+data class Limit(
+    /** 「fiveHour」 or 「weekly」, as in usage.get; null for another limit. */
+    val window: String? = null,
+    /** Claude Code's message. */
+    val text: String = "",
+    @Serializable(with = InstantSerializer::class) val resetsAt: Instant = Instant.EPOCH,
+    /** Set while the agent is to send a message by itself once the limit is lifted. */
+    val autoResume: AutoResume? = null,
+)
+
+/** A message the agent sends once the limit is lifted; [at] is a minute after the reset. */
+@Serializable
+data class AutoResume(
+    val text: String,
+    @Serializable(with = InstantSerializer::class) val at: Instant,
+)
+
+/** chat.autoResume: turns the message sent once the session's limit is lifted on, with [text], or off. */
+@Serializable
+data class ChatAutoResumeRequest(val sessionId: String, val on: Boolean, val text: String? = null)
+
+/** The limit as it is after chat.autoResume; null when the session no longer waits on one. */
+@Serializable
+data class ChatAutoResumeResponse(val limit: Limit? = null)
 
 @Serializable
 data class ChatSendRequest(
@@ -275,4 +304,6 @@ data class ChatStateEvent(
     val activity: String? = null,
     /** The reply drawn on the computer's screen so far, not yet an item. */
     val partial: String? = null,
+    /** Set while the session waits out a plan usage limit whose reset time is known. */
+    val limit: Limit? = null,
 )

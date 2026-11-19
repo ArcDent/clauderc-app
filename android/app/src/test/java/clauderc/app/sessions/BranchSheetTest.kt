@@ -92,7 +92,7 @@ class BranchSheetTest {
             ClaudercTheme(darkTheme = false) {
                 val state by vm.state.collectAsState()
                 SessionsScreen(
-                    state, {}, {}, {}, {}, { _, _ -> }, {}, {},
+                    state, {}, {}, {}, { _, _ -> }, {}, {},
                     snack = remember { SnackState() },
                     onBranches = vm::openBranches,
                     onFilterBranch = vm::filterBranch,
@@ -152,5 +152,22 @@ class BranchSheetTest {
         assertTrue(!has("claude 正在这个目录工作"))
         assertEquals(GitSwitchRequest(app, "feat-tools"), relay.sent(Method.GIT_SWITCH).last().decode(GitSwitchRequest.serializer()))
         compose.waitUntil(5_000) { has(branchButton("feat-tools")) }
+    }
+
+    @Test fun aDeletedBranchSessionsAreOnHasARowThatNarrowsButDoesNotSwitch() {
+        // main was deleted in relay-svc; 离线判定 and the lone fork are still on it.
+        relay.on(Method.GIT_BRANCHES) { r ->
+            val d = r.decode(DirRequest.serializer()).dir
+            val branches = if (d == relaySvc) listOf("fix-reconnect") else local.getValue(d)
+            ProtocolJson.encodeToJsonElement(GitBranchesResponse.serializer(), GitBranchesResponse(current.getValue(d), branches))
+        }
+        show()
+        compose.onNode(branchButton("fix-reconnect")).performClick()
+        compose.onNode(hasText("main") and hasText("已删除 · 2 个会话")).assertIsDisplayed()
+        assertTrue(!has(hasContentDescription("切换到 main")))
+        compose.onNode(hasText("已删除 · 2 个会话")).performClick()
+        compose.waitUntil(5_000) { !has("修复重连") }
+        compose.onNodeWithText("离线判定").assertIsDisplayed()
+        compose.onNodeWithText("排查日志 ⑂ 只看 relay 部分").assertIsDisplayed()
     }
 }

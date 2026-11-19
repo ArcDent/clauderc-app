@@ -137,7 +137,15 @@ import clauderc.app.ui.components.AppBar
 import clauderc.app.ui.components.BarSubButton
 import clauderc.app.ui.components.BarTitle
 import clauderc.app.ui.components.ClaudercSheet
+import clauderc.app.ui.components.ClaudercDialog
+import clauderc.app.ui.components.FieldError
+import clauderc.app.ui.components.FieldLabel
 import clauderc.app.ui.components.Glyph
+import clauderc.app.ui.components.PopMenu
+import clauderc.app.ui.components.PopMenuItem
+import clauderc.app.ui.components.Switch
+import clauderc.app.ui.components.UnderlineField
+import androidx.compose.foundation.selection.toggleable
 import clauderc.app.ui.components.MenuItem
 import clauderc.app.ui.components.SheetHead
 import clauderc.app.ui.components.SnackHost
@@ -183,9 +191,20 @@ class ChatActions(
     val onOpenAgent: (Subagent) -> Unit = {},
     /** The composer's text was edited; kept as the session's draft. */
     val onDraft: (String) -> Unit = {},
+    /** Sends `/fork` with the instruction typed in the Fork dialog; false when it could not go out. */
+    val onFork: (String) -> Boolean = { false },
+    /** Starts a session in a new worktree by this name, with this first message, from the Worktree dialog. */
+    val onCreateWorktree: (String, String) -> Unit = { _, _ -> },
+    /** The Worktree dialog closed or its name was edited; its last failure goes. */
+    val onClearWorktreeError: () -> Unit = {},
+    /** Turns on or off the message sent once the usage limit is lifted. */
+    val onAutoResume: (Boolean) -> Unit = {},
+    /** The text sent once the usage limit is lifted was edited. */
+    val onResumeText: (String) -> Unit = {},
 )
 
-private enum class ChatSheet { Attach, Model, Mode }
+/** The sheets and dialogs the chat page opens, one at a time. */
+private enum class ChatSheet { Attach, Model, Mode, Fork, Worktree }
 
 /** The light tick when a message goes out or a permission is answered. */
 private fun HapticFeedback.tap() = performHapticFeedback(HapticFeedbackType.VirtualKey)
@@ -222,7 +241,17 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
             },
             actions = {
                 SymbolButton(Symbols.Terminal, "打开终端", onClick = actions.onOpenTerm, enabled = state.online && state.state != SessionState.Stopped)
-                SymbolButton(Symbols.AccountTree, "打开 git", onClick = { state.session?.cwd?.let(actions.onOpenGit) }, enabled = state.online && state.session != null)
+                // The git icon opens a small menu: fork this session, start one in a new worktree, or see git.
+                var gitMenu by remember { mutableStateOf(false) }
+                Box {
+                    SymbolButton(Symbols.AccountTree, "git", onClick = { gitMenu = true }, enabled = state.online && state.session != null)
+                    val canAct = state.online && state.session != null
+                    PopMenu(gitMenu && canAct, onDismiss = { gitMenu = false }) {
+                        PopMenuItem("Fork", Symbols.CallSplit, onClick = { gitMenu = false; sheet = ChatSheet.Fork }, enabled = canAct, first = true)
+                        PopMenuItem("Worktree", Symbols.AltRoute, onClick = { gitMenu = false; actions.onClearWorktreeError(); sheet = ChatSheet.Worktree }, enabled = canAct)
+                        PopMenuItem("看 git", Symbols.AccountTree, onClick = { gitMenu = false; state.session?.cwd?.let(actions.onOpenGit) }, enabled = canAct)
+                    }
+                }
             },
         )
         Lift(visible = !state.online, fromTop = true) {
@@ -343,8 +372,127 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
                 )
             }
         }
+        ChatSheet.Fork -> ForkDialog(
+            onDismiss = { sheet = null },
+            onFork = { instruction ->
+                if (actions.onFork(instruction)) {
+                    haptic.tap()
+                    sheet = null
+                    snack.show("已发出 /fork，新会话会挂在会话页「$title」下面")
+                } else {
+                    snack.show("现在发不出去，稍后再试")
+                }
+            },
+        )
+        ChatSheet.Worktree -> {
+            // Closes once session.create succeeded; the page then moves on to the new session.
+            var asked by remember { mutableStateOf(false) }
+            LaunchedEffect(state.creatingWorktree) {
+                if (state.creatingWorktree) asked = true else if (asked && state.worktreeError == null) sheet = null
+            }
+            WorktreeDialog(
+                dir = state.session?.let { it.dir ?: it.cwd }.orEmpty(),
+                busy = state.creatingWorktree,
+                error = state.worktreeError,
+                enabled = state.online,
+                onDismiss = { if (!state.creatingWorktree) { actions.onClearWorktreeError(); sheet = null } },
+                onEdit = actions.onClearWorktreeError,
+                onCreate = actions.onCreateWorktree,
+            )
+        }
         null -> Unit
     }
+}
+
+/** Fork: an optional instruction for the copy, which goes out as `/fork <instruction>`. */
+@Composable
+private fun ForkDialog(onDismiss: () -> Unit, onFork: (String) -> Unit) {
+    var instruction by remember { mutableStateOf("") }
+    ClaudercDialog(
+        onDismiss = onDismiss,
+        title = "Fork 这个会话",
+        text = "把到这里为止的对话复制成一个新的后台会话，你留在这里。",
+        body = {
+            Column(verticalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp1)) {
+                FieldLabel("给它的指令")
+                UnderlineField(instruction, { instruction = it }, Modifier.testTag("forkInstruction"), placeholder = "可以不填")
+            }
+        },
+        buttons = {
+            TextAction("取消", onClick = onDismiss)
+            TextAction("Fork", onClick = { onFork(instruction) })
+        },
+    )
+}
+
+/**
+ * Worktree: a new session in a new worktree of [dir] with this session's profile. The name comes filled in
+ * as 「wt-」 and the month, day and time; one the agent would refuse is marked before anything is sent.
+ */
+@Composable
+private fun WorktreeDialog(
+    dir: String,
+    busy: Boolean,
+    error: String?,
+    enabled: Boolean,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onCreate: (String, String) -> Unit,
+) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    var name by remember { mutableStateOf(worktreeName(java.time.LocalDateTime.now())) }
+    var prompt by remember { mutableStateOf("") }
+    var bad by remember { mutableStateOf(false) }
+    ClaudercDialog(
+        onDismiss = onDismiss,
+        title = "在新 worktree 里开会话",
+        body = {
+            Text(
+                buildAnnotatedString {
+                    append("在 ")
+                    withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm)) { append(dir) }
+                    append(" 下另开一个 worktree，用这个会话的档位启动。")
+                },
+                fontSize = Clauderc.fontSizes.label,
+                lineHeight = 1.65.em,
+                color = c.fg2,
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(sp.sp1)) {
+                FieldLabel("worktree 名")
+                UnderlineField(
+                    name,
+                    { name = it; bad = false; onEdit() },
+                    Modifier.testTag("worktreeName"),
+                    mono = true,
+                    error = bad,
+                    enabled = !busy,
+                )
+                Text(
+                    if (bad) WORKTREE_NAME_RULE else "只能用字母、数字、点、横线和下划线",
+                    fontSize = Clauderc.fontSizes.caption,
+                    color = if (bad) c.danger else c.fg3,
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(sp.sp1)) {
+                FieldLabel("第一句话")
+                UnderlineField(prompt, { prompt = it }, Modifier.testTag("worktreePrompt"), placeholder = "可以不填", enabled = !busy)
+            }
+            if (error != null) FieldError(error)
+        },
+        buttons = {
+            TextAction("取消", onClick = onDismiss, enabled = !busy)
+            TextAction(
+                if (busy) "正在新建" else "新建",
+                onClick = {
+                    val n = name.trim()
+                    if (WORKTREE_NAME.matches(n)) onCreate(n, prompt) else bad = true
+                },
+                enabled = enabled,
+                busy = busy,
+            )
+        },
+    )
 }
 
 @Composable
@@ -986,6 +1134,12 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
         Lift(visible = state.unknownDialog && state.pending == null) {
             Box(block) { BlockedRow(enabled, actions.onOpenTerm) }
         }
+        // Keep the last limit while the row leaves.
+        var limit by remember { mutableStateOf(state.limit) }
+        state.limit?.let { limit = it }
+        Lift(visible = state.limit != null) {
+            limit?.let { l -> Box(block) { LimitRow(l, state.resumeText, enabled, actions.onResumeText, actions.onAutoResume) } }
+        }
         Lift(visible = state.attachments.isNotEmpty()) {
             Row(
                 block.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = sp.sp1),
@@ -1256,6 +1410,85 @@ private fun BlockedRow(enabled: Boolean, onOpenTerm: () -> Unit) {
         StatusGlyph(Glyph.Need)
         Text("会话停在一个对话框上", fontSize = Clauderc.fontSizes.label, color = Clauderc.colors.fg, modifier = Modifier.weight(1f))
         TextAction("打开终端", onClick = onOpenTerm, enabled = enabled)
+    }
+}
+
+/**
+ * .limit: the usage limit the session waits out and when it is lifted, then 「到点发送」, the text to send
+ * then and the switch that has the agent send it; with the switch on, when it will go out, in the accent.
+ */
+@Composable
+private fun LimitRow(limit: clauderc.app.protocol.Limit, text: String, enabled: Boolean, onText: (String) -> Unit, onSwitch: (Boolean) -> Unit) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    val ui = Clauderc.style
+    val grid = ui == UiStyle.Grid
+    val surface = when (ui) {
+        UiStyle.Clear -> Modifier.clip(RoundedCornerShape(22.dp)).glassPane(LocalGlassSource.current)
+        UiStyle.Grid -> Modifier.clip(RoundedCornerShape(6.dp)).background(c.surface)
+        UiStyle.Sticker -> Modifier.sticker(c.card, c.ink, 22.dp)
+    }
+    val small = if (grid) 12.sp else Clauderc.fontSizes.label
+    val on = limit.autoResume != null
+    Column(
+        Modifier.fillMaxWidth().then(surface).padding(start = sp.sp4, end = sp.sp2, top = sp.sp3, bottom = sp.sp2).testTag("limitRow"),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        val kind = when (limit.window) {
+            "fiveHour" -> "5 小时"
+            "weekly" -> "每周"
+            else -> "用量"
+        }
+        Text(
+            buildAnnotatedString {
+                append("${kind}限额，${clauderc.app.ui.TimeText.resets(limit.resetsAt)}")
+                limit.autoResume?.let { r -> withStyle(SpanStyle(color = c.accent)) { append(" · ${clauderc.app.ui.TimeText.ahead(r.at)} 自动发出") } }
+            },
+            fontSize = small,
+            fontFamily = if (grid) MonoFamily else null,
+            color = c.fg2,
+            modifier = Modifier.testTag("limitText"),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(sp.sp3), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "到点发送",
+                fontSize = if (grid) 13.sp else Clauderc.fontSizes.label,
+                fontFamily = if (grid) MonoFamily else null,
+                fontWeight = if (ui == UiStyle.Sticker) androidx.compose.ui.text.font.FontWeight.Bold else null,
+                color = c.fg,
+            )
+            val field = when (ui) {
+                UiStyle.Clear -> Modifier.clip(RoundedCornerShape(Clauderc.radii.sm)).background(c.fg.copy(alpha = 0.06f))
+                UiStyle.Grid -> Modifier.background(c.bg).border(1.dp, c.fg)
+                UiStyle.Sticker -> Modifier.clip(RoundedCornerShape(12.dp)).background(c.card).border(2.dp, c.ink, RoundedCornerShape(12.dp))
+            }
+            BasicTextField(
+                value = text,
+                onValueChange = onText,
+                enabled = enabled,
+                singleLine = true,
+                modifier = Modifier.weight(1f).heightIn(min = 36.dp).then(field).padding(horizontal = sp.sp3).testTag("limitInput"),
+                textStyle = TextStyle(color = c.fg, fontSize = if (grid) 14.sp else Clauderc.fontSizes.body, fontFamily = if (grid) MonoFamily else null),
+                cursorBrush = SolidColor(c.accent),
+                decorationBox = { inner ->
+                    Box(Modifier.heightIn(min = 36.dp), contentAlignment = Alignment.CenterStart) {
+                        if (text.isEmpty()) Text("要发的话", color = c.fg3, fontSize = if (grid) 14.sp else Clauderc.fontSizes.body)
+                        inner()
+                    }
+                },
+            )
+            // Off with nothing typed there is nothing to send; on, it can always be turned off.
+            val can = enabled && (on || text.isNotBlank())
+            val press = remember { MutableInteractionSource() }
+            Box(
+                Modifier
+                    .alpha(if (can) 1f else 0.4f)
+                    .toggleable(on, press, null, enabled = can, role = Role.Switch, onValueChange = onSwitch)
+                    .padding(4.dp)
+                    .semantics { contentDescription = "限额重置后自动发送" }
+                    .testTag("limitSwitch"),
+            ) { Switch(on, press) }
+        }
     }
 }
 

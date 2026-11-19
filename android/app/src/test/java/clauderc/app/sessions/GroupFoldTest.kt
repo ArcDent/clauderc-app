@@ -60,7 +60,7 @@ class GroupFoldTest {
             ClaudercTheme(darkTheme = false) {
                 val current = vm
                 val state by current.state.collectAsState()
-                SessionsScreen(state, {}, {}, {}, {}, { _, _ -> }, {}, {}, onToggle = current::toggle)
+                SessionsScreen(state, {}, {}, {}, { _, _ -> }, {}, {}, onToggle = current::toggle)
             }
         }
         compose.waitUntil(5_000) { has("迁移脚本审查") }

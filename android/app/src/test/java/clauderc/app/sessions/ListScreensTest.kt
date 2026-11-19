@@ -2,7 +2,6 @@ package clauderc.app.sessions
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.hasAnySibling
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -15,6 +14,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -91,7 +91,6 @@ class ListScreensTest {
                     onRefresh = { refreshes++ },
                     onOpenChat = {},
                     onCreate = {},
-                    onOpenGit = {},
                     onRename = { _, _ -> },
                     onStop = { stopped += it },
                     onRemove = {},
@@ -119,14 +118,13 @@ class ListScreensTest {
 
     @Test fun stoppingAWorkingSessionWarnsAboutInterruptingIt() {
         sessions()
-        // Open the menu of the working session, 修复重连.
+        // Slide the working session, 修复重连, open: 「停止」 comes in, not 「移出」.
         compose.onNodeWithTag("sessionList").performScrollToNode(hasText("修复重连"))
-        compose.onNode(hasContentDescription("会话操作") and hasAnySibling(hasText("修复重连", substring = true))).performClick()
+        compose.onNodeWithTag("sessionRow:s-work").performTouchInput { swipeLeft() }
         compose.onNodeWithText("停止").assertIsDisplayed()
-        assertEquals(0, compose.onAllNodes(hasText("移出列表")).fetchSemanticsNodes().size)
+        assertEquals(0, compose.onAllNodes(hasText("移出")).fetchSemanticsNodes().size)
         compose.onNodeWithText("停止").performClick()
         compose.onNode(hasText("打断当前任务", substring = true)).assertIsDisplayed()
-        compose.onAllNodes(hasText("停止"))[0].assertIsDisplayed()
         compose.onNode(hasText("停止") and !hasText("「", substring = true)).performClick()
         assertEquals(listOf("s-work"), stopped.map { it.id })
     }
@@ -148,7 +146,7 @@ class ListScreensTest {
                 accent = Clauderc.colors.accent
                 SessionsScreen(
                     state = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(list, emptyMap())),
-                    onRefresh = {}, onOpenChat = {}, onCreate = {}, onOpenGit = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
+                    onRefresh = {}, onOpenChat = {}, onCreate = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
                 )
             }
         }
@@ -165,12 +163,11 @@ class ListScreensTest {
         compose.onNodeWithText("已完成").assertIsDisplayed()
     }
 
-    @Test fun stoppedSessionMenuOffersRemoveInsteadOfStop() {
+    @Test fun aStoppedSessionSlidesOpenToRemoveInsteadOfStop() {
         sessions()
         compose.onNodeWithTag("sessionList").performScrollToNode(hasText("landing 页"))
-        compose.onNode(hasContentDescription("会话操作") and hasAnySibling(hasText("landing 页", substring = true))).performClick()
-        compose.onNodeWithText("移出列表").assertIsDisplayed()
-        compose.onNodeWithText("发消息时自动唤醒").assertIsDisplayed()
+        compose.onNodeWithTag("sessionRow:s-stop").performTouchInput { swipeLeft() }
+        compose.onNodeWithText("移出").assertIsDisplayed()
         assertEquals(0, compose.onAllNodes(hasText("停止")).fetchSemanticsNodes().size)
     }
 
@@ -229,7 +226,7 @@ class ListScreensTest {
             ClaudercTheme(darkTheme = false) {
                 SessionsScreen(
                     state = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(list, emptyMap())),
-                    onRefresh = {}, onOpenChat = {}, onCreate = {}, onOpenGit = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
+                    onRefresh = {}, onOpenChat = {}, onCreate = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
                     onOpenAgent = { s, a -> opened += s.id to a.id },
                 )
             }

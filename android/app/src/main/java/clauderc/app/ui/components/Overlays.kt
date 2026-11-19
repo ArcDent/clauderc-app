@@ -1,6 +1,25 @@
 package clauderc.app.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
+import clauderc.app.ui.theme.Motion
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -188,10 +207,12 @@ fun MenuItem(
     checked: Boolean = false,
     enabled: Boolean = true,
     modifier: Modifier = Modifier,
+    /** Greys the text, for something no longer there, such as a deleted branch. */
+    muted: Boolean = false,
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
-    val fg = if (danger) c.danger else c.fg
+    val fg = if (danger) c.danger else if (muted) c.fg2 else c.fg
     Row(
         modifier
             .fillMaxWidth()
@@ -263,6 +284,73 @@ fun ClaudercDialog(
                 )
             }
         }
+    }
+}
+
+/**
+ * .pmenu: a small menu that grows out from under the icon it hangs from, its right edge 4dp in from the
+ * icon's (scale 0.86 and a fade from its top right corner, on the enter rule; back on the leaving rule).
+ * A tap outside or back closes it, with no scrim. Put it inside the icon's box.
+ */
+@Composable
+fun PopMenu(open: Boolean, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    val shown = remember { MutableTransitionState(false) }
+    shown.targetState = open
+    if (!shown.currentState && !shown.targetState && shown.isIdle) return
+    val c = Clauderc.colors
+    val ui = Clauderc.style
+    val density = LocalDensity.current
+    val place = remember(density) { BelowEnd(with(density) { 4.dp.roundToPx() }, with(density) { 2.dp.roundToPx() }) }
+    Popup(popupPositionProvider = place, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+        AnimatedVisibility(
+            shown,
+            enter = fadeIn(Motion.enter()) + scaleIn(Motion.enter(), initialScale = 0.86f, transformOrigin = TransformOrigin(1f, 0f)),
+            exit = fadeOut(Motion.exit()) + scaleOut(Motion.exit(), targetScale = 0.86f, transformOrigin = TransformOrigin(1f, 0f)),
+        ) {
+            val surface = when (ui) {
+                UiStyle.Sticker -> Modifier.padding(bottom = 5.dp).sticker(c.sheet, c.ink, 18.dp, drop = 5.dp).padding(vertical = 6.dp)
+                UiStyle.Grid -> Modifier.background(c.bg).border(2.dp, c.fg)
+                UiStyle.Clear -> Modifier.shadow(18.dp, RoundedCornerShape(22.dp)).clip(RoundedCornerShape(22.dp)).background(c.pane.compositeOver(c.sheet)).topHighlight(c.rim).padding(vertical = 6.dp)
+            }
+            Column(Modifier.testTag("popMenu").widthIn(min = 188.dp).width(IntrinsicSize.Max).then(surface), content = content)
+        }
+    }
+}
+
+/** A row of [PopMenu]: 48dp, its icon and text; 格栅 sets it in monospace under a hairline, 贴纸 in bold. */
+@Composable
+fun PopMenuItem(text: String, icon: ImageVector, onClick: () -> Unit, enabled: Boolean = true, first: Boolean = false) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    val ui = Clauderc.style
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .then(if (ui == UiStyle.Grid && !first) Modifier.drawBehind { drawRect(c.line, size = Size(size.width, 1.dp.toPx())) } else Modifier)
+            .heightIn(min = 48.dp)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(start = sp.sp4, end = sp.sp6, top = 4.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(sp.sp3),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon.styled, contentDescription = null, tint = if (enabled) c.fg2 else c.fg3)
+        Text(
+            text,
+            color = if (enabled) c.fg else c.fg3,
+            fontSize = if (ui == UiStyle.Grid) 14.sp else Clauderc.fontSizes.body,
+            fontFamily = if (ui == UiStyle.Grid) MonoFamily else null,
+            fontWeight = if (ui == UiStyle.Sticker) FontWeight.Bold else null,
+            maxLines = 1,
+        )
+    }
+}
+
+/** Puts a popup under its anchor, its right edge [inset] in from the anchor's and [gap] below it, kept on screen. */
+private class BelowEnd(private val inset: Int, private val gap: Int) : PopupPositionProvider {
+    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
+        val x = (anchorBounds.right - inset - popupContentSize.width).coerceIn(0, (windowSize.width - popupContentSize.width).coerceAtLeast(0))
+        val y = (anchorBounds.bottom + gap).coerceAtMost((windowSize.height - popupContentSize.height).coerceAtLeast(0))
+        return IntOffset(x, y)
     }
 }
 

@@ -464,7 +464,7 @@ class ChatScreenTest {
         compose.onNodeWithText("已离线 · 最后在线 14:36").assertIsDisplayed()
         compose.onNodeWithTag("composer").assertIsNotEnabled()
         compose.onNodeWithText("离线，不能发送").assertIsDisplayed()
-        compose.onNodeWithContentDescription("打开 git").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("git").assertIsNotEnabled()
         compose.onNodeWithTag("chatList").performScrollToIndex(20)
         compose.onNodeWithText("第 80 条").assertIsDisplayed()
     }

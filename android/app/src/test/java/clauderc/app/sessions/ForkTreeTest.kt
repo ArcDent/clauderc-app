@@ -70,7 +70,7 @@ class ForkTreeTest {
             ClaudercTheme(darkTheme = false) {
                 val current = vm
                 val state by current.state.collectAsState()
-                SessionsScreen(state, {}, {}, {}, {}, { _, _ -> }, {}, {}, onToggleForks = current::toggleForks)
+                SessionsScreen(state, {}, {}, {}, { _, _ -> }, {}, {}, onToggleForks = current::toggleForks)
             }
         }
         compose.waitUntil(5_000) { has("clauderc 协议 ⑂ 补错误码测试") }

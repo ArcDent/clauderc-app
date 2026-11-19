@@ -23,6 +23,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeUp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.chat.ChatActions
@@ -172,6 +173,13 @@ class ScreensTest {
     private fun layered(): Bitmap {
         val page = compose.onNodeWithTag("screen").captureToImage().asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true)
         val canvas = android.graphics.Canvas(page)
+        // A popup menu sits in a window of its own: draw it under the git icon, its right edge 4dp in, as PopMenu places it.
+        if (compose.onAllNodes(androidx.compose.ui.test.hasTestTag("popMenu")).fetchSemanticsNodes().isNotEmpty()) {
+            val img = compose.onNode(androidx.compose.ui.test.hasTestTag("popMenu")).captureToImage().asAndroidBitmap()
+            val a = compose.onNode(androidx.compose.ui.test.hasContentDescription("git")).fetchSemanticsNode().boundsInRoot
+            val dp = android.content.res.Resources.getSystem().displayMetrics.density
+            canvas.drawBitmap(img, a.right - 4 * dp - img.width, a.bottom + 2 * dp, null)
+        }
         org.robolectric.shadows.ShadowDialog.getShownDialogs().filter { it.isShowing }.forEach { d ->
             val w = d.window ?: return@forEach
             if (w.attributes.flags and android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND != 0) {
@@ -208,12 +216,12 @@ class ScreensTest {
         shot("03-machines", nav = 0) { MachinesScreen(machines, {}, {}) }
         shot("03-machines-dark", isDark = true, nav = 0) { MachinesScreen(machines, {}, {}) }
         val sessions = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(sampleSessions, mapOf("api.anthropic.com" to "官方")), usage = sampleUsage())
-        shot("04-sessions", nav = 1) { SessionsScreen(sessions, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+        shot("04-sessions", nav = 1) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
         val expired = sessions.copy(usage = sampleUsage().copy(stale = UsageStale.Expired, fetchedAt = Instant.now().minusSeconds(5_400)))
-        shot("04-sessions-usage-expired", nav = 1) { SessionsScreen(expired, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
-        shot("04-sessions-dark", isDark = true, nav = 1) { SessionsScreen(sessions, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+        shot("04-sessions-usage-expired", nav = 1) { SessionsScreen(expired, {}, {}, {}, { _, _ -> }, {}, {}) }
+        shot("04-sessions-dark", isDark = true, nav = 1) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
         val folded = sessions.copy(groups = sessions.groups!!.map { it.copy(collapsed = it.profile.id == "api.anthropic.com") })
-        shot("04-sessions-folded", nav = 1) { SessionsScreen(folded, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+        shot("04-sessions-folded", nav = 1) { SessionsScreen(folded, {}, {}, {}, { _, _ -> }, {}, {}) }
 
         val items = listOf(
             ChatItem(1, ItemKind.USER, text = "给 internal/protocol 加上消息信封的编解码，版本号不是 1 时返回错误。"),
@@ -298,7 +306,7 @@ class ScreensTest {
         val withAgents = sampleSessions.copy(sessions = sampleSessions.sessions.map { if (it.id == "s-work") it.copy(agents = running) else it })
         val sessions = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(withAgents, mapOf("api.anthropic.com" to "官方")))
         for ((tail, isDark, s) in styleVariants) {
-            shot("11-sessions-agents$tail", isDark, nav = 1, look = s) { SessionsScreen(sessions, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("11-sessions-agents$tail", isDark, nav = 1, look = s) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
         }
 
         fun agentCall(seq: Long, a: clauderc.app.protocol.Subagent) = ChatItem(
@@ -410,14 +418,65 @@ class ScreensTest {
         val folded = withDefault { it.copy(foldedForks = setOf("s1")) }
         val asking = list.copy(switchAsk = clauderc.app.sessions.BranchSwitch(relaySvc, "relay-svc", "main", "修复重连"))
         for ((tail, isDark, s) in styleVariants) {
-            shot("16-sessions-forks$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(list, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
-            shot("16-sessions-filtered$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(filtered, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
-            shot("16-sessions-fork-folded$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(folded, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("16-sessions-forks$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("16-sessions-filtered$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(filtered, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("16-sessions-fork-folded$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(folded, {}, {}, {}, { _, _ -> }, {}, {}) }
             shot(
                 "16-branch-sheet$tail", isDark, nav = 1, look = s, fresh = true,
                 open = { compose.onNode(androidx.compose.ui.test.hasText("dev") and androidx.compose.ui.test.hasClickAction()).performClick() },
-            ) { SessionsScreen(list, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
-            shot("16-switch-busy$tail", isDark, nav = 1, look = s, fresh = true, open = {}) { SessionsScreen(asking, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+            ) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("16-switch-busy$tail", isDark, nav = 1, look = s, fresh = true, open = {}) { SessionsScreen(asking, {}, {}, {}, { _, _ -> }, {}, {}) }
+        }
+    }
+
+    /**
+     * Round 6 as in the demo: the chat page's limit row before and after the switch, the git icon's menu,
+     * the Fork and Worktree dialogs, a deleted branch in the branch sheet and a row slid open.
+     */
+    @Test fun roundSix() {
+        compose.mainClock.autoAdvance = false
+        val resets = java.time.ZonedDateTime.now().withHour(22).withMinute(40).withSecond(0).toInstant()
+        val limit = clauderc.app.protocol.Limit("fiveHour", "You've hit your 5-hour limit · resets 10:40pm", resets)
+        val chat = ChatUiState(
+            session = session("s16", "批量改测试", SessionState.Idle, "default", cwd = "/Users/me/github/relay-svc"), loading = false,
+            model = "claude-opus-5-5", permissionMode = "default", limit = limit,
+            items = listOf(
+                ChatItem(1, ItemKind.USER, text = "把 relay 包的测试都改成表驱动。"),
+                ChatItem(2, ItemKind.ASSISTANT, text = "先从 router_test.go 开始，改了三个用例。"),
+                ChatItem(3, ItemKind.ASSISTANT, text = "You've hit your 5-hour limit · resets 10:40pm (Asia/Shanghai)"),
+            ),
+        )
+        val on = chat.copy(limit = limit.copy(autoResume = clauderc.app.protocol.AutoResume("继续", resets.plusSeconds(60))))
+        val relaySvc = "/Users/me/github/relay-svc"
+        val app = "/Users/me/github/clauderc-app"
+        val known = mapOf(
+            app to clauderc.app.protocol.GitBranchesResponse("dev", listOf("dev", "main", "worktree-tools-view")),
+            relaySvc to clauderc.app.protocol.GitBranchesResponse("fix-reconnect", listOf("fix-reconnect")),
+            "/Users/me/github/infra" to clauderc.app.protocol.GitBranchesResponse("main", listOf("main")),
+        )
+        val list = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(clauderc.app.testing.branchSessions, mapOf("api.anthropic.com" to "官方")).map { it.copy(branches = known) })
+        // The popup's window lays out on Robolectric's looper and animates on the test clock: step both.
+        fun settle() = repeat(8) {
+            org.robolectric.shadows.ShadowLooper.idleMainLooper(50, java.util.concurrent.TimeUnit.MILLISECONDS)
+            compose.mainClock.advanceTimeBy(50)
+        }
+        fun git() {
+            compose.onNode(androidx.compose.ui.test.hasContentDescription("git")).performClick()
+            settle()
+        }
+        for ((tail, isDark, s) in styleVariants) {
+            shot("22-chat-limit$tail", isDark, look = s, fresh = true) { ChatScreen(chat, ChatActions()) }
+            shot("22-chat-limit-on$tail", isDark, look = s, fresh = true) { ChatScreen(on, ChatActions()) }
+            shot("22-git-menu$tail", isDark, look = s, fresh = true, open = { git() }) { ChatScreen(chat.copy(limit = null), ChatActions()) }
+            shot("22-fork-dialog$tail", isDark, look = s, fresh = true, open = { git(); compose.onNode(androidx.compose.ui.test.hasText("Fork")).performClick() }) { ChatScreen(chat.copy(limit = null), ChatActions()) }
+            shot("22-worktree-dialog$tail", isDark, look = s, fresh = true, open = { git(); compose.onNode(androidx.compose.ui.test.hasText("Worktree")).performClick() }) { ChatScreen(chat.copy(limit = null), ChatActions()) }
+            shot(
+                "22-branch-gone$tail", isDark, nav = 1, look = s, fresh = true,
+                open = { compose.onNode(androidx.compose.ui.test.hasText("fix-reconnect") and androidx.compose.ui.test.hasClickAction()).performClick() },
+            ) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("22-swipe-open$tail", isDark, nav = 1, look = s, fresh = true, open = { compose.onNodeWithTag("sessionRow:s2").performTouchInput { swipeLeft() } }) {
+                SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {})
+            }
         }
     }
 
@@ -444,7 +503,7 @@ class ScreensTest {
             untrusted = dir,
         )
         for ((tail, isDark, s) in styleVariants) {
-            shot("17-sessions-draft$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(list, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("17-sessions-draft$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}) }
             shot("17-chat-draft$tail", isDark, look = s, fresh = true) { ChatScreen(chat, ChatActions()) }
             shot("18-trust-sheet$tail", isDark, look = s, fresh = true, open = {}) { CreateSessionScreen(create, {}, {}, {}, {}, {}, {}, {}) }
             shot("18-trust-busy$tail", isDark, look = s, fresh = true, open = {}) { CreateSessionScreen(create.copy(trusting = true), {}, {}, {}, {}, {}, {}, {}) }
@@ -544,7 +603,7 @@ class ScreensTest {
         val places: List<Triple<String, Int?, @Composable () -> Unit>> = listOf(
             Triple("boot", null) { LoadingCover(true, LoadingArt.Link, Modifier.fillMaxSize(), splash = true, label = "正在连接 relay.example.com") {} },
             Triple("chat", null) { ChatScreen(ChatUiState(session = readme, loading = true), ChatActions()) },
-            Triple("sessions", 1) { SessionsScreen(SessionsUiState(machine("m-1", "工作室 Mac mini")), {}, {}, {}, {}, { _, _ -> }, {}, {}) },
+            Triple("sessions", 1) { SessionsScreen(SessionsUiState(machine("m-1", "工作室 Mac mini")), {}, {}, {}, { _, _ -> }, {}, {}) },
             Triple("git", 2) { GitScreen(GitUiState(dir = "/Users/me/code/clauderc-app", loading = true), GitActions()) },
             Triple("term", null) { clauderc.app.chat.TerminalScreen(clauderc.app.chat.TermUiState(session = readme), onBack = {}, onKey = {}) },
             Triple("agent", null) {
@@ -610,7 +669,7 @@ class ScreensTest {
             val tail = if (isDark) "-dark" else ""
             val name = s.name.lowercase()
             shot("$name-01-machines$tail", isDark, nav = 0, look = s) { MachinesScreen(machines, {}, {}) }
-            shot("$name-02-sessions$tail", isDark, nav = 1, look = s) { SessionsScreen(sessions, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("$name-02-sessions$tail", isDark, nav = 1, look = s) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
             shot("$name-03-chat$tail", isDark, look = s) { ChatScreen(chat, ChatActions()) }
             shot("$name-04-create$tail", isDark, look = s) { CreateSessionScreen(create, {}, {}, {}, {}, {}, {}, {}) }
             shot("$name-05-git$tail", isDark, nav = 2, look = s) { GitScreen(git, GitActions()) }

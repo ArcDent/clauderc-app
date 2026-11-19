@@ -117,7 +117,7 @@ class PressTest {
     // longer would catch the 「等你」 dot's pulse in another frame.
     @Test fun sessionRow() = assertPressShows(wait = exit, find = { compose.onNodeWithText("周报整理") }) {
         val state = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(sampleSessions, emptyMap()))
-        SessionsScreen(state, {}, {}, {}, {}, { _, _ -> }, {}, {})
+        SessionsScreen(state, {}, {}, {}, { _, _ -> }, {}, {})
     }
 
     /** Bounds of the pill in [style] at rest, held 150ms, [probe]ms after release and settled. */
