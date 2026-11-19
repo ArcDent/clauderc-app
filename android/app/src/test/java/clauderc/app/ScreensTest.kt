@@ -615,6 +615,152 @@ class ScreensTest {
         }
     }
 
+    /**
+     * README's screenshots in 贴纸, light and dark: one made-up developer's day on 「书房的 Mac」 with
+     * shop-web, shop-api and infra, every time counted back from now so the rows read as minutes ago.
+     */
+    @Test fun readmeShots() {
+        compose.mainClock.autoAdvance = false
+        val now = Instant.now()
+        val web = "/Users/me/code/shop-web"
+        val api = "/Users/me/code/shop-api"
+        val infra = "/Users/me/code/infra"
+        fun row(id: String, name: String, state: SessionState, profile: String, minutesAgo: Long, cwd: String, used: Int) =
+            session(id, name, state, profile, cwd = cwd, context = SessionContext(used, 200_000)).copy(lastActiveAt = now.minusSeconds(minutesAgo * 60), branch = "main")
+        val subagents = listOf(
+            clauderc.app.protocol.Subagent("a1", "Explore", "翻支付回调的日志", running = true, startedAt = now.minusSeconds(52)),
+            clauderc.app.protocol.Subagent("a2", "Explore", "读订单状态机的超时逻辑", running = true, startedAt = now.minusSeconds(37)),
+        )
+        val lazyImages = "$web/.claude/worktrees/lazy-images"
+        val list = clauderc.app.protocol.SessionList(
+            sessions = listOf(
+                row("s1", "结算页改版", SessionState.Pending, "default", 1, web, 76_000).copy(branch = "feat-checkout", detail = "npm run test -- checkout"),
+                row("s2", "结算页改版 ⑂ 试试单页布局", SessionState.Idle, "default", 9, web, 52_000).copy(branch = "feat-checkout", forkOf = "s1"),
+                row("s3", "图片懒加载", SessionState.Idle, "default", 22, lazyImages, 41_000)
+                    .copy(dir = web, branch = "worktree-lazy-images", worktree = clauderc.app.protocol.SessionWorktree("lazy-images", lazyImages)),
+                row("s4", "订单超时排查", SessionState.Working, "default", 0, api, 118_000).copy(jobState = "working", detail = "正在查支付回调为什么超时", agents = subagents),
+                row("s5", "接口文档", SessionState.Idle, "default", 35, api, 23_000).copy(jobState = "blocked", detail = "废弃的接口也要写进文档吗？"),
+                row("s6", "备份脚本审查", SessionState.Idle, "llm.example.com", 180, infra, 64_000),
+                row("s7", "迁移到 Postgres 17", SessionState.Stopped, "llm.example.com", 60 * 26, infra, 96_000).copy(jobState = "done", detail = "迁移脚本已合并"),
+            ),
+            profiles = listOf(
+                clauderc.app.protocol.Profile("default", clauderc.app.protocol.ProfileKind.Default),
+                clauderc.app.protocol.Profile("llm.example.com", clauderc.app.protocol.ProfileKind.Endpoint),
+            ),
+        )
+        val branches = mapOf(
+            web to clauderc.app.protocol.GitBranchesResponse("feat-checkout", listOf("feat-checkout", "main", "worktree-lazy-images")),
+            api to clauderc.app.protocol.GitBranchesResponse("main", listOf("main")),
+            infra to clauderc.app.protocol.GitBranchesResponse("main", listOf("main")),
+        )
+        val usage = UsageResponse(
+            available = true,
+            fiveHour = UsageWindow(42.0, now.plusSeconds(2 * 3_600 + 1_200)),
+            sevenDay = UsageWindow(63.0, now.plusSeconds(3 * 86_400)),
+            fetchedAt = now,
+        )
+        val desk = machine("m-1", "书房的 Mac")
+        val sessions = SessionsUiState(desk, groupSessions(list, mapOf("llm.example.com" to "公司网关")).map { it.copy(branches = branches) }, usage = usage)
+
+        fun numbered(lines: List<String>) = ToolResult(lines.mapIndexed { i, l -> "${i + 1}\t$l" }.joinToString("\n"), lines = lines.size)
+        fun call(seq: Long, id: String, name: String, summary: String, input: Pair<String, String>, result: ToolResult) =
+            ChatItem(seq, ItemKind.TOOL, tool = ToolCall(id, name, summary, buildJsonObject { put(input.first, input.second) }, result))
+        val coupon = listOf("import { useState } from \"react\"", "", "export function CouponInput({ onApply }: Props) {", "  const [code, setCode] = useState(\"\")", "  return (")
+        val edit = listOf(
+            " export function CouponInput({ onApply }: Props) {",
+            "+  const ref = useRef<HTMLInputElement>(null)",
+            "+  const reveal = () => ref.current?.scrollIntoView({ block: \"center\" })",
+            "   return (",
+            "-    <div className=\"coupon fixed bottom-0\">",
+            "+    <div className=\"coupon sticky bottom-0\">",
+            "-      <input placeholder=\"优惠码\" />",
+            "+      <input ref={ref} onFocus={reveal} placeholder=\"优惠码\" />",
+        )
+        val checkout = ChatUiState(
+            session = list.sessions[0], loading = false, state = SessionState.Pending, model = "claude-opus-5-5", permissionMode = "default",
+            items = listOf(
+                ChatItem(1, ItemKind.USER, text = "结算页的优惠券输入框在手机上会被键盘挡住，修一下，改完跑一遍结算页的测试。"),
+                ChatItem(2, ItemKind.ASSISTANT, text = "我先找一下输入框在哪个组件里。"),
+                call(3, "g1", "Grep", "搜索 CouponInput", "pattern" to "CouponInput", ToolResult("src/checkout/CouponInput.tsx\nsrc/checkout/Checkout.tsx")),
+                call(4, "r1", "Read", "读取 CouponInput.tsx", "file_path" to "$web/src/checkout/CouponInput.tsx", numbered(coupon)),
+                call(5, "r2", "Read", "读取 Checkout.tsx", "file_path" to "$web/src/checkout/Checkout.tsx", numbered(coupon)),
+                ChatItem(6, ItemKind.ASSISTANT, text = "底部操作栏用了 `position: fixed`，键盘弹起后视口变矮，输入框被压在栏下面。我改成 `sticky`，聚焦时再把输入框滚到看得见的地方。"),
+                call(7, "e1", "Edit", "编辑 CouponInput.tsx", "file_path" to "$web/src/checkout/CouponInput.tsx", ToolResult("The file has been updated successfully.", patch = listOf(Hunk(3, 5, 3, 7, edit)))),
+                ChatItem(8, ItemKind.ASSISTANT, text = "改完了，我跑一下结算页的测试。"),
+            ),
+            pending = Pending("b1", PendingKind.PERMISSION, "Bash", buildJsonObject { put("command", "npm run test -- checkout") }),
+        )
+        fun agentCall(seq: Long, a: clauderc.app.protocol.Subagent) = ChatItem(
+            seq, ItemKind.TOOL,
+            tool = ToolCall("ag$seq", "Agent", "Agent", buildJsonObject { put("description", a.description); put("subagent_type", a.type) }, ToolResult("Async agent launched successfully."), agent = a),
+        )
+        val timeout = ChatUiState(
+            session = list.sessions[3], loading = false, state = SessionState.Working, workingSinceMillis = System.currentTimeMillis() - 84_000,
+            model = "claude-opus-5-5", permissionMode = "default", activity = "Investigating… (1m 24s · ↓ 3.2k tokens)",
+            items = listOf(
+                ChatItem(1, ItemKind.USER, text = "这两天有订单付了钱还显示超时，查一下原因。"),
+                ChatItem(2, ItemKind.ASSISTANT, text = "我先让一个子代理把最近三天超时的订单列出来。"),
+                agentCall(3, clauderc.app.protocol.Subagent("a0", "general-purpose", "列出最近三天超时的订单", running = false, startedAt = now.minusSeconds(300))),
+                ChatItem(4, ItemKind.ASSISTANT, text = "超时的订单都在晚上 8 点到 10 点，全走的微信支付。我再派两个子代理，分头查回调日志和订单状态机。"),
+                agentCall(5, subagents[0]),
+                agentCall(6, subagents[1]),
+            ),
+        )
+        fun commit(hash: String, parents: List<String>, hoursAgo: Long, subject: String, lane: Int, edges: List<Pair<Int, Int>>, refs: List<Ref>? = null) =
+            Commit(hash, parents, "林舟", now.minusSeconds(hoursAgo * 3_600 + 600), subject, refs, lane, edges.map { clauderc.app.protocol.Edge(it.first, it.second) })
+        val commits = listOf(
+            commit("e4a1c07", listOf("9b3f2d8", "3be8c41"), 0, "合并 feat-checkout", 0, listOf(0 to 0, 0 to 1), listOf(Ref("main", RefKind.Branch), Ref("origin/main", RefKind.RemoteBranch))),
+            commit("9b3f2d8", listOf("7d0e6f1"), 1, "金额统一按分计算", 0, listOf(0 to 0, 1 to 1)),
+            commit("3be8c41", listOf("52c7a90"), 2, "优惠券输入框不再被键盘挡住", 1, listOf(0 to 0, 1 to 1), listOf(Ref("feat-checkout", RefKind.Branch))),
+            commit("52c7a90", listOf("7d0e6f1"), 5, "结算页拆成三步", 1, listOf(0 to 0, 1 to 0)),
+            commit("7d0e6f1", listOf("c18b2a4"), 26, "商品卡片加载时显示骨架屏", 0, listOf(0 to 0), listOf(Ref("v1.4.0", RefKind.Tag))),
+            commit("c18b2a4", listOf("0fa93d5"), 50, "升级到 Vite 7", 0, listOf(0 to 0)),
+            commit("0fa93d5", listOf("6e2b81c"), 74, "购物车数量为 0 时不能下单", 0, listOf(0 to 0)),
+            commit("6e2b81c", emptyList(), 98, "接入前端错误监控", 0, emptyList()),
+        )
+        val git = GitUiState(dir = web, status = GitStatusResponse("main", "origin/main", 0, 0), commits = commits)
+
+        for (isDark in listOf(false, true)) {
+            val tail = if (isDark) "-dark" else ""
+            val s = UiStyle.Sticker
+            shot("readme-sessions$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("readme-permission$tail", isDark, look = s, fresh = true) { ChatScreen(checkout, ChatActions()) }
+            shot("readme-agents$tail", isDark, look = s, fresh = true) { ChatScreen(timeout, ChatActions()) }
+            shot("readme-git$tail", isDark, nav = 2, look = s, fresh = true) { GitScreen(git, GitActions()) }
+            cover(tail, isDark)
+        }
+    }
+
+    /**
+     * readme-cover: the four README shots as 贴纸 stickers on its dotted paper, ink outline and hard
+     * shadow, each set a little higher or lower; design/screenshots/cover.png is a copy of it.
+     */
+    private fun cover(tail: String, isDark: Boolean) {
+        val ink = if (isDark) 0xFF000000.toInt() else 0xFF1E1B2E.toInt()
+        val bmp = Bitmap.createBitmap(1800, 820, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bmp)
+        canvas.drawColor(if (isDark) 0xFF1C1A27.toInt() else 0xFFFFF6E9.toInt())
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        paint.color = if (isDark) 0x14FFFFFF else 0x1E1E1B2E
+        for (y in 14 until bmp.height step 28) for (x in 14 until bmp.width step 28) canvas.drawCircle(x.toFloat(), y.toFloat(), 2f, paint)
+        listOf("sessions" to 96, "permission" to 44, "agents" to 136, "git" to 70).forEachIndexed { i, (name, top) ->
+            val shot = android.graphics.BitmapFactory.decodeFile(File(out, "readme-$name$tail.png").path)
+            // Two smaller steps down to 360 wide: one bilinear step from 1170 drops strokes of the text.
+            val half = Bitmap.createScaledBitmap(shot, 720, shot.height * 720 / shot.width, true)
+            val phone = Bitmap.createScaledBitmap(half, 360, half.height / 2, true)
+            val x = 90f + i * 420
+            val y = top.toFloat()
+            paint.color = ink
+            canvas.drawRoundRect(x + 9, y + 9, x + 379, y + phone.height + 19, 46f, 46f, paint)
+            canvas.drawRoundRect(x - 5, y - 5, x + 365, y + phone.height + 5, 46f, 46f, paint)
+            val image = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+            image.shader = android.graphics.BitmapShader(phone, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+                .apply { setLocalMatrix(android.graphics.Matrix().apply { setTranslate(x, y) }) }
+            canvas.drawRoundRect(x, y, x + 360, y + phone.height, 40f, 40f, image)
+        }
+        File(out, "readme-cover$tail.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
     /** The minimal shots again in dark, 格栅 and 贴纸. */
     private val styleVariants = listOf(
         Triple("", false, UiStyle.Clear),
