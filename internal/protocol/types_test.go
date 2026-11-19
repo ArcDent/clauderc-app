@@ -269,6 +269,7 @@ var errorCodes = map[protocol.ErrorCode]string{
 	protocol.CodePendingChanged:        "pendingChanged",
 	protocol.CodeNotDelivered:          "notDelivered",
 	protocol.CodeDirNotFound:           "dirNotFound",
+	protocol.CodeNotTrusted:            "notTrusted",
 	protocol.CodeNotGitRepo:            "notGitRepo",
 	protocol.CodeNeedsConfirmation:     "needsConfirmation",
 	protocol.CodeGitFailed:             "gitFailed",

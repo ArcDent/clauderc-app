@@ -49,6 +49,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
@@ -65,6 +66,7 @@ import org.junit.Test
 /** Tasks 13.1 to 13.4: the chat view model against a scripted relay. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatLogicTest {
+    @get:org.junit.Rule val tmp = org.junit.rules.TemporaryFolder()
     private val dispatcher = UnconfinedTestDispatcher()
     private val scope = CoroutineScope(dispatcher + Job())
     private val relay = FakeRelay()
@@ -118,6 +120,62 @@ class ChatLogicTest {
         assertEquals(102L, vm.state.value.items.last().seq)
         gate.complete(Unit)
         assertFalse(vm.state.value.sending)
+    }
+
+    @Test fun typingIsKeptAsTheDraftOnceItPausesForHalfASecond() = runTest(dispatcher) {
+        val storeScope = CoroutineScope(Dispatchers.IO + Job())
+        val drafts = clauderc.app.data.DraftStore(
+            androidx.datastore.preferences.core.PreferenceDataStoreFactory.create(scope = storeScope, produceFile = { java.io.File(tmp.root, "drafts.preferences_pb") }),
+        )
+        val vm = ChatViewModel("m-1", "s-need", relay, Fleet(relay, scope), scope, compress = { it }, background = dispatcher, drafts = drafts)
+        vm.typed("改一")
+        advanceTimeBy(300)
+        vm.typed("改一下标题")
+        advanceTimeBy(DRAFT_SAVE_MILLIS - 100)
+        assertEquals("nothing kept while typing goes on", "", drafts.draft("m-1", "s-need").first())
+        advanceTimeBy(200)
+        assertEquals("改一下标题", clauderc.app.testing.eventually { drafts.draft("m-1", "s-need").first { it.isNotEmpty() } })
+        assertEquals("one machine and session each", "", drafts.draft("m-1", "s-work").first())
+        storeScope.cancel()
+    }
+
+    @Test fun aRunTakesEveryCallButPicturesSubagentsCommandsAndMessages() {
+        fun call(id: String, name: String, summary: String, input: kotlinx.serialization.json.JsonElement = kotlinx.serialization.json.JsonNull, result: ToolResult? = ToolResult("")) =
+            ChatItem(0, ItemKind.TOOL, tool = ToolCall(id, name, summary, input, result))
+        val items = listOf(
+            call("e", "Edit", "编辑 a.go"),
+            call("w", "Write", "写入 b.go"),
+            call("r", "Bash", "运行 go test", buildJsonObject { put("command", "go test") }, result = null),
+            call("i", "Read", "读取 shot.png", result = ToolResult("", images = listOf(clauderc.app.protocol.ToolImage("img1", "image/png")))),
+            call("g", "Grep", "搜索 TODO"),
+            ChatItem(0, ItemKind.TOOL, tool = ToolCall("a", "Agent", "Agent", agent = clauderc.app.protocol.Subagent("ag", "Explore", "读一遍", running = true, startedAt = java.time.Instant.EPOCH))),
+            call("f", "WebFetch", "WebFetch"),
+            call("command-9", "/compact", "/compact"),
+            call("m", "SendMessage", "SendMessage", buildJsonObject { put("to", "协议文档"); put("message", "好") }),
+            call("t1", "TodoWrite", "TodoWrite"),
+        ).mapIndexed { i, it -> it.copy(seq = i + 1L) }
+        // An edit, a write and a running command run together; the picture, the subagent, the slash command and the message stand alone.
+        assertEquals(listOf(listOf("e", "w", "r"), listOf("i"), listOf("g"), listOf("a"), listOf("f"), listOf("command-9"), listOf("m"), listOf("t1")), chatRuns(items).map { run -> run.map { it.tool!!.toolUseId } })
+    }
+
+    @Test fun aMergedRowNamesWhatItDidInTheOrderItCame() {
+        fun call(name: String, summary: String, input: kotlinx.serialization.json.JsonElement = kotlinx.serialization.json.JsonNull, result: ToolResult = ToolResult("")) =
+            ToolCall(summary, name, summary, input, result)
+        val tools = listOf(
+            call("Bash", "运行 go list ./...", buildJsonObject { put("command", "go list ./...") }),
+            call("Read", "读取 go.mod"),
+            call("Read", "读取 AGENTS.md"),
+            call("Bash", "运行 ls internal", buildJsonObject { put("command", "ls internal") }),
+            call("Edit", "编辑 envelope.go", result = ToolResult(patch = listOf(Hunk(1, 1, 1, 2, listOf("-a", "+b", "+c"))))),
+            call("TodoWrite", "TodoWrite"),
+            call("TodoWrite", "TodoWrite"),
+            call("Bash", "运行 rm -rf build", buildJsonObject { put("command", "rm -rf build") }, ToolResult("The user doesn't want to proceed with this tool use.", isError = true)),
+        )
+        val head = groupSummary(tools, androidx.compose.ui.graphics.Color.Black, androidx.compose.ui.graphics.Color.Red)
+        assertEquals("运行 2 条命令，读取 2 个文件，列出 1 个目录，编辑 envelope.go，TodoWrite 2 次，1 条已拒绝", head.text)
+        assertEquals(androidx.compose.ui.graphics.Color.Red, head.spanStyles.last().item.color)
+        assertEquals(PatchStat(added = 2, deleted = 1), groupStat(tools))
+        assertNull("reads change no lines", groupStat(tools.take(3)))
     }
 
     @Test fun aSlashCommandGivesWayToItsCommandRow() {
@@ -463,7 +521,6 @@ class ChatLogicTest {
         )
         assertEquals(7, patchTotal(edit, rows))
         assertEquals(PatchStat(added = 3, deleted = 1), patchStat(edit, rows))
-        assertTrue(opensByDefault(edit))
     }
 
     @Test fun aWriteIsAllAddedAndAReadIsItsNumberedLines() {
@@ -477,7 +534,6 @@ class ChatLogicTest {
         val rrows = patchRows(read)!!
         assertEquals(listOf(PatchRow(RowKind.SAME, 1, "# proj"), PatchRow(RowKind.SAME, 2, ""), PatchRow(RowKind.SAME, 3, "hello")), rrows)
         assertEquals(PatchStat(read = 3), patchStat(read, rrows))
-        assertFalse(opensByDefault(read))
         // Older Claude Code numbered lines with an arrow.
         assertEquals(PatchRow(RowKind.SAME, 12, "x := 1"), patchRows(ToolResult("    12→x := 1", lines = 1))!!.single())
         // Anything else keeps its plain detail.
@@ -524,8 +580,20 @@ class ChatLogicTest {
         assertEquals(2, relay.sent(Method.CHAT_TOOL_OUTPUT).size)
     }
 
-    private fun call(id: String, name: String, input: Map<String, String>) =
-        ToolCall(id, name, "", buildJsonObject { input.forEach { (k, v) -> put(k, v) } }, ToolResult(""))
+    /** A finished call with the one-line summary the agent writes for it (transcript.summary). */
+    private fun call(id: String, name: String, input: Map<String, String>): ToolCall {
+        val summary = when (name) {
+            "Bash" -> "运行 " + input["command"]
+            "Read" -> "读取 " + input["file_path"]!!.substringAfterLast('/')
+            "Edit" -> "编辑 " + input["file_path"]!!.substringAfterLast('/')
+            "Write" -> "写入 " + input["file_path"]!!.substringAfterLast('/')
+            "Grep", "Glob" -> "搜索 " + input["pattern"]
+            else -> name
+        }
+        return ToolCall(id, name, summary, buildJsonObject { input.forEach { (k, v) -> put(k, v) } }, ToolResult(""))
+    }
+
+    private fun summary(tools: List<ToolCall>) = groupSummary(tools, androidx.compose.ui.graphics.Color.Black, androidx.compose.ui.graphics.Color.Red).text
 
     /** The acceptance run: Grep, Read, Read, `ls src`, `go test`. */
     private val run = listOf(
@@ -538,19 +606,20 @@ class ChatLogicTest {
 
     private fun tools(seq: Long, calls: List<ToolCall>) = calls.mapIndexed { i, t -> ChatItem(seq + i, ItemKind.TOOL, tool = t) }
 
-    @Test fun searchesReadsListingsAndCommandsInARowMergeIntoOneEntry() {
+    @Test fun fiveCallsInARowMergeIntoOneEntry() {
         val runs = chatRuns(tools(1, run))
         assertEquals(1, runs.size)
         assertEquals(5, runs.single().size)
-        assertEquals("搜索 1 个模式，读取 2 个文件，列出 1 个目录，运行 1 条命令", groupSummary(run))
+        assertEquals("搜索 Envelope，读取 2 个文件，列出 1 个目录，运行 go test", summary(run))
     }
 
-    @Test fun aReplyEditOrWriteEndsTheRunAndOneCallStaysAlone() {
+    @Test fun aReplyOrAPictureEndsTheRunAndOneCallStaysAlone() {
         val split = chatRuns(tools(1, run.take(2)) + ChatItem(3, ItemKind.ASSISTANT, text = "看一下") + tools(4, run.drop(2)))
         assertEquals(listOf(2, 1, 3), split.map { it.size })
+        // Edits and writes join the run too (tool view A).
         val edit = call("e1", "Edit", mapOf("file_path" to "/p/x.go"))
         val write = call("w1", "Write", mapOf("file_path" to "/p/y.go"))
-        assertEquals(listOf(1, 1, 1, 1, 1), chatRuns(tools(1, listOf(run[0], edit, run[1], write, run[4]))).map { it.size })
+        assertEquals(listOf(5), chatRuns(tools(1, listOf(run[0], edit, run[1], write, run[4]))).map { it.size })
         assertEquals(listOf(1), chatRuns(tools(1, listOf(run[1]))).map { it.size })
         // Slash commands and clauderc show are rows of their own.
         val show = call("s1", "Bash", mapOf("command" to "clauderc show /tmp/a.png"))
@@ -565,9 +634,9 @@ class ChatLogicTest {
     }
 
     @Test fun summaryCountsOnlyWhatIsThere() {
-        assertEquals("读取 2 个文件", groupSummary(run.subList(1, 3)))
-        assertEquals("列出 1 个目录，运行 1 条命令", groupSummary(run.subList(3, 5)))
-        assertEquals("搜索 2 个模式", groupSummary(listOf(run[0], call("g", "Glob", mapOf("pattern" to "*.go")))))
+        assertEquals("读取 2 个文件", summary(run.subList(1, 3)))
+        assertEquals("列出 1 个目录，运行 go test", summary(run.subList(3, 5)))
+        assertEquals("搜索 2 个模式", summary(listOf(run[0], call("g", "Glob", mapOf("pattern" to "*.go")))))
     }
 
     @Test fun aPictureIsFetchedOnceAndAFailureIsMarked() = runTest(dispatcher) {

@@ -235,9 +235,15 @@ func childEnv(extra []string) []string {
 }
 
 func open(opts Options, id string) (*Conn, error) {
-	argv := opts.Command(id)
+	return start(opts.Command(id), "", opts.Env, opts.Quiet, opts.ReadyTimeout)
+}
+
+// start runs argv in dir (the agent's own when empty) in a new terminal
+// and waits until its output stays quiet for quiet, at most ready.
+func start(argv []string, dir string, env []string, quiet, ready time.Duration) (*Conn, error) {
 	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Env = childEnv(opts.Env)
+	cmd.Dir = dir
+	cmd.Env = childEnv(env)
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: Rows, Cols: Cols})
 	if err != nil {
 		return nil, err
@@ -249,7 +255,7 @@ func open(opts Options, id string) (*Conn, error) {
 	}()
 	go c.pump()
 	go c.answerCursor()
-	c.waitQuiet(context.Background(), opts.Quiet, opts.ReadyTimeout)
+	c.waitQuiet(context.Background(), quiet, ready)
 	return c, nil
 }
 

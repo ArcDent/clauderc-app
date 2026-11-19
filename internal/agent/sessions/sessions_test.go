@@ -524,3 +524,72 @@ func TestRunningSubagents(t *testing.T) {
 		}
 	}
 }
+
+// The list carries each session's branch from the end of its transcript;
+// the worktree branch from the job record stands in while there is none.
+// The worktree and fork sessions are discovery's v2327 sample.
+func TestSessionBranches(t *testing.T) {
+	f := newFixture(t)
+	_ = os.Remove(filepath.Join(f.sample, "agents.json"))
+	if err := os.CopyFS(f.sample, os.DirFS(filepath.Join("..", "discovery", "testdata", "v2327"))); err != nil {
+		t.Fatal(err)
+	}
+	extra := `,
+  {"pid": 9, "id": "devb0001", "cwd": "/w/d", "kind": "background", "startedAt": 1794529871000, "sessionId": "9a1c2a5e-0000-4000-8000-0000000000d1", "status": "idle", "state": "done"},
+  {"pid": 10, "id": "nogit001", "cwd": "/w/n", "kind": "background", "startedAt": 1794529871000, "sessionId": "9a1c2a5e-0000-4000-8000-0000000000d2", "status": "idle", "state": "done"}
+]`
+	for _, name := range []string{"agents.json", "agents-active.json"} {
+		path := filepath.Join(f.sample, name)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := strings.TrimRight(strings.TrimSpace(string(raw)), "]")
+		if err := os.WriteFile(path, []byte(strings.TrimRight(body, "\n")+extra), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(project, id, branch string) {
+		t.Helper()
+		path := filepath.Join(f.sample, "projects", project, id+".jsonl")
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		line := fmt.Sprintf(`{"type":"user","gitBranch":%q,"message":{"role":"user","content":"hi"}}`+"\n", branch)
+		if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("-w-d", "9a1c2a5e-0000-4000-8000-0000000000d1", "dev")
+	write("-w-n", "9a1c2a5e-0000-4000-8000-0000000000d2", "HEAD")
+
+	res := f.h.Handle(context.Background(), request("r1", "c1", protocol.MethodSessionsSubscribe))
+	if res.Error != nil {
+		t.Fatalf("subscribe: %+v", res.Error)
+	}
+	var list protocol.SessionList
+	if err := json.Unmarshal(res.Body, &list); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]protocol.Session{}
+	for _, s := range list.Sessions {
+		got[s.ID] = s
+	}
+	for id, want := range map[string]string{
+		"wtree001": "worktree-fox", // its transcript, in the worktree's project dir
+		"fork0001": "main",         // the fork works in the original checkout
+		"wtstop01": "worktree-old", // no transcript: the job record's worktree branch
+		"devb0001": "dev",
+		"nogit001": "",
+	} {
+		if g := got[id].Branch; g != want {
+			t.Errorf("%s branch = %q, want %q", id, g, want)
+		}
+	}
+	if g := got["wtree001"]; g.Dir != "/w/repo" || g.Worktree == nil || g.Worktree.Name != "fox" {
+		t.Errorf("worktree session dir %q worktree %+v", g.Dir, g.Worktree)
+	}
+	if g := got["fork0001"]; g.ForkOf != "wtree001" {
+		t.Errorf("fork session forkOf %q, want wtree001", g.ForkOf)
+	}
+}

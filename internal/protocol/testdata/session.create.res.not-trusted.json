@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-033",
+  "method": "session.create",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "error": {"code": "notTrusted", "message": "这个目录还没被 Claude Code 信任：/Users/me/code/new-repo。请先在目标机上进入这个目录运行一次 claude，接受信任提示后再试"}
+}

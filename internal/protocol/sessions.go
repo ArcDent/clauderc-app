@@ -56,6 +56,27 @@ type Session struct {
 	// Agents are the subagents of a running session that still run, in
 	// the order they were started; absent when none.
 	Agents []Subagent `json:"agents,omitempty"`
+	// Dir is the directory the session is listed under: for a session in a
+	// git worktree the checkout the worktree was made from, else Cwd.
+	// Older agents leave it out; use Cwd then.
+	Dir string `json:"dir,omitempty"`
+	// Branch is the git branch of the session's last transcript entry, or
+	// the worktree's branch until the transcript is read; absent outside a
+	// git repository.
+	Branch string `json:"branch,omitempty"`
+	// Worktree is set while the session works in a git worktree.
+	Worktree *SessionWorktree `json:"worktree,omitempty"`
+	// ForkOf is the short id of the session this one was forked from with
+	// /fork; absent for a session that is not a fork.
+	ForkOf string `json:"forkOf,omitempty"`
+}
+
+// SessionWorktree is the git worktree a session works in.
+type SessionWorktree struct {
+	// Name is the worktree's directory name under .claude/worktrees.
+	Name string `json:"name"`
+	// Path is the worktree's absolute path; git methods take it as cwd.
+	Path string `json:"path"`
 }
 
 // SessionContext is the context window use of a session.
@@ -80,6 +101,10 @@ type SessionCreateRequest struct {
 	Name      string `json:"name,omitempty"`
 	// Prompt is the optional first message.
 	Prompt string `json:"prompt,omitempty"`
+	// Trust answers yes to Claude Code's trust prompt for Cwd when the
+	// launch finds the directory untrusted, then launches again; without
+	// it such a launch fails with CodeNotTrusted.
+	Trust bool `json:"trust,omitempty"`
 }
 
 // SessionCreateResponse answers session.create.

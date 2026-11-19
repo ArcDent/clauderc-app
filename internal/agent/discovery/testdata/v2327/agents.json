@@ -1,0 +1,5 @@
+[
+  {"pid": 301, "id": "wtree001", "cwd": "/w/repo/.claude/worktrees/fox", "kind": "background", "startedAt": 1795047861885, "sessionId": "9a1c2a5e-0000-4000-8000-0000000000a1", "name": "repo work", "status": "idle", "state": "done"},
+  {"pid": 302, "id": "fork0001", "cwd": "/w/repo", "kind": "background", "startedAt": 1795047962540, "sessionId": "9a1c2a5e-0000-4000-8000-0000000000a2", "name": "repo work ⑂ 只回复 FORKED", "status": "idle", "state": "done"},
+  {"id": "wtstop01", "cwd": "/w/repo", "kind": "background", "startedAt": 1795047000000, "sessionId": "9a1c2a5e-0000-4000-8000-0000000000a3", "name": "stopped in worktree", "state": "done"}
+]

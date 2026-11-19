@@ -581,9 +581,21 @@ func isTaskNotification(s string) bool {
 	return strings.HasPrefix(s, "<task-notification>") && strings.HasSuffix(s, "</task-notification>")
 }
 
+// forkSourceName finds the source's name in the notification Claude Code
+// 2.1.327 puts where a /fork copy's own conversation starts: "... a
+// session whose self-reported name is 'NAME'. The conversation up to ...".
+var forkSourceName = regexp.MustCompile(`(?s)self-reported name is '(.*?)'\.\s+The conversation up to`)
+
 // taskNotificationText is the grey line of a background task notification:
 // its summary, with the first line of the event after it when there is one.
+// A fork's start marker says which session the history above came from.
 func taskNotificationText(s string) string {
+	if strings.Contains(s, "<fork-source>") {
+		if m := forkSourceName.FindStringSubmatch(s); m != nil && strings.TrimSpace(m[1]) != "" {
+			return "以上来自「" + strings.TrimSpace(m[1]) + "」"
+		}
+		return "以上来自另一个会话"
+	}
 	summary := ""
 	if m := taskSummary.FindStringSubmatch(s); m != nil {
 		summary = strings.TrimSpace(m[1])

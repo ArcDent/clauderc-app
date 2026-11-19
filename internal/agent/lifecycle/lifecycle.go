@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"clauderc/internal/agent"
+	"clauderc/internal/agent/attach"
 	"clauderc/internal/agent/config"
 	"clauderc/internal/agent/discovery"
 	"clauderc/internal/protocol"
@@ -142,9 +143,16 @@ func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest)
 	}
 	const failed = "启动 claude 失败，请在目标机上查看日志"
 	out, err := h.run(ctx, req.Cwd, t.ProviderEnv, "--bg", args)
+	if err != nil && untrusted(out) && req.Trust {
+		if err := attach.Trust(ctx, req.Cwd, []string{h.opts.Source.ClaudePath}, envList(t.ProviderEnv)); err != nil {
+			h.opts.Logger.Error("trust prompt", "err", err)
+			return "", &protocol.Error{Code: protocol.CodeInternal, Message: "没能在目标机上确认信任这个目录，请在目标机上进入 " + req.Cwd + " 运行一次 claude，选「Yes, I trust this folder」后再试"}
+		}
+		out, err = h.run(ctx, req.Cwd, t.ProviderEnv, "--bg", args)
+	}
 	if err != nil {
-		if bytes.Contains(ansi.ReplaceAll(out, nil), []byte("Workspace not trusted")) {
-			return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "这个目录还没被信任：" + req.Cwd + "。请先在目标机上进入这个目录运行一次 claude，接受信任提示后再试"}
+		if untrusted(out) {
+			return "", &protocol.Error{Code: protocol.CodeNotTrusted, Message: "这个目录还没被 Claude Code 信任：" + req.Cwd + "。请先在目标机上进入这个目录运行一次 claude，接受信任提示后再试"}
 		}
 		return "", h.internal(failed, err)
 	}
@@ -332,11 +340,22 @@ func (h *Handler) run(ctx context.Context, dir string, env map[string]string, la
 	return out, nil
 }
 
+// untrusted reports whether claude refused to launch in a directory it
+// has not been told to trust.
+func untrusted(out []byte) bool {
+	return bytes.Contains(ansi.ReplaceAll(out, nil), []byte("Workspace not trusted"))
+}
+
 // environ is the agent's environment without the enroll key, with extra
 // added; exec keeps the last value of a repeated name, so extra wins.
-// Names that cannot be environment names are skipped.
 func environ(extra map[string]string) []string {
-	env := config.Environ()
+	return append(config.Environ(), envList(extra)...)
+}
+
+// envList is extra as NAME=value lines in name order. Names that cannot
+// be environment names are skipped.
+func envList(extra map[string]string) []string {
+	var env []string
 	names := make([]string, 0, len(extra))
 	for k := range extra {
 		if k != "" && !strings.ContainsAny(k, "=\x00") && !strings.Contains(extra[k], "\x00") {

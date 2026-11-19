@@ -604,3 +604,73 @@ func TestClaudeAgentsGetsNoEnrollKey(t *testing.T) {
 		t.Error("claude agents got the enroll key")
 	}
 }
+
+// TestSessionsWorktreeAndFork uses the records of a real worktree session
+// and a /fork copy of it (Claude Code 2.1.327, paths replaced).
+func TestSessionsWorktreeAndFork(t *testing.T) {
+	got, err := sampleSource(t, "v2327").Sessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	type want struct {
+		id, cwd, dir, branch, forkOf string
+		worktree                     *protocol.SessionWorktree
+	}
+	wants := []want{
+		// Running in its worktree: claude reports the worktree as cwd.
+		{"wtree001", "/w/repo/.claude/worktrees/fox", "/w/repo", "worktree-fox", "", &protocol.SessionWorktree{Name: "fox", Path: "/w/repo/.claude/worktrees/fox"}},
+		{"fork0001", "/w/repo", "/w/repo", "", "wtree001", nil},
+		// Stopped: claude reports the original checkout, the record keeps the worktree.
+		{"wtstop01", "/w/repo", "/w/repo", "worktree-old", "", &protocol.SessionWorktree{Name: "old", Path: "/w/repo/.claude/worktrees/old"}},
+	}
+	if len(got) != len(wants) {
+		t.Fatalf("got %d sessions, want %d: %+v", len(got), len(wants), got)
+	}
+	for i, w := range wants {
+		g := got[i]
+		if g.ID != w.id || g.Cwd != w.cwd || g.Dir != w.dir || g.Branch != w.branch || g.ForkOf != w.forkOf || !reflect.DeepEqual(g.Worktree, w.worktree) {
+			t.Errorf("session %d = {id %s cwd %s dir %s branch %q forkOf %q worktree %+v}, want %+v",
+				i, g.ID, g.Cwd, g.Dir, g.Branch, g.ForkOf, g.Worktree, w)
+		}
+	}
+}
+
+// TestSessionsWorktreeFromPath covers sessions without a job record: a cwd
+// under .claude/worktrees still names the checkout, a fork whose source
+// is gone keeps Claude Code's short id of it, and a plain session lists
+// under its own cwd.
+func TestSessionsWorktreeFromPath(t *testing.T) {
+	dir := t.TempDir()
+	agents := `[
+  {"pid": 1, "id": "path0001", "cwd": "/w/a/.claude/worktrees/b/sub", "kind": "background", "startedAt": 1794529871000, "sessionId": "9a1c2a5e-0000-4000-8000-0000000000b1", "status": "idle", "state": "done"},
+  {"pid": 2, "id": "orph0001", "cwd": "/w/a", "kind": "background", "startedAt": 1794529871000, "sessionId": "9a1c2a5e-0000-4000-8000-0000000000b2", "status": "idle", "state": "done"},
+  {"pid": 3, "id": "plain001", "cwd": "/w/plain", "kind": "background", "startedAt": 1794529871000, "sessionId": "9a1c2a5e-0000-4000-8000-0000000000b3", "status": "idle", "state": "done"}
+]`
+	if err := os.WriteFile(filepath.Join(dir, "agents.json"), []byte(agents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job := filepath.Join(dir, "jobs", "orph0001")
+	if err := os.MkdirAll(job, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	state := `{"state": "done", "cwd": "/w/a", "forkSessionId": "9a1c2a5e-0000-4000-8000-0000000000b2", "forkParentSessionId": "c0ffee11-0000-4000-8000-000000000000"}`
+	if err := os.WriteFile(filepath.Join(job, "state.json"), []byte(state), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := sourceAt(t, dir).Sessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d sessions", len(got))
+	}
+	if g := got[0]; g.Dir != "/w/a" || !reflect.DeepEqual(g.Worktree, &protocol.SessionWorktree{Name: "b", Path: "/w/a/.claude/worktrees/b"}) || g.Branch != "" {
+		t.Errorf("worktree by path = dir %s worktree %+v branch %q", g.Dir, g.Worktree, g.Branch)
+	}
+	if g := got[1]; g.ForkOf != "c0ffee11" || g.Worktree != nil {
+		t.Errorf("fork of a session no longer listed: forkOf %q worktree %+v", g.ForkOf, g.Worktree)
+	}
+	if g := got[2]; g.Dir != "/w/plain" || g.Worktree != nil || g.ForkOf != "" {
+		t.Errorf("plain session: dir %s worktree %+v forkOf %q", g.Dir, g.Worktree, g.ForkOf)
+	}
+}

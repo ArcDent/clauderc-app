@@ -75,6 +75,7 @@ object ErrorCode {
     const val PENDING_CHANGED = "pendingChanged"
     const val NOT_DELIVERED = "notDelivered"
     const val DIR_NOT_FOUND = "dirNotFound"
+    const val NOT_TRUSTED = "notTrusted"
     const val NOT_GIT_REPO = "notGitRepo"
     const val NEEDS_CONFIRMATION = "needsConfirmation"
     const val GIT_FAILED = "gitFailed"

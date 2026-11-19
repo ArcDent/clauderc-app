@@ -6,11 +6,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercRoot
+import clauderc.app.ui.components.LocalLoadingPolicy
+import clauderc.app.ui.components.LoadingPolicy
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
@@ -21,12 +25,16 @@ class MainActivity : ComponentActivity() {
         val container = (application as ClaudercApp).container
         // A few bytes on disk; reading them first keeps the first frame from showing the wrong theme.
         val initial = runBlocking { container.theme.appearance.first() }
+        // Read before the first frame too: the start-up cover is the first load it decides on.
+        val alwaysInitial = runBlocking { container.theme.alwaysLoading.first() }
         setContent {
             val look by container.theme.appearance.collectAsStateWithLifecycle(initial)
+            val always by container.theme.alwaysLoading.collectAsStateWithLifecycle(alwaysInitial)
+            val policy = remember(always) { LoadingPolicy(always, container.loadingFirsts) }
             ClaudercRoot(look) {
                 val dark = Clauderc.colors.isDark
                 SideEffect { themedSystemBars(dark) }
-                ClaudercNav(container)
+                CompositionLocalProvider(LocalLoadingPolicy provides policy) { ClaudercNav(container) }
             }
         }
     }

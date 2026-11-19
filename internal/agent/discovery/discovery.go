@@ -101,6 +101,55 @@ type jobState struct {
 	UpdatedAt   time.Time       `json:"updatedAt"`
 	// Detail is the one-line progress beside the job's state.
 	Detail string `json:"detail"`
+	// WorktreePath and WorktreeBranch are set once the session entered a
+	// worktree; Cwd then stays the original checkout, which OriginCwd
+	// names too when Claude Code writes it (2.1.327 does not).
+	WorktreePath   string `json:"worktreePath"`
+	WorktreeBranch string `json:"worktreeBranch"`
+	OriginCwd      string `json:"originCwd"`
+	// ForkParentSessionID is the full session id a /fork copy came from;
+	// forkSessionId beside it is the fork's own id.
+	ForkParentSessionID string `json:"forkParentSessionId"`
+}
+
+// worktreesDir is where Claude Code puts the worktrees of a checkout.
+const worktreesDir = "/.claude/worktrees/"
+
+// placeOf returns the directory a session in cwd is listed under and its
+// worktree, if any: from the job record when it names one, else from a
+// cwd inside <checkout>/.claude/worktrees/<name>.
+func placeOf(cwd string, job jobState) (string, *protocol.SessionWorktree) {
+	if job.WorktreePath != "" {
+		dir := job.OriginCwd
+		if dir == "" {
+			dir = job.Cwd
+		}
+		if dir == "" {
+			dir, _ = splitWorktree(job.WorktreePath)
+		}
+		if dir == "" {
+			dir = cwd
+		}
+		return dir, &protocol.SessionWorktree{Name: filepath.Base(job.WorktreePath), Path: job.WorktreePath}
+	}
+	if dir, name := splitWorktree(cwd); dir != "" {
+		return dir, &protocol.SessionWorktree{Name: name, Path: dir + worktreesDir + name}
+	}
+	return cwd, nil
+}
+
+// splitWorktree splits <checkout>/.claude/worktrees/<name>[/...] into the
+// checkout and the worktree name; both are empty for any other path.
+func splitWorktree(path string) (string, string) {
+	i := strings.Index(path, worktreesDir)
+	if i <= 0 {
+		return "", ""
+	}
+	name, _, _ := strings.Cut(path[i+len(worktreesDir):], "/")
+	if name == "" {
+		return "", ""
+	}
+	return path[:i], name
 }
 
 // sessionFile is the part of sessions/<pid>.json this package reads;
@@ -168,6 +217,8 @@ func (s Source) sessions(ctx context.Context) ([]protocol.Session, []protocol.Pr
 	sessions := []protocol.Session{}
 	profiles := []protocol.Profile{}
 	targets := []Target{}
+	// forkParents holds each fork's source session id, index for index.
+	forkParents := []string{}
 	for _, e := range entries {
 		if e.Kind != "background" {
 			continue
@@ -180,6 +231,11 @@ func (s Source) sessions(ctx context.Context) ([]protocol.Session, []protocol.Pr
 		p := profileOfJob(job)
 		running := e.PID != nil || e.Status == "" && active[e.ID]
 		t := Target{ID: e.ID, SessionID: e.SessionID, Cwd: e.Cwd, Running: running, Status: e.Status, State: e.State}
+		dir, worktree := placeOf(e.Cwd, job)
+		branch := ""
+		if worktree != nil {
+			branch = job.WorktreeBranch
+		}
 		sessions = append(sessions, protocol.Session{
 			ID:   e.ID,
 			Name: e.Name,
@@ -191,9 +247,29 @@ func (s Source) sessions(ctx context.Context) ([]protocol.Session, []protocol.Pr
 			LastActiveAt: last.UTC().Truncate(time.Second),
 			JobState:     e.State,
 			Detail:       strings.TrimSpace(job.Detail),
+			Dir:          dir,
+			Branch:       branch,
+			Worktree:     worktree,
 		})
 		profiles = append(profiles, p)
 		targets = append(targets, t)
+		forkParents = append(forkParents, job.ForkParentSessionID)
+	}
+	short := make(map[string]string, len(targets))
+	for _, t := range targets {
+		short[t.SessionID] = t.ID
+	}
+	for i, parent := range forkParents {
+		if parent == "" {
+			continue
+		}
+		// A source no longer listed keeps Claude Code's own short id, the
+		// first 8 characters of its session id.
+		id, ok := short[parent]
+		if !ok && len(parent) >= 8 {
+			id = parent[:8]
+		}
+		sessions[i].ForkOf = id
 	}
 	return sessions, profiles, targets, nil
 }

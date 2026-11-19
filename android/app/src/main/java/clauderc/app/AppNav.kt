@@ -89,6 +89,7 @@ import clauderc.app.settings.SettingsScreen
 import clauderc.app.ui.needsYou
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.LocalAppearance
+import clauderc.app.ui.components.LocalLoadingPolicy
 import clauderc.app.ui.theme.LocalThemeReveal
 import clauderc.app.ui.theme.accentColor
 import clauderc.app.ui.theme.Motion
@@ -173,7 +174,10 @@ private fun ClaudercPages(container: AppContainer, nav: NavHostController, haze:
             LaunchedEffect(vm) {
                 vm.created.collect { id -> nav.navigate(ChatRoute(r.machineId, id)) { popUpTo<CreateRoute> { inclusive = true } } }
             }
-            CreateSessionScreen(state, { nav.popFrom(entry) }, vm::submit, vm::setDir, vm::pickDir, vm::showAllDirs, vm::setName, vm::setPrompt)
+            CreateSessionScreen(
+                state, { nav.popFrom(entry) }, vm::submit, vm::setDir, vm::pickDir, vm::showAllDirs, vm::setName, vm::setPrompt,
+                onTrust = vm::trustAndCreate, onDismissTrust = vm::dismissTrust,
+            )
         }
         composable<ChatRoute> { entry ->
             val r = entry.toRoute<ChatRoute>()
@@ -327,6 +331,7 @@ private fun HomeNavBar(container: AppContainer, nav: NavHostController, haze: Ha
 private fun SettingsTab(container: AppContainer) {
     val look = LocalAppearance.current
     val store = container.theme
+    val alwaysLoading by store.alwaysLoading.collectAsStateWithLifecycle(LocalLoadingPolicy.current.always)
     val reveal = LocalThemeReveal.current
     // The new look spreads out from the tapped option; picking what is already set does nothing.
     fun pick(changed: Boolean, at: Offset, save: suspend () -> Unit) {
@@ -341,6 +346,8 @@ private fun SettingsTab(container: AppContainer) {
         onStyle = { style, at -> pick(style != look.style, at) { store.setStyle(style) } },
         onMode = { mode, at -> pick(mode != look.mode, at) { store.setMode(mode) } },
         onAccent = { accent, at -> pick(accent != look.accent, at) { store.setAccent(accent) } },
+        alwaysLoading = alwaysLoading,
+        onAlwaysLoading = { on -> container.scope.launch { store.setAlwaysLoading(on) } },
     )
 }
 
@@ -348,7 +355,7 @@ private fun SettingsTab(container: AppContainer) {
 private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHostController) {
     // The home page's entry: a tap that opens a page counts only while home is resumed.
     val home = LocalLifecycleOwner.current
-    val vm = viewModel(key = "sessions:$machineId") { SessionsViewModel(machineId, container.fleet, container.connection, container.profileNames) }
+    val vm = viewModel(key = "sessions:$machineId") { SessionsViewModel(machineId, container.fleet, container.connection, container.profileNames, container.drafts) }
     val state by vm.state.collectAsStateWithLifecycle()
     val snack = remember { SnackState() }
     LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
@@ -357,7 +364,7 @@ private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHost
         onRefresh = vm::refresh,
         onOpenChat = { nav.navigateFrom(home, ChatRoute(machineId, it.id)) },
         onCreate = { nav.navigateFrom(home, CreateRoute(machineId, it.profile.id)) },
-        onOpenGit = { container.selection.openGit(machineId, it.cwd) },
+        onOpenGit = { container.selection.openGit(machineId, it.worktree?.path ?: it.cwd) },
         onRename = vm::rename,
         onStop = vm::stop,
         onRemove = vm::remove,
@@ -365,6 +372,12 @@ private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHost
         onToggleDir = vm::toggleDir,
         snack = snack,
         onOpenAgent = { s, a -> nav.navigateFrom(home, agentRoute(machineId, s.id, a)) },
+        onToggleForks = vm::toggleForks,
+        onBranches = vm::openBranches,
+        onFilterBranch = vm::filterBranch,
+        onSwitchBranch = vm::switchBranch,
+        onConfirmSwitch = vm::confirmSwitch,
+        onDismissSwitch = vm::dismissSwitch,
     )
 }
 
@@ -426,7 +439,7 @@ private fun GitTab(container: AppContainer, machineId: String, nav: NavHostContr
 @Composable
 private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHostController, entry: NavBackStackEntry) {
     val context = LocalContext.current
-    val vm = viewModel { ChatViewModel(r.machineId, r.sessionId, container.connection, container.fleet, container.scope, cache = container.chatCache) }
+    val vm = viewModel { ChatViewModel(r.machineId, r.sessionId, container.connection, container.fleet, container.scope, cache = container.chatCache, drafts = container.drafts) }
     val state by vm.state.collectAsStateWithLifecycle()
     val snack = remember { SnackState() }
     LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
@@ -475,6 +488,7 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
             onImage = vm::loadImage,
             onOpenTerm = { nav.navigateFrom(entry, TermRoute(r.machineId, r.sessionId)) },
             onOpenAgent = { a -> if (a.id != null) nav.navigateFrom(entry, agentRoute(r.machineId, r.sessionId, a)) },
+            onDraft = vm::typed,
         ),
     )
 }

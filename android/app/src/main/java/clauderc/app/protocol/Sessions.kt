@@ -40,7 +40,19 @@ data class Session(
     val detail: String? = null,
     /** Subagents of a running session that still run, in start order; null when none. */
     val agents: List<Subagent>? = null,
+    /** Directory the session is listed under: a worktree session's original checkout. Null from older agents; use [cwd]. */
+    val dir: String? = null,
+    /** Git branch of the session's last transcript entry; null outside a git repository. */
+    val branch: String? = null,
+    /** Set while the session works in a git worktree. */
+    val worktree: SessionWorktree? = null,
+    /** Short id of the session this one was forked from with /fork; null when not a fork. */
+    val forkOf: String? = null,
 )
+
+/** The git worktree a session works in; git methods take [path] as cwd. */
+@Serializable
+data class SessionWorktree(val name: String, val path: String)
 
 @Serializable
 data class SessionContext(val usedTokens: Int, val windowTokens: Int)
@@ -57,6 +69,8 @@ data class SessionCreateRequest(
     val cwd: String,
     val name: String? = null,
     val prompt: String? = null,
+    /** Say yes to Claude Code's trust prompt for [cwd] first when it is untrusted; null leaves it out. */
+    val trust: Boolean? = null,
 )
 
 @Serializable

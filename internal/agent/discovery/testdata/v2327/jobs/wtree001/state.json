@@ -1,0 +1,27 @@
+{
+  "state": "done",
+  "detail": "README.md 末尾加 hello，commit 35127e4",
+  "respawnFlags": [
+    "--permission-mode",
+    "manual",
+    "--effort",
+    "low"
+  ],
+  "providerEnv": {},
+  "template": "bg",
+  "intent": "只回复 OK",
+  "name": "repo work",
+  "nameSource": "user",
+  "sessionId": "9a1c2a5e-0000-4000-8000-0000000000a1",
+  "resumeSessionId": "9a1c2a5e-0000-4000-8000-0000000000a1",
+  "daemonShort": "wtree001",
+  "cliVersion": "2.1.327",
+  "cwd": "/w/repo",
+  "worktreePath": "/w/repo/.claude/worktrees/fox",
+  "worktreeBranch": "worktree-fox",
+  "createdAt": "2026-11-19T00:24:21.626Z",
+  "updatedAt": "2026-11-19T00:26:00.103Z",
+  "firstTerminalAt": "2026-11-19T00:24:37.549Z",
+  "lastTerminalAt": "2026-11-19T00:26:00.103Z",
+  "backend": "daemon"
+}

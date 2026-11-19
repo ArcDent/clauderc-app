@@ -9,6 +9,10 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.performScrollTo
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
@@ -53,6 +57,7 @@ class SettingsTest {
             theme.setStyle(UiStyle.Clear)
             theme.setMode(ThemeMode.System)
             theme.setAccent(AccentChoice.Blue)
+            theme.setAlwaysLoading(false)
         }
     }
 
@@ -143,6 +148,22 @@ class SettingsTest {
         val x = with(compose.density) { 6.dp.toPx() }.toInt()
         button.readPixels(px, startX = x, startY = button.height / 2, width = 1, height = 1)
         assertEquals(dynamicLightColorScheme(compose.activity).primary.toArgb(), px[0])
+    }
+
+    @Test fun alwaysPlayLoadingIsAnOffSwitchUnderAnimationAndIsKept() {
+        openSettings()
+        val row = compose.onNode(hasText("总是播放加载动画") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Switch))
+        row.performScrollTo()
+        compose.onNodeWithText("动画").assertIsDisplayed()
+        compose.onNodeWithText("每次打开 APP，各页第一次加载都放一遍").assertIsDisplayed()
+        row.assertIsOff()
+        row.performClick()
+        compose.waitUntil(5_000) { runBlocking { theme.alwaysLoading.first() } }
+        row.assertIsOn()
+
+        compose.activityRule.scenario.recreate()
+        waitFor("深浅色")
+        compose.onNode(hasText("总是播放加载动画") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Switch)).performScrollTo().assertIsOn()
     }
 
     @Test fun picksSurviveRecreatingTheActivity() {

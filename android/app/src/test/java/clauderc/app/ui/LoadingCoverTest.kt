@@ -18,7 +18,12 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.data.UiStyle
+import androidx.compose.runtime.CompositionLocalProvider
+import clauderc.app.ui.components.FIRST_LOAD_HOLD_MILLIS
 import clauderc.app.ui.components.LOADING_DELAY_MILLIS
+import clauderc.app.ui.components.LoadingFirsts
+import clauderc.app.ui.components.LoadingPolicy
+import clauderc.app.ui.components.LocalLoadingPolicy
 import clauderc.app.ui.components.LoadingArt
 import clauderc.app.ui.components.LoadingArtwork
 import clauderc.app.ui.components.LoadingCover
@@ -41,17 +46,37 @@ class LoadingCoverTest {
 
     private var loading by mutableStateOf(true)
 
+    /** Which place's cover is up, and a key that mounts it anew, as opening the page again does. */
+    private var place by mutableStateOf(LoadingArt.Deal)
+    private var visit by mutableStateOf(0)
+
     /** A red page under the cover, so a corner pixel tells whether the page shows. */
-    private fun show() {
+    private fun show(policy: LoadingPolicy = LoadingPolicy()) {
         compose.mainClock.autoAdvance = false
         compose.setContent {
             ClaudercTheme(darkTheme = false) {
-                LoadingCover(loading, LoadingArt.Deal, Modifier.fillMaxSize(), label = "正在读取会话") {
-                    Box(Modifier.fillMaxSize().background(Color.Red))
+                CompositionLocalProvider(LocalLoadingPolicy provides policy) {
+                    key(place, visit) {
+                        LoadingCover(loading, place, Modifier.fillMaxSize(), label = "正在读取会话") {
+                            Box(Modifier.fillMaxSize().background(Color.Red))
+                        }
+                    }
                 }
             }
         }
         run(0)
+    }
+
+    /** Opens [art]'s place again with a load that takes [millis]; whether the cover ever came up. */
+    private fun openAgain(art: LoadingArt, millis: Long): Boolean {
+        compose.runOnUiThread { loading = true; place = art; visit++ }
+        run(16)
+        var seen = covered()
+        run(millis - 16)
+        seen = seen || covered()
+        compose.runOnUiThread { loading = false }
+        repeat(30) { run(100); seen = seen || covered() }
+        return seen
     }
 
     /** Lets the state written by the test reach the screen, then runs [millis]. */
@@ -90,6 +115,45 @@ class LoadingCoverTest {
         run(1_000)
         assertFalse("cover gone once loaded", covered())
         assertTrue("page shows once loaded", pageShows())
+    }
+
+    /**
+     * 「总是播放加载动画」: a place's first load since the app started is covered at once, though it is
+     * done in 0.2s, and the art stays 1.5s; its next load goes by the 300ms rule; each place counts on its own.
+     */
+    @Test fun withTheSwitchOnAPlacesFirstLoadIsCoveredAtOnceAndHeldOneAndAHalfSeconds() {
+        show(LoadingPolicy(always = true, LoadingFirsts()))
+        run(16)
+        assertTrue("covered at once", covered())
+        assertFalse(pageShows())
+        run(200 - 32)
+        compose.runOnUiThread { loading = false }
+        run(0)
+        // Held: still up and not fading just short of 1.5s after it came up.
+        run(FIRST_LOAD_HOLD_MILLIS - 200 - 50)
+        assertTrue("still up at 1.45s", covered())
+        assertFalse("the page waits under it", pageShows())
+        run(1_000)
+        assertFalse("gone after the hold and the fade", covered())
+        assertTrue(pageShows())
+
+        assertFalse("the same place's second 0.2s load is not covered", openAgain(LoadingArt.Deal, 200))
+        // The chat page played its first load; git's first one still plays.
+        assertTrue("chat's first load", openAgain(LoadingArt.Skeleton, 200))
+        assertFalse("chat's second load", openAgain(LoadingArt.Skeleton, 200))
+        assertTrue("git's first load after chat's", openAgain(LoadingArt.Trace, 200))
+    }
+
+    @Test fun withTheSwitchOffLoadsGoByThe300msRuleAndCountForNothing() {
+        val firsts = LoadingFirsts()
+        show(LoadingPolicy(always = false, firsts))
+        run(200 - 16)
+        assertFalse("no cover at 0.2s", covered())
+        compose.runOnUiThread { loading = false }
+        run(1_000)
+        assertFalse(covered())
+        // Loads made while it was off do not use up the place's first load.
+        assertTrue(LoadingPolicy(always = true, firsts).first(LoadingArt.Deal))
     }
 
     /** Every art draws in every style, and moves: two moments of its loop differ. */

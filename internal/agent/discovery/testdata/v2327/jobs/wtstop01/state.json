@@ -1,0 +1,14 @@
+{
+  "state": "done",
+  "respawnFlags": [
+    "--permission-mode",
+    "manual"
+  ],
+  "providerEnv": {},
+  "cwd": "/w/repo",
+  "worktreePath": "/w/repo/.claude/worktrees/old",
+  "worktreeBranch": "worktree-old",
+  "sessionId": "9a1c2a5e-0000-4000-8000-0000000000a3",
+  "daemonShort": "wtstop01",
+  "updatedAt": "2026-11-19T00:10:00.000Z"
+}

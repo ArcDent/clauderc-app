@@ -181,6 +181,8 @@ class ChatActions(
     val onOpenTerm: () -> Unit = {},
     /** Opens the read-only page of a subagent from its Agent row. */
     val onOpenAgent: (Subagent) -> Unit = {},
+    /** The composer's text was edited; kept as the session's draft. */
+    val onDraft: (String) -> Unit = {},
 )
 
 private enum class ChatSheet { Attach, Model, Mode }
@@ -710,7 +712,8 @@ private fun CommandView(tool: ToolCall) {
 
 /**
  * A tool call: a fold row whose detail is the diff view for an Edit, Write or Read and the input
- * and output for the rest. [full] is the whole result once chat.toolOutput brought it in.
+ * and output for the rest, all of it in a box that scrolls past [ToolBoxMax]. It starts folded; a
+ * result cut to 8 KB fetches its whole text when opened. [full] is that text once chat.toolOutput brought it in.
  */
 @Composable
 private fun ToolRow(tool: ToolCall, working: Boolean, full: ToolResult?, fetching: Boolean, onFetch: (String) -> Unit, onOpen: OpenImage) {
@@ -718,18 +721,10 @@ private fun ToolRow(tool: ToolCall, working: Boolean, full: ToolResult?, fetchin
     val (verb, arg) = splitSummary(tool)
     val result = full ?: tool.result
     val rows = remember(result) { patchRows(result) }
-    val fold = rememberFold(tool.toolUseId, expanded = opensByDefault(tool.result), decided = tool.result != null)
-    val scope = rememberCoroutineScope()
-    val scroll = LocalChatScroll.current
-    // A running edit has no diff yet: the default is applied when its result comes in, and the diff grows in.
-    LaunchedEffect(tool.result != null) {
-        if (tool.result != null && !fold.decided) {
-            fold.decided = true
-            if (opensByDefault(tool.result)) fold.reveal(scope, scroll)
-        }
+    val fold = rememberFold(tool.toolUseId)
+    LaunchedEffect(fold.expanded, tool.result?.truncated) {
+        if (fold.expanded && tool.result?.truncated == true && full == null) onFetch(tool.toolUseId)
     }
-    // 「展开全部」 on a cut result waits for the whole of it.
-    LaunchedEffect(full) { if (full != null && fold.wantAll) fold.showAll(scope, scroll) }
     // A read picture is titled in the viewer by the file it was read from.
     val file = tool.input.stringField("file_path")?.substringAfterLast('/')
     val images = tool.result?.images.orEmpty().map { if (it.name == null && file != null) it.copy(name = file) else it }
@@ -749,39 +744,22 @@ private fun ToolRow(tool: ToolCall, working: Boolean, full: ToolResult?, fetchin
             ) {
                 Spinner(Modifier.padding(start = Clauderc.spacing.sp2), size = 12.dp, color = c.fg3)
             }
-            when {
-                isRefusal(tool) -> Text("已拒绝", Modifier.padding(start = Clauderc.spacing.sp2), fontSize = Clauderc.fontSizes.caption, color = c.danger)
-                tool.result?.isError == true -> Text("出错", Modifier.padding(start = Clauderc.spacing.sp2), fontSize = Clauderc.fontSizes.caption, color = c.danger)
-            }
+            failWord(tool)?.let { Text(it, Modifier.padding(start = Clauderc.spacing.sp2), fontSize = Clauderc.fontSizes.caption, color = c.danger) }
         },
     ) {
         if (result != null && rows != null) {
-            val cut = result.truncated == true
-            val total = patchTotal(result, rows)
-            PatchDetail(
-                fold, rows, total,
-                more = (total ?: 0) > SHOW_LINES || cut,
-                fetching = fetching,
-                onMore = {
-                    if (cut) {
-                        fold.wantAll = true
-                        onFetch(tool.toolUseId)
-                    } else {
-                        fold.showAll(scope, scroll)
-                    }
-                },
-                onLess = { fold.showLess(scope, scroll, rows.lastIndex) },
-            )
+            PatchDetail(fold, rows, fetching)
         } else {
             FoldText(
                 buildAnnotatedString {
-                    toolDetail(tool).forEachIndexed { i, (k, v) ->
+                    toolDetail(tool.copy(result = result)).forEachIndexed { i, (k, v) ->
                         if (i > 0) append("\n")
                         withStyle(SpanStyle(color = c.fg3)) { append(k) }
                         append("\n")
                         withStyle(SpanStyle(color = c.fg)) { append(v) }
                     }
                 },
+                fetching = fetching,
             )
         }
     }
@@ -793,20 +771,19 @@ private fun ToolRow(tool: ToolCall, working: Boolean, full: ToolResult?, fetchin
 }
 
 /**
- * A run of searches, reads and commands as one row, as the CLI shows it: the counts, the latest
- * call's path or command under them, and the calls one by one once opened.
+ * Two or more tool calls in a row as one line, as in Claude's desktop app (tool view A): what was
+ * done, the lines its edits and writes changed, and the calls one by one once opened, each folded
+ * with its own result.
  */
 @Composable
 private fun ToolGroupRow(tools: List<ToolCall>, working: Boolean, outputs: ToolOutputs) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val fold = rememberFold("group-" + tools.first().toolUseId)
-    fold.hasLead = true
-    fold.leadPull = with(LocalDensity.current) { 4.dp.roundToPx() }
     val scope = rememberCoroutineScope()
     val scroll = LocalChatScroll.current
     val turn by animateFloatAsState(if (fold.expanded) 90f else 0f, Motion.turn(), label = "chevron")
-    val last = tools.last()
+    val grid = Clauderc.style == UiStyle.Grid
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier
@@ -815,29 +792,28 @@ private fun ToolGroupRow(tools: List<ToolCall>, working: Boolean, outputs: ToolO
                 .clickable(role = Role.Button, onClickLabel = if (fold.expanded) "收起" else "展开") { fold.toggle(scope, scroll) }
                 .padding(horizontal = sp.sp2, vertical = 6.dp)
                 .testTag("toolGroup"),
-            horizontalArrangement = Arrangement.spacedBy(sp.sp2),
-            verticalAlignment = Alignment.Top,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(groupSummary(tools), Modifier.weight(1f), fontSize = 13.sp, lineHeight = 1.5.em, color = c.fg2)
+            Text(
+                remember(tools, c.fg, c.danger) { groupSummary(tools, c.fg, c.danger) },
+                Modifier.weight(1f),
+                fontSize = if (grid) 12.sp else 13.sp,
+                fontFamily = if (grid) MonoFamily else null,
+                lineHeight = 1.5.em,
+                color = c.fg2,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            remember(tools) { groupStat(tools) }?.let { PatchStatText(it) }
             AnimatedVisibility(
-                last.result == null && working,
-                Modifier.padding(top = 3.dp),
+                tools.any { it.result == null } && working,
                 enter = fadeIn(Motion.enter()),
                 exit = fadeOut(Motion.exit()) + shrinkHorizontally(Motion.exit()),
             ) {
-                Spinner(size = 12.dp, color = c.fg3)
+                Spinner(Modifier.padding(start = sp.sp2), size = 12.dp, color = c.fg3)
             }
-            Icon(Symbols.ChevronRight, contentDescription = null, tint = c.fg3, modifier = Modifier.padding(top = 1.dp).size(18.dp).rotate(turn))
+            Icon(Symbols.ChevronRight, contentDescription = null, tint = c.fg3, modifier = Modifier.padding(start = sp.sp2).size(18.dp).rotate(turn))
         }
-        Text(
-            "└ " + splitSummary(last).second,
-            fold.leadModifier().padding(start = sp.sp2 + 2.dp, end = sp.sp2, bottom = 6.dp),
-            fontFamily = MonoFamily,
-            fontSize = Clauderc.fontSizes.monoSm,
-            color = c.fg3,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
         if (fold.open) {
             Column(fold.modifier().padding(start = sp.sp3)) {
                 tools.forEachIndexed { i, t ->
@@ -923,25 +899,22 @@ private fun FoldRow(verb: String?, arg: String, fold: Fold, status: @Composable 
     }
 }
 
-/** The plain detail of a fold row: mono text on the surface, scrolling past 360dp. */
+/** The plain detail of a fold row: mono text on the surface, in a box that scrolls past [ToolBoxMax]. */
 @Composable
-private fun FoldText(text: AnnotatedString) {
+private fun FoldText(text: AnnotatedString, fetching: Boolean = false) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
-    Text(
-        text,
-        modifier = Modifier
+    Column(
+        Modifier
             .padding(start = sp.sp2, end = sp.sp2, top = 2.dp, bottom = sp.sp2)
             .fillMaxWidth()
             .toolDetail()
-            .heightIn(max = 360.dp)
-            .verticalScroll(rememberScrollState())
+            .toolBox()
             .padding(horizontal = sp.sp4, vertical = sp.sp3),
-        fontFamily = MonoFamily,
-        fontSize = Clauderc.fontSizes.monoSm,
-        lineHeight = 1.6.em,
-        color = c.fg2,
-    )
+    ) {
+        Text(text, fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm, lineHeight = 1.6.em, color = c.fg2)
+        if (fetching) Fetching(Modifier.padding(top = sp.sp2))
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -996,9 +969,13 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                         haptic.tap()
                         val rest = text.removeRange(w.start, w.end).trim()
                         field = TextFieldValue(rest, TextRange(rest.length))
+                        actions.onDraft(rest)
                         actions.onOpenTerm()
                     }
-                    else -> field = pickCommand(field, w, cmd.name)
+                    else -> {
+                        field = pickCommand(field, w, cmd.name)
+                        actions.onDraft(field.text)
+                    }
                 }
             }
         }
@@ -1082,7 +1059,10 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
             ) { Icon(Symbols.Image, contentDescription = "添加图片", tint = if (enabled) c.fg2 else c.fg3) }
             BasicTextField(
                 value = field,
-                onValueChange = { field = it },
+                onValueChange = {
+                    if (it.text != field.text) actions.onDraft(it.text)
+                    field = it
+                },
                 enabled = enabled,
                 modifier = Modifier.weight(1f).padding(horizontal = 4.dp, vertical = 12.dp).testTag("composer"),
                 textStyle = TextStyle(color = c.fg, fontSize = Clauderc.fontSizes.body, lineHeight = 1.4.em),
@@ -1128,6 +1108,7 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                         when {
                             isModelCommand(text) -> {
                                 field = TextFieldValue()
+                                actions.onDraft("")
                                 onModels()
                             }
                             actions.onSend(text) -> {

@@ -13,6 +13,7 @@ object Symbols {
     val AccountTreeFilled by lazy { symbol("account_tree_filled", SymbolPaths.accountTreeFilled) }
     val Add by lazy { symbol("add", SymbolPaths.add) }
     val AltRoute by lazy { symbol("alt_route", SymbolPaths.altRoute) }
+    val Animation by lazy { symbol("animation", SymbolPaths.animation) }
     val ArrowBack by lazy { symbol("arrow_back", SymbolPaths.arrowBack) }
     val ArrowUpward by lazy { symbol("arrow_upward", SymbolPaths.arrowUpward) }
     val Backspace by lazy { symbol("backspace", SymbolPaths.backspace) }

@@ -9,6 +9,7 @@ import clauderc.app.protocol.Session
 import clauderc.app.protocol.SessionContext
 import clauderc.app.protocol.SessionList
 import clauderc.app.protocol.SessionState
+import clauderc.app.protocol.SessionWorktree
 import java.io.File
 import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +41,31 @@ val sampleSessions = SessionList(
         session("s-stop", "landing 页", SessionState.Stopped, "api.anthropic.com", minutesAgo = 60 * 24, cwd = "/Users/me/github/site", context = SessionContext(142_000, 200_000))
             .copy(jobState = "done", detail = "landing 页已上线"),
         session("s-other", "scratch", SessionState.Idle, "other", minutesAgo = 60 * 72, cwd = "/Users/me/scratch"),
+    ),
+    profiles = sampleProfiles,
+)
+
+/**
+ * The demo's round 5 list (design/ui-mockup/demo.html): in clauderc-app a session in a worktree and a
+ * fork hung under 「clauderc 协议」; in relay-svc sessions on two branches and a fork whose source is gone.
+ */
+val branchSessions = SessionList(
+    sessions = listOf(
+        session("s1", "clauderc 协议", SessionState.Pending, "default", minutesAgo = 2, cwd = "/Users/me/github/clauderc-app", context = SessionContext(250_000, 1_000_000))
+            .copy(branch = "dev", detail = "go vet ./... && go test ./internal/protocol/..."),
+        session("s2", "修复重连", SessionState.Working, "default", minutesAgo = 3, cwd = "/Users/me/github/relay-svc", context = SessionContext(124_000, 200_000))
+            .copy(branch = "fix-reconnect", jobState = "working", detail = "正在查断线后为什么没有自动重连"),
+        session("s12", "工具视图重写", SessionState.Idle, "default", minutesAgo = 6, cwd = "/Users/me/github/clauderc-app/.claude/worktrees/tools-view", context = SessionContext(94_000, 200_000))
+            .copy(dir = "/Users/me/github/clauderc-app", branch = "worktree-tools-view", worktree = SessionWorktree("tools-view", "/Users/me/github/clauderc-app/.claude/worktrees/tools-view")),
+        session("s9", "README 截图", SessionState.Idle, "default", minutesAgo = 12, cwd = "/Users/me/github/clauderc-app", context = SessionContext(36_000, 200_000)).copy(branch = "dev"),
+        session("s13", "clauderc 协议 ⑂ 补错误码测试", SessionState.Idle, "default", minutesAgo = 14, cwd = "/Users/me/github/clauderc-app", context = SessionContext(62_000, 200_000))
+            .copy(branch = "dev", forkOf = "s1"),
+        session("s10", "离线判定", SessionState.Pending, "default", minutesAgo = 60, cwd = "/Users/me/github/relay-svc", context = SessionContext(82_000, 200_000))
+            .copy(branch = "main", detail = "停在一个对话框上"),
+        session("s14", "排查日志 ⑂ 只看 relay 部分", SessionState.Idle, "default", minutesAgo = 120, cwd = "/Users/me/github/relay-svc", context = SessionContext(18_000, 200_000))
+            .copy(branch = "main", forkOf = "gone0001"),
+        session("s4", "迁移脚本审查", SessionState.Pending, "api.anthropic.com", minutesAgo = 5, cwd = "/Users/me/github/infra", context = SessionContext(330_000, 1_000_000)).copy(branch = "main"),
+        session("s11", "部署脚本", SessionState.Idle, "api.anthropic.com", minutesAgo = 40, cwd = "/Users/me/github/infra", context = SessionContext(24_000, 200_000)).copy(branch = "main"),
     ),
     profiles = sampleProfiles,
 )

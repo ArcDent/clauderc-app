@@ -2,6 +2,7 @@ package clauderc.app.data
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
@@ -49,7 +50,7 @@ data class Appearance(
     val accent: AccentChoice = AccentChoice.Blue,
 )
 
-/** What the user picked in 设置 for the look of the app, kept on this phone. */
+/** What the user picked in 设置 for the look of the app and its 动画, kept on this phone. */
 class ThemeStore(private val store: DataStore<Preferences>) {
     private val styleKey = stringPreferencesKey("appearance|style")
     private val modeKey = stringPreferencesKey("appearance|mode")
@@ -69,4 +70,11 @@ class ThemeStore(private val store: DataStore<Preferences>) {
     suspend fun setMode(mode: ThemeMode) = store.edit { it[modeKey] = mode.name }
 
     suspend fun setAccent(accent: AccentChoice) = store.edit { it[accentKey] = accent.name }
+
+    private val alwaysLoadingKey = booleanPreferencesKey("animation|alwaysLoading")
+
+    /** 「总是播放加载动画」: each place's first load after the app starts shows its art at once; off by default. */
+    val alwaysLoading: Flow<Boolean> = store.data.map { it[alwaysLoadingKey] ?: false }
+
+    suspend fun setAlwaysLoading(on: Boolean) = store.edit { it[alwaysLoadingKey] = on }
 }

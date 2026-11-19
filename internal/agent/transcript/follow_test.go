@@ -151,3 +151,66 @@ func TestFollow(t *testing.T) {
 		t.Fatalf("latest page after follow = %v", texts(items))
 	}
 }
+
+// Claude Code moves a session's transcript to the project directory of its
+// worktree when it enters one; the follower picks it up there, sends what
+// came after the move once and keeps what it had.
+func TestFollowMovedTranscript(t *testing.T) {
+	claude := t.TempDir()
+	const id = "3c1e2a5e-0000-4000-8000-00000000ab01"
+	from := filepath.Join(claude, "projects", "-w-repo", id+".jsonl")
+	to := filepath.Join(claude, "projects", "-w-repo--claude-worktrees-fox", id+".jsonl")
+	for _, p := range []string{from, to} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(from, []byte(userLine("m1")+assistantLine("m2")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := transcript.Open(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(from, to); err != nil {
+		t.Fatal(err)
+	}
+	appendTo(t, to, userLine("m3"))
+	got, err := f.Poll()
+	if err != nil {
+		t.Fatalf("Poll after the move: %v", err)
+	}
+	if s := texts(got); len(s) != 1 || s[0] != "m3" || got[0].Seq != 3 {
+		t.Fatalf("after the move got %q seq %d, want m3 alone as seq 3", s, got[0].Seq)
+	}
+	appendTo(t, to, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_w1","name":"Edit","input":{"file_path":"/w/repo/.claude/worktrees/fox/README.md"}}]}}`+"\n")
+	if got := pollFor(t, f, time.Second); len(got) != 1 {
+		t.Fatalf("next poll got %d items", len(got))
+	}
+	if p := f.Pending(true); p == nil || p.ToolUseID != "toolu_w1" {
+		t.Fatalf("pending after the move = %+v", p)
+	}
+	if page, _ := f.Page(0, 10); len(page) != 4 || page[0].Text != "m1" {
+		t.Fatalf("page after the move = %q", texts(page))
+	}
+}
+
+// A transcript that is gone for good still fails the poll.
+func TestFollowDeletedTranscript(t *testing.T) {
+	claude := t.TempDir()
+	path := filepath.Join(claude, "projects", "-w-x", "3c1e2a5e-0000-4000-8000-00000000ab02.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(userLine("m1")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := transcript.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(path)
+	if _, err := f.Poll(); err == nil {
+		t.Fatal("Poll of a deleted transcript did not fail")
+	}
+}

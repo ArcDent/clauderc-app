@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.map
 
 /**
  * What the user set for profile groups on this phone, per machine id and profile id
- * (design D10): custom names, and which groups and directories are folded on the session page.
+ * (design D10): custom names, and which groups, directories and fork lists are folded on the session page.
  */
 class ProfileNameStore(private val store: DataStore<Preferences>) {
     private fun key(machineId: String, profileId: String) = stringPreferencesKey("profileName|$machineId|$profileId")
@@ -50,6 +50,19 @@ class ProfileNameStore(private val store: DataStore<Preferences>) {
         store.edit { prefs ->
             val k = stringSetPreferencesKey(dirFoldPrefix(machineId) + profileId)
             val next = prefs[k].orEmpty().let { if (collapsed) it + cwd else it - cwd }
+            if (next.isEmpty()) prefs.remove(k) else prefs[k] = next
+        }
+    }
+
+    private fun forkFoldKey(machineId: String) = stringSetPreferencesKey("collapsedForks|$machineId")
+
+    /** Ids of the sessions whose forks are folded under them on this machine's session page. */
+    fun collapsedForks(machineId: String): Flow<Set<String>> = store.data.map { it[forkFoldKey(machineId)].orEmpty() }
+
+    suspend fun setForksCollapsed(machineId: String, sessionId: String, collapsed: Boolean) {
+        store.edit { prefs ->
+            val k = forkFoldKey(machineId)
+            val next = prefs[k].orEmpty().let { if (collapsed) it + sessionId else it - sessionId }
             if (next.isEmpty()) prefs.remove(k) else prefs[k] = next
         }
     }
