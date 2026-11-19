@@ -6,8 +6,11 @@
 #   FAKE_CLAUDE_DIR    sample directory; `agents ...` prints its agents.json
 #                      (or [] when the file is missing). Without --all it
 #                      prints agents-active.json instead when that exists.
-#                      If agents.delay exists there, `agents` first sleeps
-#                      that many seconds.
+#                      If agents.delay exists there, `agents` reads the
+#                      list, then sleeps that many seconds before printing
+#                      it, like a slow call that began before a change.
+#                      If rm.out exists there, `rm` prints it and exits
+#                      with the number in rm.exit (default 0).
 #   FAKE_CLAUDE_LOG    if set, every call creates <LOG>/<6-digit seq>/ with
 #                      args  each argument followed by a NUL byte
 #                      env   NAME=value lines for PATH, HOME, PWD, USER,
@@ -25,7 +28,7 @@
 #   agents [--json] [--all]   print the sample list
 #   ... --bg ...              print "backgrounded · <id> · <name>", name from
 #                             -n/--name (default "session")
-#   stop <id>, rm <id>        succeed silently
+#   stop <id>, rm <id>        succeed silently, unless rm.out says otherwise
 # Anything else, or -n/--name without a value, exits 2.
 
 if [ -n "$FAKE_CLAUDE_LOG" ]; then
@@ -58,25 +61,30 @@ fi
 
 case "$1" in
 agents)
-	if [ -f "$FAKE_CLAUDE_DIR/agents.delay" ]; then
-		# Detach sleep from stdout so killing this shell ends the output.
-		sleep "$(cat "$FAKE_CLAUDE_DIR/agents.delay")" </dev/null >/dev/null 2>&1
-	fi
 	all=
 	for a in "$@"; do
 		[ "$a" = --all ] && all=1
 	done
 	if [ -z "$all" ] && [ -f "$FAKE_CLAUDE_DIR/agents-active.json" ]; then
-		cat "$FAKE_CLAUDE_DIR/agents-active.json"
+		list=$(cat "$FAKE_CLAUDE_DIR/agents-active.json")
 	elif [ -f "$FAKE_CLAUDE_DIR/agents.json" ]; then
-		cat "$FAKE_CLAUDE_DIR/agents.json"
+		list=$(cat "$FAKE_CLAUDE_DIR/agents.json")
 	else
-		printf '%s\n' '[]'
+		list='[]'
 	fi
+	if [ -f "$FAKE_CLAUDE_DIR/agents.delay" ]; then
+		# Detach sleep from stdout so killing this shell ends the output.
+		sleep "$(cat "$FAKE_CLAUDE_DIR/agents.delay")" </dev/null >/dev/null 2>&1
+	fi
+	printf '%s\n' "$list"
 	exit 0
 	;;
 stop | rm)
 	[ -n "$2" ] || { printf '%s\n' "fake-claude: $1 needs an id" >&2; exit 2; }
+	if [ "$1" = rm ] && [ -f "$FAKE_CLAUDE_DIR/rm.out" ]; then
+		cat "$FAKE_CLAUDE_DIR/rm.out"
+		exit "$(cat "$FAKE_CLAUDE_DIR/rm.exit" 2>/dev/null || echo 0)"
+	fi
 	exit 0
 	;;
 esac

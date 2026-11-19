@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,6 +57,20 @@ type Options struct {
 	// Waker resumes stopped sessions for chat.send; nil refuses to send to
 	// them.
 	Waker Waker
+	// ResumeFile keeps the messages waiting for a usage limit to be lifted
+	// (chat.autoResume) across restarts; empty keeps them in memory.
+	ResumeFile string
+	// ResumeInterval is how often due messages are looked for; it defaults
+	// to DefaultResumeInterval.
+	ResumeInterval time.Duration
+	// Usage reads the plan usage, whose reset times stand in when a limit
+	// message gives none; nil has no stand-in.
+	Usage func(ctx context.Context) protocol.UsageResponse
+	// Now defaults to time.Now.
+	Now func() time.Time
+	// Logger receives the failures of automatic messages; nil discards
+	// them.
+	Logger *slog.Logger
 }
 
 // Waker resumes a stopped session, named by its full session id, so a
@@ -91,6 +106,10 @@ type Handler struct {
 	agents map[string]*agentChat // by agentKey
 	terms  map[string]*termView  // by short session id
 	closed bool
+
+	resumes    *resumes
+	stopResume context.CancelFunc
+	resumeDone chan struct{}
 }
 
 // New returns a Handler; call Close when done.
@@ -111,9 +130,23 @@ func New(opts Options) *Handler {
 	if opts.DeliveryTimeout <= 0 {
 		opts.DeliveryTimeout = DefaultDeliveryTimeout
 	}
+	if opts.ResumeInterval <= 0 {
+		opts.ResumeInterval = DefaultResumeInterval
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
+	if opts.Logger == nil {
+		opts.Logger = slog.New(slog.DiscardHandler)
+	}
 	wake := opts.Attach
 	wake.Linger = wakeLinger
-	return &Handler{opts: opts, pool: attach.NewPool(opts.Attach), wakes: attach.NewPool(wake), chats: map[string]*session{}, agents: map[string]*agentChat{}, terms: map[string]*termView{}}
+	h := &Handler{opts: opts, pool: attach.NewPool(opts.Attach), wakes: attach.NewPool(wake), chats: map[string]*session{}, agents: map[string]*agentChat{}, terms: map[string]*termView{}}
+	h.resumes = loadResumes(opts.ResumeFile)
+	ctx, cancel := context.WithCancel(context.Background())
+	h.stopResume, h.resumeDone = cancel, make(chan struct{})
+	go h.resumeLoop(ctx, h.resumeDone)
+	return h
 }
 
 // Methods implements agent.Handler.
@@ -130,6 +163,7 @@ func (h *Handler) Methods() []protocol.Method {
 		protocol.MethodChatCommands,
 		protocol.MethodChatToolOutput,
 		protocol.MethodChatImage,
+		protocol.MethodChatAutoResume,
 		protocol.MethodTermOpen,
 		protocol.MethodTermKey,
 		protocol.MethodTermClose,
@@ -170,6 +204,8 @@ func (h *Handler) Handle(ctx context.Context, req protocol.Envelope) protocol.En
 		return h.toolOutput(ctx, req)
 	case protocol.MethodChatImage:
 		return h.image(ctx, req)
+	case protocol.MethodChatAutoResume:
+		return h.autoResume(ctx, req)
 	case protocol.MethodTermOpen:
 		return h.termOpen(ctx, req)
 	case protocol.MethodTermKey:
@@ -323,6 +359,8 @@ func (h *Handler) Close() {
 	h.mu.Lock()
 	h.closed = true
 	h.mu.Unlock()
+	h.stopResume()
+	<-h.resumeDone
 	h.AllClientsGone()
 	h.pool.Close()
 	h.wakes.Close()
@@ -411,6 +449,10 @@ type session struct {
 	// activity and partial are the status line and the reply being drawn,
 	// as last read off the screen (see pollScreen).
 	activity, partial string
+	// limitReset is usage.get's reset time for the limit of the record at
+	// limitFor, read once when the limit message gives none.
+	limitReset, limitFor time.Time
+	limitRead            bool
 	// last status and pending prompt sent to the phones
 	status  protocol.ChatStatus
 	pending *protocol.Pending
@@ -452,6 +494,13 @@ func (s *session) compute() (protocol.ChatStatus, *protocol.Pending) {
 	}
 	unknown := s.offInput >= offInputPolls && pending == nil && s.target.Running
 	status := protocol.ChatStatus{State: state, Model: info.Model, PermissionMode: mode, UnknownDialog: unknown}
+	if info.Limit != nil {
+		reset := time.Time{}
+		if s.limitRead && s.limitFor.Equal(info.Limit.At) {
+			reset = s.limitReset
+		}
+		status.Limit = s.h.limitStatus(s.id, info.Limit, reset)
+	}
 	if state == protocol.StateWorking {
 		status.Activity = s.activity
 		if s.partial != "" && !landed(s.follower, s.partial) {
@@ -512,8 +561,8 @@ func (s *session) run(ctx context.Context) {
 	}
 }
 
-// pollScreen reads the status line and the reply being drawn off the
-// screen of the hidden attach; compute passes them on while the session
+// pollScreen reads the permission mode, the status line and the reply
+// being drawn off the screen of the hidden attach; compute passes them on while the session
 // works. A screen without the status line is taken for a frame caught
 // mid-draw and keeps what the last one showed: once the turn ends,
 // compute drops them anyway.
@@ -525,6 +574,13 @@ func (s *session) pollScreen() {
 		return
 	}
 	lines := conn.View().Lines
+	// A mode changed on the session itself, such as by /plan, shows in
+	// its status line.
+	if mode, ok := attach.ParseMode(strings.Join(lines, "\n")); ok {
+		s.mu.Lock()
+		s.screenMode = mode
+		s.mu.Unlock()
+	}
 	activity := screenActivity(lines)
 	if activity == "" {
 		s.mu.Lock()
@@ -566,12 +622,38 @@ func (s *session) pollTranscript() {
 }
 
 func (s *session) pollState(ctx context.Context) {
+	s.readLimitReset(ctx)
 	t, err := s.h.lookup(ctx, s.id)
 	if err != nil {
 		return
 	}
 	s.mu.Lock()
 	s.target = t
+	s.mu.Unlock()
+}
+
+// readLimitReset asks usage.get once for the reset time of a limit whose
+// message gives none.
+func (s *session) readLimitReset(ctx context.Context) {
+	s.mu.Lock()
+	f := s.follower
+	s.mu.Unlock()
+	if f == nil {
+		return
+	}
+	l := f.Info().Limit
+	if l == nil || !l.ResetsAt.IsZero() {
+		return
+	}
+	s.mu.Lock()
+	known := s.limitRead && s.limitFor.Equal(l.At)
+	s.mu.Unlock()
+	if known {
+		return
+	}
+	reset := s.h.usageReset(ctx, l)
+	s.mu.Lock()
+	s.limitReset, s.limitFor, s.limitRead = reset, l.At, true
 	s.mu.Unlock()
 }
 
@@ -672,7 +754,7 @@ func (s *session) ensureAttach(ctx context.Context) {
 func (s *session) pushChanges() {
 	s.mu.Lock()
 	status, pending := s.compute()
-	statusChanged := status != s.status
+	statusChanged := !sameStatus(status, s.status)
 	pendingChanged := pendingID(pending) != pendingID(s.pending)
 	s.status, s.pending = status, pending
 	s.mu.Unlock()

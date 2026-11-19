@@ -52,6 +52,10 @@ type Options struct {
 	// Logger receives the errors behind internal failures, which the
 	// phone only sees as a fixed message; nil discards them.
 	Logger *slog.Logger
+	// Changed is called once a create, stop or remove has gone through,
+	// before the phone gets its answer, so the session list can be read
+	// again at once; nil calls nothing.
+	Changed func()
 }
 
 // Handler implements agent.Handler for the session management methods.
@@ -70,6 +74,9 @@ func New(opts Options) *Handler {
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
+	}
+	if opts.Changed == nil {
+		opts.Changed = func() {}
 	}
 	return &Handler{opts: opts}
 }
@@ -123,11 +130,15 @@ func (h *Handler) Handle(ctx context.Context, req protocol.Envelope) protocol.En
 // its short id. The launch flags and providerEnv come from the profile's
 // most recent session, or from the template cache once jobs/ has none
 // left; claude gets the flags plus --bg, -n <name> when a name is given,
-// and "--" and the first message when one is given. A missing working directory
+// -w <worktree> when a worktree is asked for, and "--" and the first
+// message when one is given. A missing working directory
 // or a profile without a template fails before claude runs.
 func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest) (string, error) {
 	if err := checkDir(req.Cwd, "目录不存在："+req.Cwd); err != nil {
 		return "", err
+	}
+	if req.Worktree != "" && !worktreeName.MatchString(req.Worktree) {
+		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "worktree 名只能用字母、数字、点、横线和下划线，不能以点或横线开头"}
 	}
 	t, ok := h.opts.Source.LaunchTemplate(req.ProfileID)
 	if !ok {
@@ -136,6 +147,9 @@ func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest)
 	args := append(slices.Clone(t.Flags), "--bg")
 	if req.Name != "" {
 		args = append(args, "-n", req.Name)
+	}
+	if req.Worktree != "" {
+		args = append(args, "-w", req.Worktree)
 	}
 	if req.Prompt != "" {
 		// "--" keeps a message starting with "-" from being read as a flag.
@@ -160,6 +174,7 @@ func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest)
 	if id == "" {
 		return "", h.internal(failed, fmt.Errorf("claude --bg: no session id in output: %s", tail(out)))
 	}
+	h.opts.Changed()
 	return id, nil
 }
 
@@ -173,6 +188,7 @@ func (h *Handler) Stop(ctx context.Context, id string) error {
 	if _, err := h.run(ctx, "", nil, "stop", []string{"stop", t.ID}); err != nil {
 		return h.internal("停止会话失败，请在目标机上查看日志", err)
 	}
+	h.opts.Changed()
 	return nil
 }
 
@@ -187,10 +203,35 @@ func (h *Handler) Remove(ctx context.Context, id string) error {
 	if t.Running {
 		return &protocol.Error{Code: protocol.CodeSessionRunning, Message: "会话仍在运行，先停止再移出"}
 	}
-	if _, err := h.run(ctx, "", nil, "rm", []string{"rm", t.ID}); err != nil {
+	out, err := h.run(ctx, "", nil, "rm", []string{"rm", t.ID})
+	// claude keeps a session whose worktree still holds work and says why;
+	// 2.1.327 exits 0 when it does, later versions 1.
+	if why, ok := kept(out); ok {
+		return &protocol.Error{Code: protocol.CodeInternal, Message: "没有移出：worktree 里还有没保存的工作。\n" + why}
+	}
+	if err != nil {
 		return h.internal("移出会话失败，请在目标机上查看日志", err)
 	}
+	h.opts.Changed()
 	return nil
+}
+
+// kept reports whether `claude rm` output says the session was kept, and
+// returns claude's own words on why and what to do, e.g.
+//
+//	kept 1a2b3c4d — its worktree is still at /w/repo/.claude/worktrees/fox
+//	  The worktree has uncommitted changes.
+//	  commit or stash them and run claude rm 1a2b3c4d again, …
+func kept(out []byte) (string, bool) {
+	text := strings.TrimSpace(string(ansi.ReplaceAll(out, nil)))
+	if !strings.HasPrefix(text, "kept ") {
+		return "", false
+	}
+	lines := strings.Split(text, "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimSpace(l)
+	}
+	return strings.Join(lines, "\n"), true
 }
 
 // Wake resumes the stopped session whose full session id is sessionID by
@@ -370,6 +411,9 @@ func envList(extra map[string]string) []string {
 }
 
 var (
+	// worktreeName is what session.create accepts as a worktree name: it
+	// becomes a directory and a branch name.
+	worktreeName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$`)
 	ansi         = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
 	backgrounded = regexp.MustCompile(`backgrounded\s*·\s*([0-9a-z]+)`)
 )

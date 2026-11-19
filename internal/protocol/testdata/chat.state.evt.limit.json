@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.state",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"sessionId": "a1b2c3", "state": "idle", "model": "claude-opus-5-5", "permissionMode": "default", "limit": {"window": "weekly", "text": "You've hit your weekly limit · resets Nov 21 at 10am (America/Los_Angeles)", "resetsAt": "2026-11-21T18:00:00Z"}}
+}

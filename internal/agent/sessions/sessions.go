@@ -48,6 +48,8 @@ type Handler struct {
 	closed bool
 	cancel context.CancelFunc // stops the poller; nil while not polling
 	done   chan struct{}      // closed once the poller has returned
+	kick   chan struct{}      // wakes the poller for a read right away
+	gen    uint64             // bumped by Refresh; a read begun before is dropped
 
 	contexts contexts
 	agents   agents
@@ -58,7 +60,21 @@ func New(opts Options) *Handler {
 	if opts.Interval <= 0 {
 		opts.Interval = DefaultInterval
 	}
-	return &Handler{opts: opts, subs: map[string]bool{}}
+	return &Handler{opts: opts, subs: map[string]bool{}, kick: make(chan struct{}, 1)}
+}
+
+// Refresh has the poller read the list again right away, after a session
+// was created, stopped or removed, and push it when it changed. A read
+// that began before the call is dropped, as it may still show the session
+// as it was. Without subscribers nothing is read.
+func (h *Handler) Refresh() {
+	h.mu.Lock()
+	h.gen++
+	h.mu.Unlock()
+	select {
+	case h.kick <- struct{}{}:
+	default:
+	}
 }
 
 // Methods implements agent.Handler.
@@ -183,7 +199,11 @@ func (h *Handler) poll(ctx context.Context, done chan<- struct{}) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		case <-h.kick:
 		}
+		h.mu.Lock()
+		gen := h.gen
+		h.mu.Unlock()
 		callCtx, cancel := context.WithTimeout(ctx, pollTimeout)
 		list, err := h.list(callCtx)
 		cancel()
@@ -199,7 +219,9 @@ func (h *Handler) poll(ctx context.Context, done chan<- struct{}) {
 			h.mu.Unlock()
 			return
 		}
-		if bytes.Equal(data, h.last) {
+		// Refresh was called meanwhile: this read may be stale, and the
+		// kick it left reads again on the next turn.
+		if h.gen != gen || bytes.Equal(data, h.last) {
 			h.mu.Unlock()
 			continue
 		}

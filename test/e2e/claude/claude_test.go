@@ -247,6 +247,7 @@ type session struct {
 	t                 *testing.T
 	id, sessionID, ws string
 	path              string // transcript
+	keep              bool   // cleanup leaves ws in place
 }
 
 func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
@@ -270,13 +271,34 @@ func launch(t *testing.T, name string) *session {
 // launchIn is launch in the given test profile.
 func launchIn(t *testing.T, name, profile string) *session {
 	t.Helper()
-	x := h(t)
 	tag := make([]byte, 3)
 	_, _ = rand.Read(tag)
-	ws := filepath.Join(x.root, ".local", "e2e-ws", name+"-"+hex.EncodeToString(tag))
+	ws := filepath.Join(h(t).root, ".local", "e2e-ws", name+"-"+hex.EncodeToString(tag))
 	if err := os.MkdirAll(ws, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	return launchAt(t, name, profile, ws, false)
+}
+
+// probeRepo is the trusted git repository under .local/e2e-ws whose
+// background sessions go into worktrees; tests launch in it with launchAt
+// and keep it.
+func probeRepo(t *testing.T) string {
+	t.Helper()
+	ws := filepath.Join(h(t).root, ".local", "e2e-ws", "git-probe")
+	if _, err := os.Stat(filepath.Join(ws, ".git")); err != nil {
+		t.Skipf("没有 %s：要先建好并在 claude 里接受信任", ws)
+	}
+	return ws
+}
+
+// launchAt is launchIn in the existing workspace ws; cleanup deletes ws
+// unless keep.
+func launchAt(t *testing.T, name, profile, ws string, keep bool) *session {
+	t.Helper()
+	x := h(t)
+	tag := make([]byte, 3)
+	_, _ = rand.Read(tag)
 	var res protocol.SessionCreateResponse
 	x.must(t, protocol.MethodSessionCreate, protocol.SessionCreateRequest{
 		ProfileID: profile, Cwd: ws, Name: "e2e-" + name + "-" + hex.EncodeToString(tag), Prompt: "只回复 OK",
@@ -287,7 +309,7 @@ func launchIn(t *testing.T, name, profile string) *session {
 	createdMu.Lock()
 	created = append(created, res.SessionID)
 	createdMu.Unlock()
-	s := &session{x: x, t: t, id: res.SessionID, ws: ws}
+	s := &session{x: x, t: t, id: res.SessionID, ws: ws, keep: keep}
 	t.Cleanup(s.cleanup)
 
 	waitFor(t, 60*time.Second, "会话出现在列表里", func() bool {
@@ -338,7 +360,9 @@ func (s *session) cleanup() {
 			time.Sleep(time.Second)
 		}
 	}
-	_ = os.RemoveAll(s.ws)
+	if !s.keep {
+		_ = os.RemoveAll(s.ws)
+	}
 }
 
 // entries reads the transcript, skipping a line still being written.

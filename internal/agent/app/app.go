@@ -56,12 +56,14 @@ func Run(ctx context.Context, o Options) error {
 	if err != nil {
 		return err
 	}
-	life := lifecycle.New(lifecycle.Options{Source: src, Logger: log})
-	chats := chat.New(chat.Options{Source: src, Push: c, Waker: life, Attach: o.Attach})
-	defer chats.Close()
-	list := sessions.New(sessions.Options{Source: src, Push: c, Dialog: chats.HasDialog})
-	defer list.Close()
+	// list is set below, before any request can arrive.
+	var list *sessions.Handler
+	life := lifecycle.New(lifecycle.Options{Source: src, Logger: log, Changed: func() { list.Refresh() }})
 	plan := usage.New(usage.Options{ClaudeDir: cfg.ClaudeDir, UserAgent: "clauderc/" + o.Version, Logger: log})
+	chats := chat.New(chat.Options{Source: src, Push: c, Waker: life, Attach: o.Attach, ResumeFile: cfg.ResumeFile, Usage: plan.Get, Logger: log})
+	defer chats.Close()
+	list = sessions.New(sessions.Options{Source: src, Push: c, Dialog: chats.HasDialog})
+	defer list.Close()
 	if err := c.Register(list, chats, life, gitops.New(gitops.Options{Source: src, Logger: log}), plan); err != nil {
 		return err
 	}

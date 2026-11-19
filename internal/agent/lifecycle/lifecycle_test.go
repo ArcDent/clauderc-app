@@ -206,6 +206,31 @@ func TestCreatePromptLikeFlag(t *testing.T) {
 	wantEqual(t, "args", calls[0].Args, []string{"--model", "haiku", "--bg", "-n", "-x", "--", "--dangerously-skip-permissions"})
 }
 
+// A worktree name goes to claude as -w; one that is no plain name is
+// refused before claude runs.
+func TestCreateInWorktree(t *testing.T) {
+	f := newFixture(t)
+	f.job(t, "dflt0001", []string{"--model", "haiku"}, nil, "2026-11-13T09:00:00.000Z")
+	req := protocol.SessionCreateRequest{ProfileID: "default", Cwd: t.TempDir(), Name: "wt", Prompt: "开始", Worktree: "probe-wt"}
+	if _, err := f.h.Create(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	calls := f.calls(t)
+	if len(calls) != 1 {
+		t.Fatalf("claude ran %d times, want once", len(calls))
+	}
+	wantEqual(t, "args", calls[0].Args, []string{"--model", "haiku", "--bg", "-n", "wt", "-w", "probe-wt", "--", "开始"})
+	for _, name := range []string{"has space", "a/b", "-x", ".hidden", "../up", strings.Repeat("a", 65)} {
+		req.Worktree = name
+		if _, err := f.h.Create(context.Background(), req); codeOf(err) != protocol.CodeInvalidParams {
+			t.Errorf("worktree %q: %v, want %s", name, err, protocol.CodeInvalidParams)
+		}
+	}
+	if n := len(f.calls(t)); n != 1 {
+		t.Errorf("claude ran %d times, want only the first launch", n)
+	}
+}
+
 // A profile whose sessions were all removed is created from profiles.json.
 func TestCreateFromTemplateCache(t *testing.T) {
 	f := newFixture(t)
@@ -517,6 +542,78 @@ func TestRemove(t *testing.T) {
 		t.Fatalf("calls besides agents = %+v, want one rm", launches)
 	}
 	wantEqual(t, "args", launches[0].Args, []string{"rm", "stp00001"})
+}
+
+// Changed is called after each create, stop or remove that went through,
+// and not after one that failed.
+func TestChangedAfterActions(t *testing.T) {
+	f := newFixture(t)
+	changed := 0
+	f.h = lifecycle.New(lifecycle.Options{Source: f.src, Changed: func() { changed++ }})
+	f.setAgents(t, session{"run00001", "uuid-run", "/w/a", true}, session{"stp00001", "uuid-stp", "/w/b", false})
+	f.job(t, "run00001", []string{"--model", "opus"}, nil, "2026-11-13T10:00:00Z")
+	ctx := context.Background()
+	steps := []struct {
+		what string
+		do   func() error
+		want int
+	}{
+		{"stop", func() error { return f.h.Stop(ctx, "run00001") }, 1},
+		{"remove", func() error { return f.h.Remove(ctx, "stp00001") }, 2},
+		{"create", func() error {
+			_, err := f.h.Create(ctx, protocol.SessionCreateRequest{ProfileID: "default", Cwd: t.TempDir()})
+			return err
+		}, 3},
+		{"refused remove", func() error {
+			if err := f.h.Remove(ctx, "run00001"); err == nil {
+				return errors.New("removing a running session went through")
+			}
+			return nil
+		}, 3},
+	}
+	for _, s := range steps {
+		if err := s.do(); err != nil {
+			t.Fatalf("%s: %v", s.what, err)
+		}
+		if changed != s.want {
+			t.Errorf("after %s Changed ran %d times, want %d", s.what, changed, s.want)
+		}
+	}
+}
+
+// claude keeps a session whose worktree still holds work: the phone gets
+// claude's reasons, whatever its exit code.
+func TestRemoveKept(t *testing.T) {
+	const out = "kept stp00001 \u2014 its worktree is still at /w/b/.claude/worktrees/fox\n" +
+		"  The worktree has uncommitted changes.\n" +
+		"  commit or stash them and run claude rm stp00001 again\n"
+	for _, code := range []string{"0", "1"} {
+		t.Run("exit "+code, func(t *testing.T) {
+			f := newFixture(t)
+			changed := 0
+			f.h = lifecycle.New(lifecycle.Options{Source: f.src, Changed: func() { changed++ }})
+			f.setAgents(t, session{"stp00001", "uuid-stp", "/w/b", false})
+			if err := os.WriteFile(filepath.Join(f.claudeDir, "rm.out"), []byte(out), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(f.claudeDir, "rm.exit"), []byte(code), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := f.h.Remove(context.Background(), "stp00001")
+			var pe *protocol.Error
+			if !errors.As(err, &pe) {
+				t.Fatalf("Remove = %v, want a protocol error", err)
+			}
+			for _, want := range []string{"没有移出", "The worktree has uncommitted changes.", "commit or stash them and run claude rm stp00001 again"} {
+				if !strings.Contains(pe.Message, want) {
+					t.Errorf("message %q lacks %q", pe.Message, want)
+				}
+			}
+			if changed != 0 {
+				t.Errorf("Changed ran %d times for a kept session", changed)
+			}
+		})
+	}
 }
 
 const wakeUUID = "8f0c2a5e-0000-4000-8000-000000000042"

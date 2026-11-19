@@ -21,12 +21,19 @@ type Info struct {
 	PermissionMode protocol.PermissionMode
 	// Skills are the skills listed to the session, in listing order.
 	Skills []protocol.Command
+	// Limit is set while the transcript ends on a plan usage limit: no
+	// user message or reply came after it.
+	Limit *Limit
 }
 
 // Info returns what the transcript says about the session so far.
 func (t *Transcript) Info() Info {
 	info := t.info
 	info.Skills = append([]protocol.Command(nil), t.info.Skills...)
+	if t.info.Limit != nil {
+		l := *t.info.Limit
+		info.Limit = &l
+	}
 	return info
 }
 
@@ -105,7 +112,8 @@ func (t *Transcript) Pending(blocked bool) *protocol.Pending {
 
 // BuiltinCommands are Claude Code's own slash commands offered for
 // completion: those of a background session's popup in Claude Code
-// 2.1.326 that run without opening a panel. Maintained by hand (design
+// 2.1.326 that run without opening a panel, plus /fork and /plan, tried
+// in 2.1.328 (test/e2e/claude TestSlashCommon). Maintained by hand (design
 // Open Questions); test/e2e/claude TestSlashList compares them with the
 // real popup. Descriptions are shown on the phone as is, so they are
 // Chinese and follow the UI mockup.
@@ -114,8 +122,10 @@ var BuiltinCommands = []protocol.Command{
 	{Name: "clear", Description: "清空对话"},
 	{Name: "compact", Description: "压缩对话上下文"},
 	{Name: "context", Description: "查看上下文用量"},
+	{Name: "fork", Description: "把这段对话复制成一个新的后台会话，这里照常继续"},
 	{Name: "goal", Description: "设定 Claude 停下前要核对的目标"},
 	{Name: "model", Description: "切换模型"},
+	{Name: "plan", Description: "打开计划模式或查看计划"},
 	{Name: "recap", Description: "生成一句话的会话回顾"},
 	{Name: "reload-plugins", Description: "让改过的插件在本会话生效"},
 	{Name: "reload-skills", Description: "重新读取磁盘上新增或改过的技能"},
@@ -159,14 +169,18 @@ func IsPanelCommand(text string) bool {
 
 // UnofferedCommands are the other built-ins of that popup, left out of
 // completion: they open a panel or dialog the phone cannot drive, change
-// only the terminal, or would detach or stop the hidden attach. The last
+// only the terminal, or would detach or stop the hidden attach. Tried in
+// a background session of 2.1.328: /btw answers in an overlay that never
+// reaches the transcript, /fast opens a dialog, /branch moves the session
+// to a new session id, and /stop stops it without a transcript record, so
+// chat.send reports it undelivered. The last
 // group are Claude Code's own skills that its skill listing leaves out; a
 // background session's popup only shows them in --safe-mode.
 var UnofferedCommands = []string{
 	"advisor", "auto-mode-setup", "autocompact", "background", "branch", "btw", "bug", "cd", "color",
 	"copy", "design-login", "exit", "export", "fast", "feedback", "focus",
-	"fork", "ide", "import", "keybindings", "list-agents", "login", "logout",
-	"memory", "mobile", "output-style", "plan", "powerup", "radio",
+	"ide", "import", "keybindings", "list-agents", "login", "logout",
+	"memory", "mobile", "output-style", "powerup", "radio",
 	"release-notes", "resume", "sandbox", "scroll-speed", "skill-doctor",
 	"stickers", "stop", "terminal-setup", "theme", "tui", "workflows",
 	"batch", "debug", "deep-research", "design", "design-sync", "doctor", "insights",

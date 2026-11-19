@@ -14,6 +14,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"time"
 
 	"clauderc/internal/protocol"
 )
@@ -120,6 +121,10 @@ type record struct {
 	ToolUseResult json.RawMessage `json:"toolUseResult"`
 	// Timestamp is kept as text: a malformed one must not drop the record.
 	Timestamp string `json:"timestamp"`
+	// IsAPIErrorMessage and Error mark the synthetic assistant record of
+	// a failed request; Error "rate_limit" may be a plan usage limit.
+	IsAPIErrorMessage bool   `json:"isApiErrorMessage"`
+	Error             string `json:"error"`
 }
 
 // origin is the origin of a user record or a queued command: a
@@ -198,10 +203,20 @@ func (t *Transcript) record(r *record) []int {
 		}
 		return nil
 	case "user":
+		if !r.IsMeta {
+			t.info.Limit = nil
+		}
 		return t.userRecord(r)
 	case "assistant":
+		t.info.Limit = nil
 		if r.Message == nil {
 			return nil
+		}
+		if r.IsAPIErrorMessage && r.Error == "rate_limit" {
+			at, _ := time.Parse(time.RFC3339Nano, r.Timestamp)
+			if l, ok := parseLimit(flatten(r.Message.Content), at); ok {
+				t.info.Limit = &l
+			}
 		}
 		return t.assistant(r.Message.Content)
 	case "system":

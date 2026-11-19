@@ -105,6 +105,9 @@ type SessionCreateRequest struct {
 	// launch finds the directory untrusted, then launches again; without
 	// it such a launch fails with CodeNotTrusted.
 	Trust bool `json:"trust,omitempty"`
+	// Worktree, when set, starts the session in a new git worktree of Cwd
+	// by that name (claude -w); letters, digits, ".", "_" and "-" only.
+	Worktree string `json:"worktree,omitempty"`
 }
 
 // SessionCreateResponse answers session.create.
