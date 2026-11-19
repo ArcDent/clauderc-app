@@ -54,6 +54,8 @@ class ProtocolSamplesTest {
         "chat.toolOutput.res" to ToolResult.serializer(),
         "chat.image.req" to ChatImageRequest.serializer(),
         "chat.image.res" to ChatImageResponse.serializer(),
+        "chat.autoResume.req" to ChatAutoResumeRequest.serializer(),
+        "chat.autoResume.res" to ChatAutoResumeResponse.serializer(),
         "chat.items.evt" to ChatItemsEvent.serializer(),
         "chat.pending.evt" to ChatPendingEvent.serializer(),
         "chat.state.evt" to ChatStateEvent.serializer(),

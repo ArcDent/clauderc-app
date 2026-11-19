@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-031",
+  "method": "chat.autoResume",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"limit": {"window": "fiveHour", "text": "You've hit your 5-hour limit · resets 10:40pm (America/Denver)", "resetsAt": "2026-11-19T05:40:00Z", "autoResume": {"text": "继续", "at": "2026-11-19T05:41:00Z"}}}
+}

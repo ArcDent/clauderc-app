@@ -66,6 +66,9 @@ type Target struct {
 	// Status is empty from 2.1.326 on; State then tells a working session.
 	Status string
 	State  string
+	// Worktree is the git worktree the session works in, empty outside
+	// one; see placeOf.
+	Worktree string
 }
 
 // Blocked reports whether the running session may wait for the user to
@@ -235,6 +238,7 @@ func (s Source) sessions(ctx context.Context) ([]protocol.Session, []protocol.Pr
 		branch := ""
 		if worktree != nil {
 			branch = job.WorktreeBranch
+			t.Worktree = worktree.Path
 		}
 		sessions = append(sessions, protocol.Session{
 			ID:   e.ID,

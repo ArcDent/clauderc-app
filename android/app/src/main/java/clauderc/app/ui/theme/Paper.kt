@@ -4,17 +4,19 @@ import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.layer.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageShader
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -38,13 +40,22 @@ fun Modifier.page(): Modifier {
         Canvas(tile).drawCircle(Offset(with(density) { 1.dp.toPx() }, with(density) { 1.dp.toPx() }), with(density) { 1.3.dp.toPx() }, paint)
         ShaderBrush(ImageShader(tile, TileMode.Repeated, TileMode.Repeated))
     }
-    return drawBehind {
-        drawRect(c.bg)
-        drawRect(dots)
-        // radial-gradient(60% 34% at 100% 0%, accent 20%, transparent 72%)
-        wash(Offset(size.width, 0f), 0.6f, 0.34f, c.accent.copy(alpha = if (c.isDark) 0.22f else 0.2f))
-        // radial-gradient(60% 30% at 0% 100%, yellow 28%, transparent 72%), light only
-        if (!c.isDark) wash(Offset(0f, size.height), 0.6f, 0.3f, Color(0x47FFD84D))
+    // The paper is drawn once into a layer of its own, kept as a picture until the size or the colours
+    // change: the phone sends the whole screen to the GPU for every frame, and filling it with the dots
+    // and the washes again on each frame of a scroll made the first frames after a pause miss their slot.
+    return drawWithCache {
+        val paper = obtainGraphicsLayer().apply {
+            compositingStrategy = CompositingStrategy.Offscreen
+            record {
+                drawRect(c.bg)
+                drawRect(dots)
+                // radial-gradient(60% 34% at 100% 0%, accent 20%, transparent 72%)
+                wash(Offset(size.width, 0f), 0.6f, 0.34f, c.accent.copy(alpha = if (c.isDark) 0.22f else 0.2f))
+                // radial-gradient(60% 30% at 0% 100%, yellow 28%, transparent 72%), light only
+                if (!c.isDark) wash(Offset(0f, size.height), 0.6f, 0.3f, Color(0x47FFD84D))
+            }
+        }
+        onDrawBehind { drawLayer(paper) }
     }
 }
 

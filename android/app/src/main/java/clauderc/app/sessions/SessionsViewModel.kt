@@ -34,12 +34,14 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class SessionGroup(
     val profile: Profile,
@@ -105,6 +107,14 @@ data class DirGroup(
 
     /** The sessions in the checkout itself are on more than one branch, so each row names its own. */
     val rowsShowBranch: Boolean = sessions.filter { it.worktree == null }.mapNotNull { it.branch }.toSet().size > 1
+
+    /**
+     * Branches sessions are on that git no longer lists, deleted since, in the order of the sessions. Empty
+     * until git answered, and when it could not: then every branch would look deleted. A detached HEAD is no branch.
+     */
+    val goneBranches: List<String> = branches?.takeIf { it.current.isNotEmpty() || it.local.isNotEmpty() }
+        ?.let { b -> sessions.mapNotNull { it.branch }.distinct().filter { it != "HEAD" && it !in b.local } }
+        .orEmpty()
 }
 
 /** A row of a directory: a session and the forks hung under it, which fold away when [forksCollapsed]. */
@@ -321,8 +331,8 @@ class SessionsViewModel(
                 relay.call(Method.DIR_BUSY, machineId, DirRequest(dir.cwd), DirRequest.serializer(), DirBusyResponse.serializer()).busy
             }.getOrDefault(false)
             if (busy) {
-                val working = dir.sessions.filter { it.state == SessionState.Working }
-                val name = (working.firstOrNull { it.worktree == null } ?: working.firstOrNull())?.let(::display)
+                // The agent counts only the sessions in the checkout itself; one in a worktree is not in the way.
+                val name = dir.sessions.firstOrNull { it.state == SessionState.Working && it.worktree == null }?.let(::display)
                 switchAsk.value = BranchSwitch(dir.cwd, dir.title, branch, name)
             } else {
                 runSwitch(dir.cwd, branch)
@@ -404,24 +414,40 @@ class SessionsViewModel(
 
     fun remove(session: Session) = act(Method.SESSION_REMOVE, session, null, null)
 
-    /** Shows the result at once ([shown] null hides the row) and takes it back if the agent refuses. */
+    /**
+     * Shows the result at once ([shown] null hides the row) and takes it back if the agent refuses. A removed
+     * row stays hidden until a list without it arrives, at most [REMOVED_HOLD_MILLIS]: a list read before the
+     * removal may still bring it back meanwhile.
+     */
     private fun act(method: String, session: Session, shown: SessionState?, done: String?) {
         pendingActs.update { it + (session.id to shown) }
         viewModelScope.launch {
-            try {
+            val ok = try {
                 relay.call(method, machineId, SessionIdRequest(session.id), SessionIdRequest.serializer(), Empty.serializer())
                 fleet.refresh(machineId)
                 done?.let { _messages.send(it) }
+                true
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: RemoteException) {
                 _messages.send(e.message ?: "操作失败")
+                false
             } catch (e: Exception) {
                 _messages.send("操作失败：${e.message}")
-            } finally {
-                pendingActs.update { it - session.id }
+                false
             }
+            if (ok && shown == null) {
+                withTimeoutOrNull(REMOVED_HOLD_MILLIS) {
+                    fleet.sessions.first { lists -> lists[machineId]?.sessions?.none { it.id == session.id } ?: true }
+                }
+            }
+            pendingActs.update { it - session.id }
         }
     }
 }
+
+/** How long a removed row stays hidden while the lists that arrive still hold it. */
+const val REMOVED_HOLD_MILLIS = 30_000L
 
 /** The list as it will be once the pending stops and removals are done. */
 private fun SessionList.withActs(acts: Map<String, SessionState?>): SessionList =

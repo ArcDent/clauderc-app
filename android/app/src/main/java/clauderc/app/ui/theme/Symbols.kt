@@ -17,6 +17,7 @@ object Symbols {
     val ArrowBack by lazy { symbol("arrow_back", SymbolPaths.arrowBack) }
     val ArrowUpward by lazy { symbol("arrow_upward", SymbolPaths.arrowUpward) }
     val Backspace by lazy { symbol("backspace", SymbolPaths.backspace) }
+    val CallSplit by lazy { symbol("call_split", SymbolPaths.callSplit) }
     val Check by lazy { symbol("check", SymbolPaths.check) }
     val CheckBox by lazy { symbol("check_box", SymbolPaths.checkBox) }
     val CheckBoxOutlineBlank by lazy { symbol("check_box_outline_blank", SymbolPaths.checkBoxOutlineBlank) }

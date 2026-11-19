@@ -67,6 +67,42 @@ func TestDirBusy(t *testing.T) {
 	}
 }
 
+// A session working in a git worktree keeps the worktree busy, not the
+// checkout it came from.
+func TestDirBusyWorktree(t *testing.T) {
+	claudeDir := t.TempDir()
+	fakeclaude.Setup(t, claudeDir)
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	wt := filepath.Join(repo, ".claude", "worktrees", "x")
+	if err := os.MkdirAll(filepath.Join(wt, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h := New(Options{Source: discovery.Source{ClaudePath: fakeclaude.Path(), ClaudeDir: claudeDir}})
+	check := func(cases map[string]bool) {
+		t.Helper()
+		for dir, want := range cases {
+			got, err := h.Busy(context.Background(), dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Errorf("Busy(%s) = %v, want %v", strings.TrimPrefix(dir, root), got, want)
+			}
+		}
+	}
+	setAgents(t, claudeDir, map[string]string{wt: "busy"})
+	check(map[string]bool{
+		repo:                      false, // only a worktree session works
+		wt:                        true,
+		filepath.Join(wt, "sub"):  false,
+		filepath.Join(root):       false,
+		filepath.Join(repo, ".."): false,
+	})
+	setAgents(t, claudeDir, map[string]string{wt: "busy", repo: "busy"})
+	check(map[string]bool{repo: true, wt: true})
+}
+
 func sampleRequest(t *testing.T, name string) protocol.Envelope {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "protocol", "testdata", name))

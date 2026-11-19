@@ -5,7 +5,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;700&display=swap">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300..500,0..1,0&icon_names=account_tree,add,alt_route,animation,arrow_back,arrow_upward,backspace,battery_full,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,contrast,delete,description,dns,download,edit,error,expand_more,folder,forum,image,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,keyboard_return,keyboard_tab,lock,more_vert,palette,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,settings,signal_cellular_alt,stop,style,terminal,upload,wallpaper,warning,wifi&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300..500,0..1,0&icon_names=account_tree,add,alt_route,animation,arrow_back,arrow_upward,backspace,battery_full,call_split,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,contrast,delete,description,dns,download,edit,error,expand_more,folder,forum,image,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,keyboard_return,keyboard_tab,lock,more_vert,palette,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,settings,signal_cellular_alt,stop,style,terminal,upload,wallpaper,warning,wifi&display=block">
 <style>
 /* 下面这段从 index.html 原样复制：APP 主题变量、通用样式和各页面样式。改设计稿时两边一起改。 */
 :root {
@@ -1553,7 +1553,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 .dkids > .fkids, .fkids > * { box-shadow: none; }
 .srow.has-forks, .srow.fork { position: relative; }
 .srow.has-forks::after, .srow.fork::before, .srow.fork:not(.last)::after { content: ""; position: absolute; pointer-events: none; }
-.srow.has-forks::after { left: calc(var(--gx) - var(--shift) - var(--tree-w) / 2); top: calc(var(--gy) + var(--gr) + 4px); bottom: 0; border-left: var(--tree-w) solid var(--tree); }
+.srow.has-forks::after { left: calc(var(--gx) - var(--shift) - var(--tree-w) / 2); top: calc(var(--gy) + var(--gr) + 4px); bottom: 0; border-left: var(--tree-w) solid var(--tree); transform-origin: top; }
 .srow.has-forks.forks-folded::after { display: none; }
 .srow.fork::before { left: calc(var(--gx) - var(--shift) - var(--fk) - var(--tree-w) / 2); top: 0; width: calc(var(--fk) + var(--shift) - var(--gr) - 2px - var(--tree-w) / 2); height: var(--gy); border-left: var(--tree-w) solid var(--tree); border-bottom: var(--tree-w) solid var(--tree); border-bottom-left-radius: min(var(--tree-r), 6px); box-sizing: content-box; }
 .srow.fork:not(.last)::after { left: calc(var(--gx) - var(--shift) - var(--fk) - var(--tree-w) / 2); top: 0; bottom: 0; border-left: var(--tree-w) solid var(--tree); }
@@ -1603,6 +1603,58 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 .tool-detail.tbox::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--c-fg) 22%, transparent); border-radius: 2px; }
 [data-dir="grid"] .tool-detail.tbox::-webkit-scrollbar-thumb { border-radius: 0; background: var(--c-fg); }
 [data-dir="sticker"] .tool-detail.tbox::-webkit-scrollbar-thumb { background: var(--k-ink); }
+
+/* ================= 第六轮：已删分支、git 入口、Fork 和 Worktree、限额自动发送、移出收起、左滑停止和移出（待批） ================= */
+.r6-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 分支弹层：已经删掉的分支，名字浅一级 */
+.mi .mono-name.gone { color: var(--c-fg-2); }
+/* git 入口点开的小菜单：从图标下面长出来，不压暗页面，点别处收起 */
+.scrim.clear, [data-style="glass"] .scrim.clear { background: transparent; }
+.device:has(#scrim.clear:not([hidden])) .statusbar, .device:has(#scrim.clear:not([hidden])) .gesture { box-shadow: none; }
+.pmenu { position: absolute; z-index: 41; min-width: 188px; padding: 6px 0; background: var(--c-sheet); border-radius: var(--r-md); box-shadow: 0 0 0 0.5px var(--c-line), 0 14px 36px -12px rgba(0, 0, 0, 0.3); transform-origin: top right; }
+.pmenu .mi { min-height: 48px; padding: 4px var(--sp-6) 4px var(--sp-4); gap: var(--sp-3); }
+[data-dir="clear"] .pmenu { background: var(--k-pane); -webkit-backdrop-filter: blur(30px) saturate(1.8); backdrop-filter: blur(30px) saturate(1.8); border-radius: 22px; box-shadow: inset 0 1px 1px var(--k-rimc), 0 0 0 0.5px var(--k-edgec), 0 18px 40px -16px rgba(0, 0, 0, 0.3); }
+[data-dir="grid"] .pmenu { border-radius: 0; padding: 0; background: var(--c-bg); box-shadow: none; border: 2px solid var(--c-fg); }
+[data-dir="grid"] .pmenu .mi { font-family: var(--font-mono); font-size: 14px; }
+[data-dir="grid"] .pmenu .mi + .mi { box-shadow: inset 0 1px 0 var(--c-line); }
+[data-dir="sticker"] .pmenu { border-radius: 18px; border: 2px solid var(--k-ink); box-shadow: 0 5px 0 var(--k-ink); }
+[data-dir="sticker"] .pmenu .mi { font-weight: 700; }
+/* Fork、Worktree 对话框：两个输入框之间留一点距离，说明文字在输入框下面 */
+.dialog .field + .field { margin-top: var(--sp-1); }
+.dialog .fhint { margin: 4px 0 0; font-size: var(--fs-caption); color: var(--c-fg-3); }
+.dialog .fhint.err { color: var(--c-danger); }
+/* 限额：输入框上方一块，第一行是限额和重置时间，第二行是到点要发的话和开关 */
+.limit { display: flex; flex-direction: column; gap: 6px; padding: var(--sp-3) var(--sp-2) var(--sp-2) var(--sp-4); border-radius: 22px; background: var(--c-surface); font-size: var(--fs-label); color: var(--c-fg-2); }
+.lim-t { margin: 0; }
+.lim-t .on { color: var(--c-accent); }
+.lim-row { display: flex; align-items: center; gap: var(--sp-3); }
+.lim-lab { flex: none; color: var(--c-fg); }
+.lim-in { flex: 1; min-width: 0; height: 36px; border: 0; border-radius: var(--r-sm); padding: 0 var(--sp-3); background: var(--c-bg); color: var(--c-fg); font: inherit; font-size: var(--fs-body); }
+.lim-in:focus { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+.swrow.lim-sw { width: auto; flex: none; padding: 4px; }
+.swrow.lim-sw:disabled { opacity: 0.4; }
+[data-dir="clear"] .limit { background: var(--k-pane); -webkit-backdrop-filter: blur(22px) saturate(1.8); backdrop-filter: blur(22px) saturate(1.8); box-shadow: inset 0 1px 1px var(--k-rimc), 0 0 0 0.5px var(--k-edgec), 0 10px 26px -12px rgba(0, 0, 0, 0.28); }
+[data-dir="clear"] .lim-in { background: color-mix(in srgb, var(--c-fg) 6%, transparent); }
+[data-dir="grid"] .limit { border-radius: 6px; font-family: var(--font-mono); font-size: 12px; }
+[data-dir="grid"] .lim-lab { font-size: 13px; }
+[data-dir="grid"] .lim-in { border-radius: 0; font-family: var(--font-mono); font-size: 14px; box-shadow: inset 0 0 0 1px var(--c-fg); }
+[data-dir="sticker"] .limit { background: var(--c-card); border: 2px solid var(--k-ink); box-shadow: 0 4px 0 var(--k-ink); }
+[data-dir="sticker"] .lim-lab { font-weight: 700; }
+[data-dir="sticker"] .lim-in { border: 2px solid var(--k-ink); border-radius: 12px; background: var(--c-card); }
+/* 左滑：状态圆点和 fork 连线不动，圆点右边的内容跟着手指往左走，右边露出「停止」或「移出」，松手过一半就停在打开的位置 */
+.srow { --sw: 0px; position: relative; overflow: hidden; }
+.srow .row-body { overflow: hidden; }
+.srow .row-body > *, .srow > :not(.swipe-act):not(.row) { transform: translateX(var(--sw)); }
+.srow.sw-anim .row-body > *, .srow.sw-anim > :not(.row) { transition: transform var(--dur-m) var(--ease-emph); }
+/* 行尾没有按钮了，时间离右边留出页边距 */
+.srow > .row:last-child { padding-right: calc(var(--sp-page) - var(--sp-2)); }
+/* 露出的是一枚 40dp 的小圆钮，下面一行小字，不占满整行；格栅是直角小方块，贴纸描墨线加硬阴影 */
+.swipe-act { position: absolute; top: 0; right: 0; bottom: 0; width: 76px; border: 0; padding: 0; background: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--c-danger); font-size: 11px; transform: translateX(calc(100% + var(--sw))); }
+.swipe-act .ms { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--c-danger); color: #FFFFFF; font-size: 20px; }
+[data-dir="grid"] .swipe-act { font-family: var(--font-mono); }
+[data-dir="grid"] .swipe-act .ms { width: 36px; height: 36px; border-radius: 0; }
+[data-dir="sticker"] .swipe-act { font-weight: 800; }
+[data-dir="sticker"] .swipe-act .ms { border: 2px solid var(--k-ink); box-shadow: 0 3px 0 var(--k-ink); }
 </style>
 
 <!-- 第四轮：卡通图标（24 格，2 像素圆头线，APP 里照这些路径画） -->
@@ -1636,23 +1688,20 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     </div>
     <div class="themes" role="group" aria-label="样式" id="styleSet"></div>
 
-    <section class="knob" id="r5">
-      <h2>第五轮（待批）</h2>
-      <h3>工具视图</h3>
-      <div class="seg" role="group" aria-label="工具视图" id="toolsSeg"></div>
-      <p class="desk-note" style="margin:0" id="toolsNote"></p>
-      <div class="r5-btns"><button type="button" class="desk-btn" data-r5="tools-open">打开示例会话</button><button type="button" class="desk-btn" data-r5="tools-run">跑一轮带工具的回复</button></div>
-      <h3>草稿</h3>
-      <p class="desk-note" style="margin:0">在任一会话的输入框里打几个字再返回，列表那行变成草稿，再进去字还在；发出去后草稿清掉。</p>
-      <div class="r5-btns"><button type="button" class="desk-btn" data-r5="draft">自动演示一遍</button></div>
-      <h3>分支、worktree 和 fork</h3>
-      <p class="desk-note" style="margin:0">clauderc-app 目录：标题右边是当前分支，点开能筛选、能切换；「工具视图重写」在 worktree 里；「clauderc 协议」下面挂着从它 fork 出的会话，左边箭头能收起。fork 的聊天里有一行「以上来自」。</p>
-      <div class="r5-btns"><button type="button" class="desk-btn" data-r5="list">打开会话列表</button><button type="button" class="desk-btn" data-r5="fork">打开 fork 的聊天</button></div>
-      <h3>没被信任的目录</h3>
-      <div class="r5-btns"><button type="button" class="desk-btn" data-r5="trust">新建到 new-repo</button></div>
-      <h3>总是播放加载动画</h3>
-      <p class="desk-note" style="margin:0">开关在设置的「动画」里。打开后每次启动 APP，六处各自第一次加载都立刻出动画，至少放 1.5 秒；之后照原来的规则，快的不出。</p>
-      <div class="r5-btns"><button type="button" class="desk-btn" data-r5="settings">打开设置</button><button type="button" class="desk-btn" data-r5="relaunch">重新打开 APP</button></div>
+    <section class="knob" id="r6">
+      <h2>第六轮（待批）</h2>
+      <h3>已删除的分支</h3>
+      <p class="desk-note" style="margin:0">「旧版重连实验」停在已经删掉的 fix-old-relay 上，分支弹层里单独一行，能点它筛选，没有「切换」。</p>
+      <div class="r6-btns"><button type="button" class="desk-btn" data-r6="branches">打开 clauderc-app 的分支</button></div>
+      <h3>聊天页的 git 入口</h3>
+      <p class="desk-note" style="margin:0">顶栏的 git 图标点开是一个小菜单：Fork、Worktree、看 git。</p>
+      <div class="r6-btns"><button type="button" class="desk-btn" data-r6="menu">打开菜单</button><button type="button" class="desk-btn" data-r6="fork">Fork 对话框</button><button type="button" class="desk-btn" data-r6="wt">Worktree 对话框</button></div>
+      <h3>限额自动发送</h3>
+      <p class="desk-note" style="margin:0">「批量改测试」撞到 5 小时限额。打开开关后，重置后 1 分钟目标机替你发出框里的话；没打开就只是到点收起。</p>
+      <div class="r6-btns"><button type="button" class="desk-btn" data-r6="limit">打开撞到限额的会话</button><button type="button" class="desk-btn" data-r6="reset">快进到重置后 1 分钟</button></div>
+      <h3>左滑停止和移出</h3>
+      <p class="desk-note" style="margin:0">会话页任一行按住往左拖：运行中的露出「停止」，停了的露出「移出」；点别处收回。圆点和 fork 连线不动。行尾的 ⋮ 菜单去掉了，git 从聊天页顶栏进。移出后那一行收起。</p>
+      <div class="r6-btns"><button type="button" class="desk-btn" data-r6="swipe">演示左滑</button><button type="button" class="desk-btn" data-r6="remove">移出「landing 页」</button></div>
       <label class="check"><input type="checkbox" data-k="slow">慢放 5 倍</label>
     </section>
   </aside>
@@ -1865,6 +1914,14 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     { k: "show", img: "hero" },
     { k: "ai", text: "没问题的话我把 README 里的路径换过去。" }
   ];
+  // 第六轮：撞到限额的会话，最后一条是 Claude Code 写的限额提示
+  var LIMIT_MSGS = [
+    { k: "me", text: "把 internal 下面剩下的测试都改成表驱动" },
+    { k: "ai", text: "先从 transcript 包开始，改完一个包跑一次测试。" },
+    { k: "tool", verb: "编辑", arg: "internal/transcript/parse_test.go", detail: [["改动", "+42 −67"]] },
+    { k: "tool", verb: "运行", arg: "go test ./internal/transcript/...", detail: [["命令", "go test ./internal/transcript/..."], ["输出", "ok  \tclauderc/internal/agent/transcript\t0.81s"]] },
+    { k: "ai", text: "You've hit your 5-hour limit · resets 10:40pm (Asia/Shanghai)" }
+  ];
   function sess(id, title, dir, state, time, extra) {
     return Object.assign({ id: id, title: title, dir: dir, state: state, time: time, model: "Opus 5.5", mode: "默认询问", msgs: null, pending: null, l3: "", timers: null, queue: [] }, extra || {});
   }
@@ -1883,7 +1940,11 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
           // 停在认不出的对话框上：会话是 blocked，记录里没有待确认，屏幕也不是已认识的对话框
           sess("s10", "离线判定", "relay-svc", "need", "1 小时前", { ctx: 41, pending: "dialog", l3: "停在一个对话框上", branch: "main" }),
           // 第五轮：来源已经移出列表的 fork，单独成行
-          sess("s14", "排查日志 ⑂ 只看 relay 部分", "relay-svc", "idle", "2 小时前", { ctx: 9, branch: "main", forkOf: "gone1" })
+          sess("s14", "排查日志 ⑂ 只看 relay 部分", "relay-svc", "idle", "2 小时前", { ctx: 9, branch: "main", forkOf: "gone1" }),
+          // 第六轮：撞到 5 小时限额的会话
+          sess("s16", "批量改测试", "relay-svc", "idle", "25 分钟前", { ctx: 58, branch: "main", msgs: clone(LIMIT_MSGS), limit: { kind: "5 小时", resets: "22:40", at: "22:41", text: "继续", auto: false } }),
+          // 第六轮：停在已经删掉的分支上
+          sess("s15", "旧版重连实验", "clauderc-app", "stop", "3 天前", { ctx: 64, branch: "fix-old-relay" })
         ] },
         { id: "official", name: "官方", def: "官方", host: "api.anthropic.com", rename: true, create: true, folded: false, sessions: [
           sess("s4", "迁移脚本审查", "infra", "need", "5 分钟前", { pending: "question", ctx: 33, l3: "错误码用哪种命名风格？", branch: "main" }),
@@ -2402,6 +2463,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   // 底部菜单和对话框在 APP 里是 Material 自带的进出场，这里用同一组时长近似
   var FR = {
     up: [{ transform: "translateY(100%)" }, { transform: "none" }],
+    menu: [{ opacity: 0, transform: "scale(0.86)" }, { opacity: 1, transform: "none" }],
     pop: [{ opacity: 0, transform: "translateY(-50%) scale(0.92)" }, { opacity: 1, transform: "translateY(-50%) scale(1)" }]
   };
   function openOverlay(html, kind) {
@@ -2416,8 +2478,9 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     if (scrim.hidden || fading) scrim.animate([{ opacity: 0 }, { opacity: 1 }], { duration: dur("durS") });
     scrim.hidden = false;
     scrim._closing = false;
-    n.animate(FR[kind === "dialog" ? "pop" : "up"], { duration: dur("durM"), easing: ez("emph") });
-    note(kind === "dialog" ? "对话框弹出" : "底部菜单升起", dur("durM"), ez("emph"));
+    scrim.classList.toggle("clear", kind === "menu");
+    n.animate(FR[kind === "dialog" ? "pop" : kind === "menu" ? "menu" : "up"], { duration: dur("durM"), easing: ez("emph") });
+    note(kind === "dialog" ? "对话框弹出" : kind === "menu" ? "小菜单从图标下面长出来" : "底部菜单升起", dur("durM"), ez("emph"));
     return ov;
   }
   function closeOverlay() {
@@ -2428,7 +2491,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     scrim._closing = true;
     var fa = scrim.animate([{ opacity: 1 }, { opacity: 0 }], { duration: d, fill: "forwards" });
     fa.finished.then(function () { if (!ov) { scrim.hidden = true; scrim._closing = false; } fa.cancel(); }, noop);
-    var a = o.el.animate(FR[o.kind === "dialog" ? "pop" : "up"].slice().reverse(), { duration: d, easing: ez("emphIn"), fill: "forwards" });
+    var a = o.el.animate(FR[o.kind === "dialog" ? "pop" : o.kind === "menu" ? "menu" : "up"].slice().reverse(), { duration: d, easing: ez("emphIn"), fill: "forwards" });
     a.finished.then(function () { o.el.remove(); }, function () { o.el.remove(); });
   }
   function closeOverlayNow() {
@@ -2750,8 +2813,11 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     if (draft) st = '<span class="draft">草稿：</span>' + esc(draft.split("\n")[0]);
     var l3 = s.state === "need" && s.l3 ? '<span class="row-l3 need"' + (s.pending === "question" || s.pending === "dialog" ? ' style="font-family:var(--font-ui);font-size:13px"' : "") + ">" + esc(s.l3) + "</span>" : "";
     var fold = o.forks ? '<button type="button" class="icon-btn sm ffold" data-act="fork-fold" data-id="' + s.id + '" aria-expanded="' + !S.forkFold[s.id] + '" aria-label="收起 ' + o.forks + ' 个 fork"><span class="ms">expand_more</span></button>' : "";
-    return '<div class="srow' + (s.state === "stop" ? " dim" : "") + (o.fork ? " fork" : "") + (o.last ? " last" : "") + (o.forks ? " has-forks" + (S.forkFold[s.id] ? " forks-folded" : "") : "") + '"><button type="button" class="row" data-act="open-chat" data-id="' + s.id + '">' + glyphHtml(s) + '<span class="row-body"><span class="row-l1"><span class="row-title">' + esc(s.title) + "</span><time>" + esc(s.time) + '</time></span><span class="row-l2">' + st + "</span>" + l3 + "</span></button>" + fold +
-      '<button type="button" class="icon-btn sm" data-act="session-menu" data-id="' + s.id + '" aria-label="会话操作"><span class="ms">more_vert</span></button></div>' + agentRowsHtml(s);
+    // 第六轮：左滑露出的按钮，运行中是「停止」，停了是「移出」
+    var swipe = s.state === "stop" ? '<button type="button" class="swipe-act" data-act="sw-act" data-k="remove" data-v="' + s.id + '" tabindex="-1"><span class="ms">delete</span>移出</button>'
+      : '<button type="button" class="swipe-act" data-act="sw-act" data-k="stop" data-v="' + s.id + '" tabindex="-1"><span class="ms">power_settings_new</span>停止</button>';
+    // 第六轮：行尾的 ⋮ 菜单去掉了：点行打开，左滑停止或移出，git 从聊天页顶栏进
+    return '<div class="srow' + (s.state === "stop" ? " dim" : "") + (o.fork ? " fork" : "") + (o.last ? " last" : "") + (o.forks ? " has-forks" + (S.forkFold[s.id] ? " forks-folded" : "") : "") + '" data-sid="' + s.id + '">' + swipe + '<button type="button" class="row" data-act="open-chat" data-id="' + s.id + '">' + glyphHtml(s) + '<span class="row-body"><span class="row-l1"><span class="row-title">' + esc(s.title) + "</span><time>" + esc(s.time) + '</time></span><span class="row-l2">' + st + "</span>" + l3 + "</span></button>" + fold + "</div>" + agentRowsHtml(s);
   }
   function renderSessions() {
     var n = pane("sessions");
@@ -3078,13 +3144,12 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   }
   function toolHtml(it) {
     var rich = it.patch || it.write || it.read, folds = !!(rich || it.detail);
-    // B 里编辑、写入默认展开，读取和其余工具默认收起；A 里全都收着。跑着的编辑还没有差异，等结果到了再定
-    if (it.open == null && folds) it.open = toolsMode === "B" && !!(it.patch || it.write);
+    // 工具行默认都收着
+    if (it.open == null && folds) it.open = false;
     // 和 APP 一样：跑着的工具行转圈排在箭头前面
     var tail = statHtml(it) + (it.spin ? SPIN12 : "") +
       (it.flag ? '<span class="t-flag">' + esc(it.flag) + "</span>" : folds || it.spin ? '<span class="ms">chevron_right</span>' : "");
-    var boxed = toolsMode === "A";
-    var detail = rich ? patchHtml(it, boxed) : it.detail ? detailHtml(it, boxed) : "";
+    var detail = rich ? patchHtml(it, true) : it.detail ? detailHtml(it, true) : "";
     return '<div class="tool' + (it.open && folds ? " open" : "") + '" data-id="' + reg(it) + '"><button type="button" class="tool-row"' + (folds ? ' data-act="tool"' : "") + ">" + (it.verb ? '<span class="t-verb">' + esc(it.verb) + "</span>" : "") + '<span class="t-arg">' + esc(it.arg) + "</span>" + tail + "</button>" + detail + (it.img ? imgHtml(it.img) : "") + "</div>";
   }
   // Agent 调用：「子代理 · 描述」，跑着时转圈；整行点了进子代理页，不在原地展开
@@ -3093,20 +3158,13 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     return '<div class="tool" data-id="' + reg(it) + '"><button type="button" class="tool-row" data-act="open-agent" data-sid="' + a.sid + '" data-aid="' + a.id + '"><span class="t-verb">子代理 ·</span><span class="t-arg ui">' + esc(a.desc) + "</span>" +
       (a.run ? SPIN12 : "") + '<span class="ms">chevron_right</span></button></div>';
   }
-  // ---------- 第五轮：工具视图 A / B（待批） ----------
-  // A：连着两次以上的工具调用合成一行总述，点开列出每次调用，每次调用再点开看完整结果，结果放在限高、能在框里滚动的框里；
-  // 单独一次调用就是一行。B：每次调用一行，点开是全部内容，不限高。带图的读取和 clauderc show 两种都单独显示
-  var TOOLS_STORE = "clauderc-demo-tools";
-  var toolsMode = (function () { try { return localStorage.getItem(TOOLS_STORE) === "B" ? "B" : "A"; } catch (err) { return "A"; } })();
-  var TOOLS_NOTE = {
-    A: "像桌面端：连着的几次工具调用合成一行总述，点开列出每次调用，每次调用再点开看完整结果；结果放在限高、能在框里滚动的框里，默认都收着。单独一次调用就是一行。",
-    B: "每次调用还是一行，点开就是全部内容，不限高。编辑、写入默认展开。"
-  };
+  // ---------- 工具视图（第五轮选定 A） ----------
+  // 连着两次以上的工具调用合成一行总述，点开列出每次调用，每次调用再点开看完整结果，结果放在限高、能在框里滚动的框里；
+  // 单独一次调用就是一行。带图的读取和 clauderc show 单独显示
   function inRun(m) { return m.k === "tool" && !m.img; }
   function shapeTools(msgs) {
     var flat = [];
     msgs.forEach(function (m) { if (m.k === "group") flat.push.apply(flat, m.tools); else flat.push(m); });
-    if (toolsMode === "B") return flat;
     var out = [], run = null;
     flat.forEach(function (m) {
       if (!inRun(m)) { run = null; out.push(m); return; }
@@ -3166,19 +3224,6 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       it.read = fill(it.read, it.n);
       if (box.isConnected) swapDetail(box, it, boxed);
     }, 600 * slowK());
-  }
-  function setToolsMode(m) {
-    if (toolsMode === m) return;
-    toolsMode = m;
-    try { localStorage.setItem(TOOLS_STORE, m); } catch (err) { /* 存不了就不记 */ }
-    shapeAll();
-    stack.forEach(function (p) {
-      var list = p.route.name === "chat" ? p.s && p.s.msgs : null;
-      if (!list || !p.msgs) return;
-      p.msgs.innerHTML = "";
-      list.forEach(function (it) { p.msgs.appendChild(itemEl(it)); });
-    });
-    renderR5Desk();
   }
   function itemEl(it) {
     var n;
@@ -3512,6 +3557,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       '<div class="dock"><div class="composer-wrap"><div class="slash" hidden><ul></ul></div>' +
       '<div class="working whole" hidden><span class="cli-spin">·</span><span class="w-text"><span class="w-verb"></span><span class="w-det"></span></span><button type="button" class="tbtn" data-act="interrupt">中断</button></div>' +
       '<div class="working blocked whole" hidden><span class="glyph g-need"></span><span>会话停在一个对话框上</span><span class="grow"></span><button type="button" class="tbtn" data-act="open-term">打开终端</button></div>' +
+      '<div class="limit whole" hidden></div>' +
       '<div class="attach whole" hidden></div>' +
       '<div class="composer"><button type="button" class="icon-btn" data-act="attach" aria-label="添加图片"><span class="ms">image</span></button><textarea rows="1" placeholder="发消息"></textarea><button type="button" class="send" data-act="send" aria-label="发送"><span class="ms">arrow_upward</span></button></div></div></div>';
     page.msgs = $(".msgs", page.el);
@@ -3522,6 +3568,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     page.working = $(".working:not(.blocked)", page.el);
     page.blocked = $(".working.blocked", page.el);
     page.attach = $(".attach", page.el);
+    page.limit = $(".limit", page.el);
+    paintLimit(page, false);
     page.slash = $(".slash", page.el);
     page.sendBtn = $(".send", page.el);
     s.msgs.forEach(function (it) { page.msgs.appendChild(itemEl(it)); });
@@ -3912,7 +3960,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     } else {
       t.classList.remove("closing");
       // 第五轮：被截断的结果展开时自动取全文
-      if (it && it.k !== "group" && it.cut) { fetchFull(t, it, toolsMode === "A"); d = t.querySelector(":scope > .tool-detail"); }
+      if (it && it.k !== "group" && it.cut) { fetchFull(t, it, true); d = t.querySelector(":scope > .tool-detail"); }
       t.classList.add("open");
       cs = getComputedStyle(d);
       // 长的块只把屏幕里看得见的那段展开，行依次淡入（同「展开全部」）
@@ -4142,10 +4190,10 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     Array.prototype.forEach.call(fadeIn, function (x) { x.animate([{ opacity: 0 }, { opacity: 1 }], { duration: dur("durS"), easing: ez("emph") }); });
     follow(p, d);
   }
-  // 第五轮：A 里新来的调用并进紧挨着的那组，紧挨着的是单独一次调用就和它合成一组；B 里一条一行
+  // 新来的调用并进紧挨着的那组，紧挨着的是单独一次调用就和它合成一组
   function addTool(s, tool) {
     var msgs = ensureMsgs(s), last = msgs[msgs.length - 1];
-    if (toolsMode === "B" || !inRun(tool)) { addMsg(s, tool); return; }
+    if (!inRun(tool)) { addMsg(s, tool); return; }
     if (last && last.k === "group") { var oldEl = last.el; last.tools.push(tool); morph(s, oldEl, last); return; }
     if (last && inRun(last)) { var g = { k: "group", tools: [last, tool] }, el0 = last.el; msgs[msgs.length - 1] = g; morph(s, el0, g); return; }
     addMsg(s, tool);
@@ -4236,6 +4284,10 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       var tail = b === info.cur || wt ? "" : '<button type="button" class="tbtn" data-act="br-switch" data-key="' + esc(key) + '" data-v="' + esc(b) + '">切换</button>';
       rows += item(b, '<span class="mono-name">' + esc(b) + "</span>", sub, f === b, tail);
     });
+    // 第六轮：会话停在已经删掉的分支上，单独一行，能筛选，不能切换
+    all.map(function (s) { return s.branch; }).filter(function (b, i, a) { return b && info.local.indexOf(b) < 0 && a.indexOf(b) === i; }).forEach(function (b) {
+      rows += item(b, '<span class="mono-name gone">' + esc(b) + "</span>", "已删除 · " + count(all.filter(function (s) { return s.branch === b; })), f === b, "");
+    });
     openOverlay(sheet("<h2>" + esc(k.dir) + " 的分支</h2><p>点分支只看它上面的会话</p>", rows));
   }
   function switchBranch(key, b) {
@@ -4248,23 +4300,30 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     if (!box) return;
     S.forkFold[id] = !S.forkFold[id];
     btn.setAttribute("aria-expanded", String(!S.forkFold[id]));
-    // 来源圆点下的竖线：收起时跟着收，展开时等 fork 长出来再接上
-    var src = btn.closest(".srow");
-    if (S.forkFold[id]) src.classList.add("forks-folded");
-    else setTimeout(function () { if (!S.forkFold[id]) src.classList.remove("forks-folded"); }, dur("durS"));
+    // 第六轮：展开时先从来源圆点往下画出竖线，紧接着 fork 行顺着线展开（裁着长出来，不淡入，连线一直是连着的）；
+    // 收起倒过来：fork 行先收起，竖线再缩回圆点
+    var src = btn.closest(".srow"), stub = Math.round(dur("durM") * 0.3);
+    src.getAnimations({ subtree: true }).forEach(function (a) { if (a.effect && a.effect.pseudoElement === "::after") a.cancel(); });
     box.getAnimations().forEach(function (a) { a.cancel(); });
     box.style.overflow = "hidden";
     if (S.forkFold[id]) {
       var h = box.offsetHeight;
-      box.animate([{ height: h + "px", opacity: 1 }, { height: "0px", opacity: 0 }], { duration: dur("durS"), easing: ez("emphIn") })
-        .finished.then(function () { box.style.overflow = ""; box.classList.add("folded"); }, noop);
-      note("fork 收起", dur("durS"), ez("emphIn"));
+      box.animate([{ height: h + "px" }, { height: "0px" }], { duration: dur("durS"), easing: ez("emphIn") }).finished.then(function () {
+        box.style.overflow = "";
+        box.classList.add("folded");
+        if (!S.forkFold[id]) return;
+        src.animate([{ transform: "scaleY(1)" }, { transform: "scaleY(0)" }], { duration: stub, easing: "linear", pseudoElement: "::after" })
+          .finished.then(function () { if (S.forkFold[id]) src.classList.add("forks-folded"); }, noop);
+      }, noop);
+      note("fork 收起，竖线跟着缩回", dur("durS") + stub, ez("emphIn"));
     } else {
+      src.classList.remove("forks-folded");
+      src.animate([{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }], { duration: stub, easing: "linear", pseudoElement: "::after" });
       box.classList.remove("folded");
       var h2 = box.offsetHeight;
-      box.animate([{ height: "0px", opacity: 0 }, { height: h2 + "px", opacity: 1 }], { duration: dur("durM"), easing: ez("emph") })
+      box.animate([{ height: "0px" }, { height: h2 + "px" }], { duration: dur("durM"), delay: stub, easing: ez("emph"), fill: "backwards" })
         .finished.then(function () { box.style.overflow = ""; }, noop);
-      note("fork 展开", dur("durM"), ez("emph"));
+      note("fork 展开：先画竖线再展开", stub + dur("durM"), ez("emph"));
     }
   }
 
@@ -4339,15 +4398,6 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     "rename-reset": function (t) { var g = findGroup(t.dataset.group); g.name = g.def; closeOverlay(); refreshHome(); },
     create: function (t) { push({ name: "create", group: t.dataset.group }); },
     "open-chat": function (t) { openChat(t.dataset.id); },
-    "session-menu": function (t) {
-      var s = findSession(t.dataset.id);
-      var items = mi({ act: "menu-open", v: s.id, icon: "description", html: s.state === "stop" ? "<span>打开</span><small>发消息时自动唤醒</small>" : "<span>打开</span>" }) +
-        mi({ act: "menu-git", v: s.id, icon: "account_tree", text: "git" }) +
-        (s.state === "stop" ? mi({ act: "menu-remove", v: s.id, icon: "delete", text: "移出列表", danger: true }) : mi({ act: "menu-stop", v: s.id, icon: "power_settings_new", text: "停止", danger: true }));
-      openOverlay(sheet("<h2>" + esc(s.title) + '</h2><p><span class="mono">' + esc(s.dir) + "</span> · " + esc(stateText(s)) + "</p>", items));
-    },
-    "menu-open": function (t) { closeOverlay(); openChat(t.dataset.v); },
-    "menu-git": function (t) { closeOverlay(); openGit(findSession(t.dataset.v)); },
     "menu-stop": function (t) {
       var s = findSession(t.dataset.v);
       if (s.state !== "work") { closeOverlay(); ACT["do-stop"](t); return; }
@@ -4358,7 +4408,17 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       var s = findSession(t.dataset.v);
       openOverlay(dialog("移出「" + esc(s.title) + "」？", "<p>不再显示在列表里，对话记录仍留在目标机上。</p>", '<button type="button" class="tbtn" data-act="dlg-cancel">取消</button><button type="button" class="tbtn danger" data-act="do-remove" data-v="' + s.id + '">移出</button>'), "dialog");
     },
-    "do-remove": function (t) { var s = findSession(t.dataset.v), g = groupOf(s); closeOverlay(); g.sessions.splice(g.sessions.indexOf(s), 1); refreshHome(); },
+    // 第六轮：移出的那一行先收起，再从列表里拿掉
+    "do-remove": function (t) {
+      var s = findSession(t.dataset.v), g = groupOf(s);
+      closeOverlay();
+      var row = $('.srow[data-sid="' + s.id + '"]', pane("sessions"));
+      function drop() { if (g.sessions.indexOf(s) >= 0) g.sessions.splice(g.sessions.indexOf(s), 1); refreshHome(); }
+      if (!row) { drop(); return; }
+      var h = row.offsetHeight;
+      note("移出的行收起", dur("durM"), ez("emph"));
+      row.animate([{ height: h + "px", opacity: 1 }, { height: "0px", opacity: 0 }], { duration: dur("durM"), easing: ez("emph"), fill: "forwards" }).finished.then(drop, drop);
+    },
     submit: function (t) { submitCreate(t); },
     "all-dirs": function (t) {
       var p = pageOf(t), link = $(".more-link", p.el);
@@ -4380,7 +4440,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       openOverlay(sheet("<h2>权限模式</h2>", MODES.map(function (m, i) { return mi({ act: "pick-mode", v: m[0], text: m[0], small: m[1], radio: true, tick: p.s.mode === m[0], danger: i === 3 }); }).join(""))).page = p;
     },
     "pick-mode": function (t) { var p = ov.page; p.s.mode = t.dataset.v; $(".v-mode", p.el).textContent = t.dataset.v; closeOverlay(); },
-    "chat-git": function (t) { openGit(pageOf(t).s); },
+    "chat-git": function (t) { gitMenu(t); },
     attach: function (t) {
       var p = pageOf(t);
       openOverlay(sheet("<h2>添加图片</h2><p>最多 5 张，每张不超过 10 MB</p>", mi({ act: "add-photo", icon: "photo_camera", text: "拍照" }) + mi({ act: "add-photo", icon: "image", text: "从相册选择" }))).page = p;
@@ -4719,16 +4779,179 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   function bindPick() {
     renderDirDesk();
     bindDirDesk();
-    bindR5();
+    bindR6();
   }
 
-  // ---------- 第五轮：侧栏 ----------
-  function renderR5Desk() {
-    var seg = $("#toolsSeg");
-    if (!seg) return;
-    seg.innerHTML = [["A", "A 合成一行"], ["B", "B 每次一行"]].map(function (m) { return '<button type="button" data-tools="' + m[0] + '" aria-pressed="' + (toolsMode === m[0]) + '">' + m[1] + "</button>"; }).join("");
-    $("#toolsNote").textContent = TOOLS_NOTE[toolsMode];
+  // ---------- 第六轮：git 入口、Fork、Worktree ----------
+  function gitMenu(btn) {
+    var p = pageOf(btn);
+    var o = openOverlay('<div class="pmenu" role="menu">' + mi({ act: "git-fork", icon: "call_split", text: "Fork" }) + mi({ act: "git-wt", icon: "alt_route", text: "Worktree" }) + mi({ act: "git-view", icon: "account_tree", text: "看 git" }) + "</div>", "menu");
+    o.page = p;
+    var r = btn.getBoundingClientRect(), box = o.el.offsetParent.getBoundingClientRect();
+    o.el.style.top = (r.bottom - box.top + 2) + "px";
+    o.el.style.right = (box.right - r.right + 4) + "px";
   }
+  var WT_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$/;
+  function forkDialog(p) {
+    var o = openOverlay(dialog("Fork 这个会话", "<p>把到这里为止的对话复制成一个新的后台会话，你留在这里。</p>" +
+      '<div class="field"><label>给它的指令</label><input class="input fork-in" placeholder="可以不填" autocomplete="off"></div>',
+      '<button type="button" class="tbtn" data-act="dlg-cancel">取消</button><button type="button" class="tbtn" data-act="fork-ok">Fork</button>'), "dialog");
+    o.page = p;
+  }
+  function wtDialog(p) {
+    var d = new Date(), z = function (n) { return (n < 10 ? "0" : "") + n; };
+    var name = "wt-" + z(d.getMonth() + 1) + z(d.getDate()) + "-" + z(d.getHours()) + z(d.getMinutes());
+    var o = openOverlay(dialog("在新 worktree 里开会话", '<p>在 <span class="mono">' + esc(p.s.dir) + "</span> 下另开一个 worktree，用这个会话的档位启动。</p>" +
+      '<div class="field"><label>worktree 名</label><input class="input mono wt-name" value="' + name + '" autocomplete="off" spellcheck="false"><p class="fhint">只能用字母、数字、点、横线和下划线</p></div>' +
+      '<div class="field"><label>第一句话</label><input class="input wt-first" placeholder="可以不填" autocomplete="off"></div>',
+      '<button type="button" class="tbtn" data-act="dlg-cancel">取消</button><button type="button" class="tbtn" data-act="wt-ok">新建</button>'), "dialog");
+    o.page = p;
+  }
+  // ---------- 第六轮：限额 ----------
+  function paintLimit(page, animate) {
+    var s = page.s, l = s.limit, n = page.limit;
+    if (!n) return;
+    if (!l) { lift(n, false, 8, false, animate); return; }
+    var typed = $(".lim-in", n);
+    if (typed) l.text = typed.value;
+    n.innerHTML = '<p class="lim-t">' + esc(l.kind) + "限额，" + esc(l.resets) + " 重置" + (l.auto ? ' · <span class="on">' + esc(l.at) + " 自动发出</span>" : "") + "</p>" +
+      '<div class="lim-row"><span class="lim-lab">到点发送</span><input class="lim-in" value="' + esc(l.text) + '" placeholder="要发的话" aria-label="到点要发的话">' +
+      '<button type="button" class="swrow lim-sw" role="switch" aria-checked="' + !!l.auto + '" data-act="lim-toggle" aria-label="限额重置后自动发送"' + (l.text.trim() ? "" : " disabled") + '><span class="switch"><i></i></span></button></div>';
+    lift(n, true, 8, false, animate);
+  }
+  // 重置后 1 分钟：开着就替你发出框里的话，没开就只是收起
+  function limitReset(s) {
+    var l = s.limit, p = chatPageOf(s);
+    if (!l) return;
+    if (p) { var typed = $(".lim-in", p.limit); if (typed) l.text = typed.value; }
+    s.limit = null;
+    if (p) paintLimit(p, true);
+    if (!l.auto) { toast("限额已重置"); return; }
+    note("限额重置后 1 分钟：自动发出", dur("durM"), ez("emph"));
+    var it = { k: "me", text: l.text, sending: true };
+    addMsg(s, it);
+    setTimeout(function () { it.sending = false; updateItem(it); }, 350);
+    turn(s, "好，接着把 relay 包的测试改成表驱动。");
+  }
+  // ---------- 第六轮：左滑停止和移出 ----------
+  var SW_W = 76, SW = null, swOpen = null, swEndAt = 0;
+  function swSet(row, x, anim) {
+    row.classList.toggle("sw-anim", !!anim);
+    row.style.setProperty("--sw", x + "px");
+  }
+  function swClose() {
+    var r = swOpen;
+    swOpen = null;
+    if (r && r.isConnected) { swSet(r, 0, true); note("左滑收回", dur("durM"), ez("emph")); }
+  }
+  app.addEventListener("pointerdown", function (e) {
+    if (e.button !== 0 || G) return;
+    var row = e.target.closest(".srow");
+    if (!row || e.target.closest(".swipe-act")) return;
+    SW = { id: e.pointerId, row: row, x0: e.clientX, y0: e.clientY, base: row === swOpen ? -SW_W : 0, on: false, x: 0 };
+  });
+  window.addEventListener("pointermove", function (e) {
+    if (!SW || e.pointerId !== SW.id) return;
+    var dx = e.clientX - SW.x0, dy = e.clientY - SW.y0;
+    if (!SW.on) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { SW = null; return; }
+      if (Math.abs(dx) < 10) return;
+      SW.on = true;
+      cancelPress();
+      if (swOpen && swOpen !== SW.row) swClose();
+    }
+    var x = Math.min(0, SW.base + dx);
+    // 拉过按钮宽度后越拉越沉
+    if (x < -SW_W) x = -SW_W + (x + SW_W) / 3;
+    SW.x = x;
+    swSet(SW.row, x, false);
+  });
+  function swEnd(e) {
+    if (!SW || e.pointerId !== SW.id) return;
+    var g = SW;
+    SW = null;
+    if (!g.on) return;
+    swallowUntil = swEndAt = Date.now() + 400;
+    var open = g.x < -SW_W / 2;
+    swSet(g.row, open ? -SW_W : 0, true);
+    swOpen = open ? g.row : null;
+    note(open ? "左滑松手：停在打开的位置" : "左滑松手：弹回", dur("durM"), ez("emph"));
+  }
+  window.addEventListener("pointerup", swEnd);
+  window.addEventListener("pointercancel", swEnd);
+  // 有一行滑开时，点别处只把它收回
+  app.addEventListener("click", function (e) {
+    // 列表重画过，滑开的那一行已经不在了
+    if (swOpen && !swOpen.isConnected) swOpen = null;
+    // 鼠标拖完会补一次点击，那一下已经被吞掉，不算点别处
+    if (!swOpen || e.target.closest(".swipe-act") || Date.now() < swEndAt) return;
+    swClose();
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+  Object.assign(ACT, {
+    "git-view": function () { var p = ov.page; closeOverlay(); openGit(p.s); },
+    "git-fork": function () { var p = ov.page; closeOverlay(); setTimeout(function () { forkDialog(p); }, dur("durS")); },
+    "git-wt": function () { var p = ov.page; closeOverlay(); setTimeout(function () { wtDialog(p); }, dur("durS")); },
+    // Fork：替你发 /fork <指令>，出一行命令和它的输出，新会话挂在来源下面，你留在原会话
+    "fork-ok": function () {
+      var p = ov.page, s = p.s, instr = $(".fork-in", ov.el).value.trim();
+      closeOverlay();
+      var title = s.title + " ⑂ " + (instr || "fork"), id = "f" + Date.now().toString(36);
+      var it = { k: "tool", verb: "/fork", arg: instr, spin: true };
+      addMsg(s, it);
+      setTimeout(function () {
+        it.spin = false;
+        it.detail = [["输出", "session running · " + title + " · " + id]];
+        updateItem(it);
+        var g = groupOf(s);
+        g.sessions.splice(g.sessions.indexOf(s) + 1, 0, sess(id, title, s.dir, instr ? "work" : "idle", "刚刚", { ctx: s.ctx, branch: s.branch, forkOf: s.id }));
+        refreshHome();
+        toast("已 fork，新会话在会话页「" + s.title + "」下面");
+      }, 700 * slowK());
+    },
+    // Worktree：名字不合规就标红；新建时按钮转圈，好了进新会话
+    "wt-ok": function (t) {
+      var p = ov.page, s = p.s, nameIn = $(".wt-name", ov.el), name = nameIn.value.trim(), first = $(".wt-first", ov.el).value.trim();
+      var hint = $(".fhint", ov.el);
+      if (!WT_NAME.test(name)) { nameIn.classList.add("error"); hint.classList.add("err"); return; }
+      t.disabled = true;
+      t.innerHTML = SPIN12 + "正在新建";
+      setTimeout(function () {
+        closeOverlay();
+        var g = groupOf(s), id = "w" + Date.now().toString(36);
+        var n = sess(id, first ? first.slice(0, 16) : name, s.dir, first ? "work" : "idle", "刚刚", { ctx: 0, branch: "worktree-" + name, wt: name, msgs: first ? [{ k: "me", text: first }] : [] });
+        g.sessions.unshift(n);
+        if (S.dirGit[s.dir] && S.dirGit[s.dir].local.indexOf("worktree-" + name) < 0) S.dirGit[s.dir].local.push("worktree-" + name);
+        refreshHome();
+        push({ name: "chat", id: id });
+        if (first) turn(n, "好，我在 worktree " + name + " 里开始。");
+      }, 900 * slowK());
+    },
+    "lim-toggle": function (t) {
+      var p = pageOf(t), l = p.s.limit;
+      l.text = $(".lim-in", p.limit).value;
+      if (!l.text.trim()) return;
+      l.auto = !l.auto;
+      t.setAttribute("aria-checked", String(l.auto));
+      buzz(l.auto ? "打开自动发送" : "关上自动发送");
+      setTimeout(function () { paintLimit(p, false); }, dur("durS"));
+    },
+    "sw-act": function (t) { swClose(); ACT[t.dataset.k === "stop" ? "menu-stop" : "menu-remove"](t); }
+  });
+  app.addEventListener("input", function (e) {
+    var t = e.target;
+    if (t.classList.contains("lim-in")) {
+      var p = pageOf(t);
+      p.s.limit.text = t.value;
+      $(".lim-sw", p.limit).disabled = !t.value.trim();
+    } else if (t.classList.contains("wt-name")) {
+      t.classList.remove("error");
+      $(".fhint", ov.el).classList.remove("err");
+    }
+  });
+
+  // ---------- 第六轮：侧栏 ----------
   function toSessions() {
     goHome();
     S.machineId = "m1";
@@ -4736,51 +4959,48 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     if (S.tab !== "sessions") switchTab("sessions", false);
   }
   function openIn(id) { toSessions(); push({ name: "chat", id: id }); }
-  // 草稿演示：进会话、一个字一个字打、返回看列表、再进去看输入框
-  function draftDemo() {
-    openIn("s3");
-    var p = top(), text = "改一下标题", i = 0, k = slowK();
-    setTimeout(function typeNext() {
-      if (top() !== p) return;
-      p.ta.value = text.slice(0, ++i);
-      p.ta.dispatchEvent(new Event("input"));
-      if (i < text.length) { setTimeout(typeNext, 120 * k); return; }
-      setTimeout(function () {
-        if (top() !== p) return;
-        back();
-        setTimeout(function () { if (top().route.name === "home") push({ name: "chat", id: "s3" }); }, 1600 * k);
-      }, 700 * k);
-    }, 700 * k);
+  function inChat(id, then) {
+    var s = findSession(id);
+    if (!(top().route.name === "chat" && top().s === s)) openIn(id);
+    setTimeout(function () { var p = top(); if (p.route.name === "chat" && p.s === s) then(p); }, dur("durM") + 80);
   }
-  function relaunch() {
-    if (look.alwaysLd) bootLoad(true); else resetApp(true);
-  }
-  var R5 = {
-    "tools-open": function () { openIn("s1"); },
-    "tools-run": function () { var s = findSession("s1"); if (!(top().route.name === "chat" && top().s === s)) openIn("s1"); toolTurn(s); },
-    draft: draftDemo,
-    list: function () {
+  var R6 = {
+    branches: function () {
       toSessions();
-      var d = $('.dfold[data-key="default:clauderc-app"]', pane("sessions"));
-      if (d) d.closest(".dgroup").scrollIntoView({ block: "start" });
+      var d = $('.dbr[data-key="default:clauderc-app"]', pane("sessions"));
+      if (d) { d.closest(".dgroup").scrollIntoView({ block: "start" }); branchSheet("default:clauderc-app"); }
     },
-    fork: function () { openIn("s13"); },
-    trust: function () {
+    menu: function () { inChat("s1", function (p) { gitMenu($('[data-act="chat-git"]', p.el)); }); },
+    fork: function () { inChat("s1", forkDialog); },
+    wt: function () { inChat("s1", wtDialog); },
+    limit: function () { openIn("s16"); },
+    reset: function () {
+      var s = findSession("s16");
+      if (!s.limit) { toast("「批量改测试」现在没停在限额上，先点重置 demo"); return; }
+      inChat("s16", function () { limitReset(s); });
+    },
+    swipe: function () {
       toSessions();
-      var p = push({ name: "create", group: "default", dir: UNTRUSTED[0] });
-      p.renderDirs();
-      setTimeout(function () { if (top() === p) submitCreate($('[data-act="submit"]', p.el)); }, 900 * slowK());
+      var row = $('.srow[data-sid="s2"]', pane("sessions"));
+      if (!row) return;
+      row.scrollIntoView({ block: "center" });
+      if (swOpen && swOpen !== row) swClose();
+      swSet(row, -SW_W, true);
+      swOpen = row;
+      note("左滑露出「停止」", dur("durM"), ez("emph"));
     },
-    settings: function () { goHome(); if (S.tab !== "settings") switchTab("settings", true); },
-    relaunch: relaunch
+    remove: function () {
+      toSessions();
+      if (!findSession("s5")) { toast("「landing 页」已经移出了，先点重置 demo"); return; }
+      var row = $('.srow[data-sid="s5"]', pane("sessions"));
+      if (row) row.scrollIntoView({ block: "center" });
+      ACT["menu-remove"]({ dataset: { v: "s5" } });
+    }
   };
-  function bindR5() {
-    renderR5Desk();
+  function bindR6() {
     $(".desk").addEventListener("click", function (e) {
-      var b = e.target.closest("[data-tools], [data-r5]");
-      if (!b) return;
-      if (b.dataset.tools) setToolsMode(b.dataset.tools);
-      else R5[b.dataset.r5]();
+      var b = e.target.closest("[data-r6]");
+      if (b) R6[b.dataset.r6]();
     });
   }
 
@@ -4829,8 +5049,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     cfg: function () { return Object.assign({}, cfg); },
     look: function () { return Object.assign({ mode: themeMode() }, look); },
     pick: function () { return Object.assign({}, pick); },
-    tools: function () { return toolsMode; },
-    session: function (id) { var x = findSession(id); return x ? { draft: x.draft || "", branch: x.branch, wt: x.wt, forkOf: x.forkOf } : null; },
+    session: function (id) { var x = findSession(id); return x ? { draft: x.draft || "", branch: x.branch, wt: x.wt, forkOf: x.forkOf, state: x.state, limit: x.limit ? Object.assign({}, x.limit) : null } : null; },
+    ids: function () { return allSessions().map(function (x) { return x.id; }); },
     dirGit: function () { return JSON.parse(JSON.stringify(S.dirGit)); },
     panels: function () { return allCommands().filter(function (c) { return c[2] === "panel"; }).map(function (c) { return c[0]; }); },
     back: back

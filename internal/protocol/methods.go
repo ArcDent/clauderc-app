@@ -34,6 +34,7 @@ const (
 	MethodChatCommands          Method = "chat.commands"
 	MethodChatToolOutput        Method = "chat.toolOutput"
 	MethodChatImage             Method = "chat.image"
+	MethodChatAutoResume        Method = "chat.autoResume"
 	EventChatItems              Method = "chat.items"
 	EventChatPending            Method = "chat.pending"
 	EventChatState              Method = "chat.state"

@@ -120,7 +120,7 @@ class DraftTest {
                     if (open == null) {
                         val vm = pageViewModel { SessionsViewModel("m-1", fleet, relay, names, store) }
                         val state by vm.state.collectAsState()
-                        SessionsScreen(state, {}, {}, {}, {}, { _, _ -> }, {}, {})
+                        SessionsScreen(state, {}, {}, {}, { _, _ -> }, {}, {})
                     } else {
                         val vm = pageViewModel { ChatViewModel("m-1", open, relay, fleet, appScope, compress = { it }, drafts = store) }
                         val state by vm.state.collectAsState()

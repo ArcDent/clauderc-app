@@ -109,6 +109,7 @@ object Method {
     const val CHAT_COMMANDS = "chat.commands"
     const val CHAT_TOOL_OUTPUT = "chat.toolOutput"
     const val CHAT_IMAGE = "chat.image"
+    const val CHAT_AUTO_RESUME = "chat.autoResume"
     const val CHAT_ITEMS = "chat.items"
     const val CHAT_PENDING = "chat.pending"
     const val CHAT_STATE = "chat.state"

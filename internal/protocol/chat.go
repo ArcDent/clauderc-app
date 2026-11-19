@@ -199,6 +199,46 @@ type ChatStatus struct {
 	// rendered, wrapped lines joined. The phone shows it until the reply
 	// arrives as an item.
 	Partial string `json:"partial,omitempty"`
+	// Limit is set while the session waits out a plan usage limit.
+	Limit *Limit `json:"limit,omitempty"`
+}
+
+// Limit is the plan usage limit a session ran into: its transcript ends
+// on Claude Code's "You've hit your 5-hour limit · resets 10:40pm
+// (America/Denver)". It is set only when the reset time is known, until
+// the limit is lifted or, with AutoResume, until that message is sent.
+type Limit struct {
+	// Window is "fiveHour" or "weekly", as in usage.get; absent when
+	// Claude Code names another limit.
+	Window string `json:"window,omitempty"`
+	// Text is Claude Code's message.
+	Text     string    `json:"text"`
+	ResetsAt time.Time `json:"resetsAt"`
+	// AutoResume is set while the agent is to send a message by itself
+	// once the limit is lifted.
+	AutoResume *AutoResume `json:"autoResume,omitempty"`
+}
+
+// AutoResume is a message the agent sends to a session once its limit is
+// lifted, unless something else was sent in the meantime.
+type AutoResume struct {
+	Text string `json:"text"`
+	// At is when it goes out: a minute after Limit.ResetsAt.
+	At time.Time `json:"at"`
+}
+
+// ChatAutoResumeRequest turns the message sent once the session's limit
+// is lifted on, with Text, or off.
+type ChatAutoResumeRequest struct {
+	SessionID string `json:"sessionId"`
+	On        bool   `json:"on"`
+	Text      string `json:"text,omitempty"`
+}
+
+// ChatAutoResumeResponse answers chat.autoResume with the limit as it is
+// now; null when the session no longer waits on one.
+type ChatAutoResumeResponse struct {
+	Limit *Limit `json:"limit"`
 }
 
 // PendingKind tells a permission request from a question (design D6).

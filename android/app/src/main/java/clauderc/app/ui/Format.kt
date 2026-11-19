@@ -43,17 +43,19 @@ object TimeText {
     }
 
     /** When a usage limit starts over: 「22:40 重置」 today, 「明天 09:00 重置」, 「周二 11:00 重置」 within the week, else the date. */
-    fun resets(t: Instant, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): String {
+    fun resets(t: Instant, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): String = ahead(t, now, zone) + " 重置"
+
+    /** A time to come: 「22:40」 today, 「明天 09:00」, 「周二 11:00」 within the week, else the date. */
+    fun ahead(t: Instant, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): String {
         val z = t.atZone(zone)
         val day = z.toLocalDate()
         val today = now.atZone(zone).toLocalDate()
-        val at = when {
+        return when {
             day == today -> hm.format(z)
             day == today.plusDays(1) -> "明天 " + hm.format(z)
             day.isAfter(today) && day.isBefore(today.plusDays(7)) -> WEEKDAYS[day.dayOfWeek.value - 1] + " " + hm.format(z)
             else -> monthDay(day)
         }
-        return "$at 重置"
     }
 
     private val WEEKDAYS = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")

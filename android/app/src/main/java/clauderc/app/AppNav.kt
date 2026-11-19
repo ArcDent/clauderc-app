@@ -283,7 +283,7 @@ private fun HomeScreen(container: AppContainer, nav: NavHostController, haze: Ha
                     MachinesScreen(state, onOpen = selection::openSessions, onAdd = onAdd, onClearAll = onClearAll, snack = snack)
                 }
                 MainTab.Sessions -> if (machineId == null) {
-                    SessionsScreen(SessionsUiState(), {}, {}, {}, {}, { _, _ -> }, {}, {})
+                    SessionsScreen(SessionsUiState(), {}, {}, {}, { _, _ -> }, {}, {})
                 } else {
                     SessionsTab(container, machineId, nav)
                 }
@@ -364,7 +364,6 @@ private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHost
         onRefresh = vm::refresh,
         onOpenChat = { nav.navigateFrom(home, ChatRoute(machineId, it.id)) },
         onCreate = { nav.navigateFrom(home, CreateRoute(machineId, it.profile.id)) },
-        onOpenGit = { container.selection.openGit(machineId, it.worktree?.path ?: it.cwd) },
         onRename = vm::rename,
         onStop = vm::stop,
         onRemove = vm::remove,
@@ -443,6 +442,8 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
     val state by vm.state.collectAsStateWithLifecycle()
     val snack = remember { SnackState() }
     LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
+    // A session started in a new worktree from here opens on top of this one.
+    LaunchedEffect(vm) { vm.created.collect { id -> nav.navigateFrom(entry, ChatRoute(r.machineId, id)) } }
 
     fun add(uri: Uri) {
         val (name, size) = nameAndSize(context, uri)
@@ -489,6 +490,11 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
             onOpenTerm = { nav.navigateFrom(entry, TermRoute(r.machineId, r.sessionId)) },
             onOpenAgent = { a -> if (a.id != null) nav.navigateFrom(entry, agentRoute(r.machineId, r.sessionId, a)) },
             onDraft = vm::typed,
+            onFork = vm::fork,
+            onCreateWorktree = vm::createWorktree,
+            onClearWorktreeError = vm::clearWorktreeError,
+            onAutoResume = vm::setAutoResume,
+            onResumeText = vm::typedResume,
         ),
     )
 }

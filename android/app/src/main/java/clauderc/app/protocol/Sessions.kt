@@ -71,6 +71,8 @@ data class SessionCreateRequest(
     val prompt: String? = null,
     /** Say yes to Claude Code's trust prompt for [cwd] first when it is untrusted; null leaves it out. */
     val trust: Boolean? = null,
+    /** Start the session in a new git worktree of [cwd] by this name; letters, digits, 「.」「_」「-」 only. */
+    val worktree: String? = null,
 )
 
 @Serializable

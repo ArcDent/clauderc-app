@@ -1,6 +1,25 @@
 package clauderc.app.sessions
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.semantics.customActions
+import clauderc.app.ui.theme.styled
+import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
@@ -39,7 +58,6 @@ import clauderc.app.ui.contextPercent
 import clauderc.app.ui.needsReply
 import clauderc.app.ui.sessionStateText
 import kotlin.math.roundToInt
-import kotlinx.coroutines.delay
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
@@ -98,7 +116,6 @@ import clauderc.app.ui.components.Spinner
 import clauderc.app.protocol.Session
 import clauderc.app.protocol.SessionState
 import clauderc.app.ui.TimeText
-import clauderc.app.ui.baseName
 import clauderc.app.ui.components.AppBar
 import clauderc.app.ui.components.GroupBlock
 import clauderc.app.ui.components.ClaudercDialog
@@ -138,7 +155,6 @@ fun glyphOf(state: SessionState) = when (state) {
 }
 
 private sealed interface Overlay {
-    data class Menu(val session: Session) : Overlay
     data class ConfirmStop(val session: Session) : Overlay
     data class ConfirmRemove(val session: Session) : Overlay
     data class Rename(val group: SessionGroup) : Overlay
@@ -153,7 +169,6 @@ fun SessionsScreen(
     onRefresh: () -> Unit,
     onOpenChat: (Session) -> Unit,
     onCreate: (SessionGroup) -> Unit,
-    onOpenGit: (Session) -> Unit,
     onRename: (profileId: String, name: String?) -> Unit,
     onStop: (Session) -> Unit,
     onRemove: (Session) -> Unit,
@@ -178,6 +193,21 @@ fun SessionsScreen(
     val machine = state.machine
     val online = machine?.online == true
     val pull = rememberPullToRefreshState()
+    // The row slid open to its 「停止」 or 「移出」; one at a time.
+    val swipe = remember { SwipeHub() }
+    // Rows confirmed for removal: false while the row folds away, true once session.remove went out. An id
+    // goes when the list no longer holds the session; a row that comes back, the removal refused, is whole.
+    val removing = remember { mutableStateMapOf<String, Boolean>() }
+    val listed = state.groups?.flatMapTo(HashSet()) { g -> g.sessions.map { it.id } }
+    LaunchedEffect(listed) {
+        if (listed != null) removing.keys.filter { removing[it] == true && it !in listed }.forEach { removing.remove(it) }
+    }
+    val rowActs = RowActs(
+        swipe = swipe,
+        removing = removing,
+        onAct = { s -> overlay = if (s.state == SessionState.Stopped) Overlay.ConfirmRemove(s) else Overlay.ConfirmStop(s) },
+        onLeft = { s -> removing[s.id] = true; onRemove(s) },
+    )
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -270,7 +300,7 @@ fun SessionsScreen(
                                                                         node,
                                                                         enabled = online,
                                                                         onOpen = onOpenChat,
-                                                                        onMenu = { overlay = Overlay.Menu(it) },
+                                                                        acts = rowActs,
                                                                         onOpenAgent = onOpenAgent,
                                                                         onToggleForks = { onToggleForks(node) },
                                                                         showBranch = dir.rowsShowBranch,
@@ -301,14 +331,6 @@ fun SessionsScreen(
     }
 
     when (val o = overlay) {
-        is Overlay.Menu -> SessionMenu(
-            session = o.session,
-            onDismiss = { overlay = null },
-            onOpen = { overlay = null; onOpenChat(o.session) },
-            onGit = { overlay = null; onOpenGit(o.session) },
-            onStop = { overlay = Overlay.ConfirmStop(o.session) },
-            onRemove = { overlay = Overlay.ConfirmRemove(o.session) },
-        )
         is Overlay.ConfirmStop -> ClaudercDialog(
             onDismiss = { overlay = null },
             title = "停止「${display(o.session)}」？",
@@ -324,7 +346,8 @@ fun SessionsScreen(
             text = "不再显示在列表里，对话记录仍留在目标机上。",
             buttons = {
                 TextAction("取消", onClick = { overlay = null })
-                TextAction("移出", onClick = { overlay = null; onRemove(o.session) }, tone = TextTone.Danger)
+                // The row folds away first, then session.remove goes out.
+                TextAction("移出", onClick = { overlay = null; removing[o.session.id] = false }, tone = TextTone.Danger)
             },
         )
         is Overlay.Rename -> RenameDialog(
@@ -383,9 +406,9 @@ private fun filterReveal(filter: String?): MutableFloatState {
 }
 
 /**
- * A directory's branches: 「全部分支」 and each local branch with its session count. A row narrows the
- * list to its branch; 「切换」 at the end switches the directory, except for the current branch and one
- * a worktree holds.
+ * A directory's branches: 「全部分支」, each local branch with its session count, then the deleted branches
+ * sessions are still on. A row narrows the list to its branch; 「切换」 at the end switches the directory,
+ * except for the current branch, one a worktree holds and a deleted one.
  */
 @Composable
 private fun BranchSheet(dir: DirGroup, onDismiss: () -> Unit, onFilter: (String?) -> Unit, onSwitch: (String) -> Unit) {
@@ -416,6 +439,11 @@ private fun BranchSheet(dir: DirGroup, onDismiss: () -> Unit, onFilter: (String?
                     }
                 }
             }
+        }
+        // Sessions still on a branch deleted since: a row of its own that narrows the list, with nothing to switch to.
+        dir.goneBranches.forEach { name ->
+            val on = dir.sessions.count { it.branch == name }
+            MenuItem(name, onClick = { onFilter(name) }, mono = true, muted = true, supporting = "已删除 · " + count(on), checked = dir.branchFilter == name)
         }
     }
 }
@@ -761,85 +789,128 @@ private fun treeLine(): TreeLine {
 }
 
 /**
+ * What a session row can do besides opening: slide open to 「停止」 or 「移出」, and fold away once its
+ * removal is confirmed. [removing] is the screen's: false while a row folds away, true once its removal went out.
+ */
+private class RowActs(
+    val swipe: SwipeHub,
+    val removing: Map<String, Boolean>,
+    /** The slid-open button was tapped: ask before stopping or removing. */
+    val onAct: (Session) -> Unit,
+    /** The row has folded away: send the removal. */
+    val onLeft: (Session) -> Unit,
+)
+
+/** The row slid open, by session id; sliding another closes it, as does a tap on any row. */
+@Stable
+private class SwipeHub {
+    var open by mutableStateOf<String?>(null)
+}
+
+/** How far a row slides open: the width of its 「停止」 or 「移出」. */
+private val SwipeWidth = 76.dp
+
+/**
  * A session and the forks hung under it. No rule between them: a line runs down from the session's
- * symbol and turns into each fork just short of the fork's symbol. Folding the forks takes the line
- * away at once; unfolding draws it again once the forks have grown in.
+ * symbol and turns into each fork just short of the fork's symbol. Unfolding first draws the line down
+ * from the symbol in 30% of durM, then the forks grow in along it on the enter rule, cut off at their
+ * bottom edge and not fading, so the line never breaks; folding shrinks the forks on the leaving rule,
+ * then takes the line back up into the symbol.
  */
 @Composable
 private fun SessionNodeRows(
     node: SessionNode,
     enabled: Boolean,
     onOpen: (Session) -> Unit,
-    onMenu: (Session) -> Unit,
+    acts: RowActs,
     onOpenAgent: (Session, Subagent) -> Unit,
     onToggleForks: () -> Unit,
     showBranch: Boolean = false,
     modifier: Modifier = Modifier,
     drafts: Map<String, String> = emptyMap(),
-) = Column(modifier) {
+) = Leaving(node.session, acts, modifier) {
     val s = node.session
     val forks = node.forks
     val spot = glyphSpot()
     val tree = treeLine()
-    var line by remember { mutableStateOf(!node.forksCollapsed) }
-    if (node.forksCollapsed) line = false
-    val durS = Clauderc.motion.durS.toLong()
+    val m = Clauderc.motion
+    val stub = (m.durM * 0.3f).roundToInt()
+    val line = remember { Animatable(if (node.forksCollapsed) 0f else 1f) }
+    val grown = remember { Animatable(if (node.forksCollapsed) 0f else 1f) }
     LaunchedEffect(node.forksCollapsed) {
-        if (!node.forksCollapsed) {
-            delay(durS)
-            line = true
+        if (node.forksCollapsed) {
+            grown.animateTo(0f, tween(m.durS, easing = m.easeEmphIn))
+            line.animateTo(0f, tween(stub, easing = LinearEasing))
+        } else {
+            line.animateTo(1f, tween(stub, easing = LinearEasing))
+            grown.animateTo(1f, tween(m.durM, easing = m.easeEmph))
         }
     }
     val lineX = spot.x - ForkShift
-    Column(
-        Modifier.groupDivider().then(
-            if (forks.isNotEmpty() && line) {
-                Modifier.drawBehind {
-                    val x = lineX.toPx()
-                    drawLine(tree.color, Offset(x, (spot.y + spot.half + 4.dp).toPx()), Offset(x, size.height), tree.width.toPx())
-                }
-            } else {
-                Modifier
-            },
-        ),
-    ) {
-        val agents = runningAgents(s)
-        SessionRow(
-            s, enabled = enabled, onOpen = { onOpen(s) }, onMenu = { onMenu(s) }, tight = agents.isNotEmpty(),
-            forks = forks.size, forksCollapsed = node.forksCollapsed, onToggleForks = onToggleForks, showBranch = showBranch, draft = drafts[s.id],
-        )
-        AgentRows(agents, enabled = enabled, onOpen = { onOpenAgent(s, it) })
-    }
-    if (forks.isNotEmpty()) {
-        Fold(visible = !node.forksCollapsed) {
-            Column(Modifier.padding(start = ForkIndent)) {
-                forks.forEachIndexed { i, f ->
-                    key(f.id) {
-                        val last = i == forks.lastIndex
-                        Column(
-                            Modifier.drawBehind {
-                                val x = (lineX - ForkIndent).toPx()
-                                val y = spot.y.toPx()
-                                val r = tree.corner.toPx()
-                                val end = (spot.x - spot.half - 2.dp).toPx()
-                                val stroke = Stroke(tree.width.toPx())
-                                drawPath(
-                                    Path().apply {
-                                        moveTo(x, 0f)
-                                        lineTo(x, y - r)
-                                        if (r > 0f) quadraticTo(x, y, x + r, y)
-                                        lineTo(end, y)
-                                    },
-                                    tree.color,
-                                    style = stroke,
-                                )
-                                if (!last) drawLine(tree.color, Offset(x, y), Offset(x, size.height), tree.width.toPx())
-                            },
-                        ) {
-                            val agents = runningAgents(f)
-                            SessionRow(f, enabled = enabled, onOpen = { onOpen(f) }, onMenu = { onMenu(f) }, tight = agents.isNotEmpty(), showBranch = showBranch, draft = drafts[f.id])
-                            AgentRows(agents, enabled = enabled, onOpen = { onOpenAgent(f, it) })
+    Box(Modifier.groupDivider()) {
+        Column {
+            val agents = runningAgents(s)
+            SessionRow(
+                s, enabled = enabled, onOpen = { onOpen(s) }, acts = acts, tight = agents.isNotEmpty(),
+                forks = forks.size, forksCollapsed = node.forksCollapsed, onToggleForks = onToggleForks, showBranch = showBranch, draft = drafts[s.id],
+            )
+            AgentRows(agents, enabled = enabled, onOpen = { onOpenAgent(s, it) })
+        }
+        // The line from just under the symbol to the bottom, grown down as far as [line] says.
+        if (forks.isNotEmpty()) {
+            Box(Modifier.matchParentSize().padding(top = spot.y + spot.half + 4.dp)) {
+                Box(
+                    Modifier
+                        .offset(x = lineX - tree.width / 2)
+                        .layout { measurable, constraints ->
+                            val p = measurable.measure(Constraints.fixed(tree.width.roundToPx(), (constraints.maxHeight * line.value).roundToInt()))
+                            layout(p.width, p.height) { p.place(0, 0) }
                         }
+                        .background(tree.color)
+                        .testTag("treeLine:${s.id}"),
+                )
+            }
+        }
+    }
+    val shown by remember { derivedStateOf { grown.value > 0f } }
+    if (forks.isNotEmpty() && shown) {
+        Column(
+            Modifier
+                .testTag("forks:${s.id}")
+                .clipToBounds()
+                .layout { measurable, constraints ->
+                    val p = measurable.measure(constraints)
+                    layout(p.width, (p.height * grown.value).roundToInt()) { p.place(0, 0) }
+                }
+                .padding(start = ForkIndent),
+        ) {
+            forks.forEachIndexed { i, f ->
+                key(f.id) {
+                    val last = i == forks.lastIndex
+                    Leaving(
+                        f, acts,
+                        Modifier.drawBehind {
+                            val x = (lineX - ForkIndent).toPx()
+                            val y = spot.y.toPx()
+                            val r = tree.corner.toPx()
+                            val end = (spot.x - spot.half - 2.dp).toPx()
+                            val stroke = Stroke(tree.width.toPx())
+                            drawPath(
+                                Path().apply {
+                                    moveTo(x, 0f)
+                                    lineTo(x, y - r)
+                                    if (r > 0f) quadraticTo(x, y, x + r, y)
+                                    lineTo(end, y)
+                                },
+                                tree.color,
+                                style = stroke,
+                            )
+                            if (!last) drawLine(tree.color, Offset(x, y), Offset(x, size.height), tree.width.toPx())
+                        },
+                    ) {
+                        val agents = runningAgents(f)
+                        SessionRow(f, enabled = enabled, onOpen = { onOpen(f) }, acts = acts, tight = agents.isNotEmpty(), showBranch = showBranch, draft = drafts[f.id])
+                        AgentRows(agents, enabled = enabled, onOpen = { onOpenAgent(f, it) })
                     }
                 }
             }
@@ -848,15 +919,60 @@ private fun SessionNodeRows(
 }
 
 /**
+ * A row whose removal was confirmed folds away, its height and its colour going together on the enter
+ * rule, and only then is the removal sent (demo.html do-remove). Rows not leaving get no extra layer.
+ */
+@Composable
+private fun Leaving(s: Session, acts: RowActs, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val state = acts.removing[s.id]
+    val left = remember { Animatable(1f) }
+    val leaving = state != null
+    val onLeft by rememberUpdatedState(acts.onLeft)
+    LaunchedEffect(leaving) {
+        when {
+            !leaving -> left.snapTo(1f)
+            state == false -> {
+                left.animateTo(0f, Motion.enter())
+                onLeft(s)
+            }
+            else -> left.snapTo(0f)
+        }
+    }
+    Column(
+        modifier.then(
+            if (leaving) {
+                Modifier
+                    .testTag("leaving:${s.id}")
+                    .clipToBounds()
+                    .layout { measurable, constraints ->
+                        val p = measurable.measure(constraints)
+                        layout(p.width, (p.height * left.value).roundToInt()) { p.place(0, 0) }
+                    }
+                    .graphicsLayer { alpha = left.value }
+            } else {
+                Modifier
+            },
+        ),
+        content = content,
+    )
+}
+
+/**
  * [tight] leaves out most of the bottom gap, for the subagent rows that follow. A session with
  * [forks] moves its symbol left for the tree line and gets a button that folds them.
+ *
+ * Sliding the row left brings in 「停止」 for a running session or 「移出」 for a stopped one, a small
+ * round button over a word; the status symbol stays where it is and only what is right of it moves, cut
+ * off just after the symbol. Let go past half the button's width it stays open; else it slides back.
+ * Pulled past the button it drags with a third of the finger's travel. A tap on any row while one is
+ * open only closes it.
  */
 @Composable
 private fun SessionRow(
     s: Session,
     enabled: Boolean,
     onOpen: () -> Unit,
-    onMenu: () -> Unit,
+    acts: RowActs,
     modifier: Modifier = Modifier,
     tight: Boolean = false,
     forks: Int = 0,
@@ -866,79 +982,179 @@ private fun SessionRow(
     /** Text typed into the session and not sent: it takes the second line's place. */
     draft: String? = null,
 ) {
-    val c = Clauderc.colors
     val sp = Clauderc.spacing
-    Row(modifier.fillMaxWidth().padding(end = sp.sp2).semantics { isTraversalGroup = true }, verticalAlignment = Alignment.CenterVertically) {
-        Row(
-            Modifier
-                .weight(1f)
-                .clickable(enabled = enabled, role = Role.Button, onClick = onOpen)
-                .padding(start = Clauderc.look.rowStart + DirIndent, top = 14.dp, bottom = if (tight) 4.dp else 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(sp.sp4),
-        ) {
-            // A change of state crossfades: the old symbol leaves in durS while the new one comes in over durM.
-            AnimatedContent(
-                if (needsReply(s)) Glyph.Need else glyphOf(s.state),
-                Modifier.padding(top = 6.dp).offset(x = if (forks > 0) -ForkShift else 0.dp),
-                transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit()) using null },
-                label = "glyph",
-            ) { StatusGlyph(it) }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(sp.sp3), verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        display(s),
-                        modifier = Modifier.weight(1f),
-                        fontSize = Clauderc.fontSizes.body,
-                        color = if (s.state == SessionState.Stopped) c.fg2 else c.fg,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    val since = TimeText.relative(s.lastActiveAt)
-                    // 格栅 sets the time and the second line in small monospace.
-                    val grid = Clauderc.style == UiStyle.Grid
-                    Text(contextPercent(s.context)?.let { "上下文 $it% · $since" } ?: since, fontSize = if (grid) 11.5.sp else Clauderc.fontSizes.caption, fontFamily = if (grid) MonoFamily else null, color = c.fg3, maxLines = 1)
+    val hub = acts.swipe
+    val width = with(LocalDensity.current) { SwipeWidth.toPx() }
+    val slide = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val enter = Motion.enter<Float>()
+    var pulled by remember { mutableFloatStateOf(0f) }
+    // Another row slid open, or a tap closed this one: back it goes.
+    LaunchedEffect(hub.open) { if (hub.open != s.id && slide.value != 0f) slide.animateTo(0f, enter) }
+    val drag = rememberDraggableState { d ->
+        pulled = (pulled + d).coerceAtMost(0f)
+        // Past the button's width the row drags with a third of the finger's travel.
+        val x = if (pulled < -width) -width + (pulled + width) / 3 else pulled
+        scope.launch { slide.snapTo(x) }
+    }
+    val act = if (s.state == SessionState.Stopped) "移出" else "停止"
+    Box(
+        modifier
+            .fillMaxWidth()
+            .clipToBounds()
+            .draggable(
+                drag,
+                Orientation.Horizontal,
+                enabled = enabled,
+                onDragStarted = {
+                    pulled = slide.value
+                    hub.open = s.id
+                },
+                onDragStopped = { v ->
+                    val open = slide.value < -width / 2 || v < -1000f
+                    if (!open && hub.open == s.id) hub.open = null
+                    slide.animateTo(if (open) -width else 0f, enter)
+                },
+            )
+            .semantics {
+                isTraversalGroup = true
+                if (enabled) customActions = listOf(CustomAccessibilityAction(act) { acts.onAct(s); true })
+            }
+            .testTag("sessionRow:${s.id}"),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(end = sp.sp2), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier
+                    .weight(1f)
+                    .clickable(enabled = enabled, role = Role.Button) {
+                        if (hub.open != null) hub.open = null else onOpen()
+                    }
+                    // Without the fold button the time keeps the page margin from the right edge.
+                    .padding(start = Clauderc.look.rowStart + DirIndent, end = if (forks > 0) 0.dp else sp.page - sp.sp2, top = 14.dp, bottom = if (tight) 4.dp else 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(sp.sp4),
+            ) {
+                // A change of state crossfades: the old symbol leaves in durS while the new one comes in over durM.
+                AnimatedContent(
+                    if (needsReply(s)) Glyph.Need else glyphOf(s.state),
+                    Modifier.padding(top = 6.dp).offset(x = if (forks > 0) -ForkShift else 0.dp),
+                    transitionSpec = { fadeIn(Motion.enter()) togetherWith fadeOut(Motion.exit()) using null },
+                    label = "glyph",
+                ) { StatusGlyph(it) }
+                Column(Modifier.weight(1f).clipToBounds()) {
+                    Column(Modifier.graphicsLayer { translationX = slide.value }, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        SessionRowText(s, showBranch, draft)
+                    }
                 }
-                // The directory is the row above, so the second line is the state and Claude Code's one-line progress, as in its agent view.
-                // A worktree session leads with the worktree mark and its branch; others name their branch when [showBranch].
-                // A draft takes the whole line: 「草稿：」 and its first line (.draft).
-                val branch = s.branch?.takeIf { s.worktree != null || showBranch }
-                val drafted = draft?.trim()?.takeIf { it.isNotEmpty() }?.lineSequence()?.first()
-                Text(
-                    buildAnnotatedString {
-                        if (drafted != null) {
-                            withStyle(SpanStyle(color = c.danger)) { append("草稿：") }
-                            append(drafted)
-                            return@buildAnnotatedString
-                        }
-                        if (branch != null) {
-                            if (s.worktree != null) appendInlineContent(WorktreeMark, "worktree")
-                            withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = if (Clauderc.style == UiStyle.Grid) 11.5.sp else Clauderc.fontSizes.monoSm)) { append(branch) }
-                            append(" · ")
-                        }
-                        val word = sessionStateText(s)
-                        if (s.state == SessionState.Pending || needsReply(s)) withStyle(SpanStyle(color = c.accent)) { append(word) } else append(word)
-                        s.detail?.takeIf { it.isNotBlank() }?.let { append(" · ${it.trim()}") }
-                    },
-                    fontSize = if (Clauderc.style == UiStyle.Grid) 11.5.sp else Clauderc.fontSizes.label,
-                    fontFamily = if (Clauderc.style == UiStyle.Grid) MonoFamily else null,
-                    color = c.fg2,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    inlineContent = worktreeMark,
+            }
+            if (forks > 0) {
+                val turn by animateFloatAsState(if (forksCollapsed) 0f else 180f, Motion.turn(), label = "forkFold")
+                SymbolButton(
+                    Symbols.ExpandMore,
+                    if (forksCollapsed) "展开 $forks 个 fork" else "收起 $forks 个 fork",
+                    onClick = onToggleForks,
+                    small = true,
+                    modifier = Modifier.graphicsLayer { translationX = slide.value }.rotate(turn),
                 )
             }
         }
-        if (forks > 0) {
-            val turn by animateFloatAsState(if (forksCollapsed) 0f else 180f, Motion.turn(), label = "forkFold")
-            SymbolButton(
-                Symbols.ExpandMore,
-                if (forksCollapsed) "展开 $forks 个 fork" else "收起 $forks 个 fork",
-                onClick = onToggleForks,
-                small = true,
-                modifier = Modifier.rotate(turn),
-            )
+        val out by remember { derivedStateOf { slide.value < 0f } }
+        if (out) {
+            Box(Modifier.matchParentSize()) {
+                SwipeAction(
+                    act,
+                    if (s.state == SessionState.Stopped) Symbols.Delete else Symbols.PowerSettingsNew,
+                    onClick = {
+                        hub.open = null
+                        acts.onAct(s)
+                    },
+                    modifier = Modifier.align(Alignment.CenterEnd).width(SwipeWidth).fillMaxHeight().graphicsLayer { translationX = width + slide.value },
+                )
+            }
         }
-        SymbolButton(Symbols.MoreVert, "会话操作", onClick = onMenu, small = true, enabled = enabled)
+    }
+}
+
+/** A session row's title and time over its state line; the part of the row that slides. */
+@Composable
+private fun SessionRowText(s: Session, showBranch: Boolean, draft: String?) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    Row(horizontalArrangement = Arrangement.spacedBy(sp.sp3), verticalAlignment = Alignment.Bottom) {
+        Text(
+            display(s),
+            modifier = Modifier.weight(1f),
+            fontSize = Clauderc.fontSizes.body,
+            color = if (s.state == SessionState.Stopped) c.fg2 else c.fg,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        val since = TimeText.relative(s.lastActiveAt)
+        // 格栅 sets the time and the second line in small monospace.
+        val grid = Clauderc.style == UiStyle.Grid
+        Text(contextPercent(s.context)?.let { "上下文 $it% · $since" } ?: since, fontSize = if (grid) 11.5.sp else Clauderc.fontSizes.caption, fontFamily = if (grid) MonoFamily else null, color = c.fg3, maxLines = 1)
+    }
+    // The directory is the row above, so the second line is the state and Claude Code's one-line progress, as in its agent view.
+    // A worktree session leads with the worktree mark and its branch; others name their branch when [showBranch].
+    // A draft takes the whole line: 「草稿：」 and its first line (.draft).
+    val branch = s.branch?.takeIf { s.worktree != null || showBranch }
+    val drafted = draft?.trim()?.takeIf { it.isNotEmpty() }?.lineSequence()?.first()
+    Text(
+        buildAnnotatedString {
+            if (drafted != null) {
+                withStyle(SpanStyle(color = c.danger)) { append("草稿：") }
+                append(drafted)
+                return@buildAnnotatedString
+            }
+            if (branch != null) {
+                if (s.worktree != null) appendInlineContent(WorktreeMark, "worktree")
+                withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = if (Clauderc.style == UiStyle.Grid) 11.5.sp else Clauderc.fontSizes.monoSm)) { append(branch) }
+                append(" · ")
+            }
+            val word = sessionStateText(s)
+            if (s.state == SessionState.Pending || needsReply(s)) withStyle(SpanStyle(color = c.accent)) { append(word) } else append(word)
+            s.detail?.takeIf { it.isNotBlank() }?.let { append(" · ${it.trim()}") }
+        },
+        fontSize = if (Clauderc.style == UiStyle.Grid) 11.5.sp else Clauderc.fontSizes.label,
+        fontFamily = if (Clauderc.style == UiStyle.Grid) MonoFamily else null,
+        color = c.fg2,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        inlineContent = worktreeMark,
+    )
+}
+
+/**
+ * The button a slid row brings in (.swipe-act): a 40dp danger-red circle with a white symbol over an 11sp
+ * word in red. 格栅 makes it a 36dp square in monospace; 贴纸 outlines it in ink on a hard shadow, the word bold.
+ */
+@Composable
+private fun SwipeAction(text: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val c = Clauderc.colors
+    val ui = Clauderc.style
+    val press = remember { MutableInteractionSource() }
+    Column(
+        modifier
+            .clickable(press, null, role = Role.Button, onClick = onClick)
+            .testTag("swipeAction"),
+        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        val knob = when (ui) {
+            UiStyle.Clear -> Modifier.size(40.dp).clip(CircleShape).background(c.danger)
+            UiStyle.Grid -> Modifier.size(36.dp).background(c.danger)
+            UiStyle.Sticker -> Modifier.padding(bottom = 3.dp).size(40.dp).sticker(c.danger, c.ink, 20.dp, drop = 3.dp, source = press)
+        }
+        Box(Modifier.pressShrink(press).then(knob), contentAlignment = Alignment.Center) {
+            Icon(icon.styled, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+        }
+        Text(
+            text,
+            fontSize = 11.sp,
+            fontFamily = if (ui == UiStyle.Grid) MonoFamily else null,
+            fontWeight = if (ui == UiStyle.Sticker) FontWeight.ExtraBold else null,
+            color = c.danger,
+            maxLines = 1,
+        )
     }
 }
 
@@ -950,38 +1166,6 @@ private val worktreeMark = mapOf(
         Icon(Symbols.AltRoute, contentDescription = "worktree", tint = Clauderc.colors.fg3, modifier = Modifier.padding(end = 2.dp).size(14.dp))
     },
 )
-
-@Composable
-private fun SessionMenu(
-    session: Session,
-    onDismiss: () -> Unit,
-    onOpen: () -> Unit,
-    onGit: () -> Unit,
-    onStop: () -> Unit,
-    onRemove: () -> Unit,
-) {
-    val stopped = session.state == SessionState.Stopped
-    ClaudercSheet(onDismiss = onDismiss) {
-        SheetHead(display(session)) {
-            Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm)) { append(baseName(session.cwd)) }
-                    append(" · ${sessionStateText(session)}")
-                },
-                fontSize = Clauderc.fontSizes.label,
-                color = Clauderc.colors.fg2,
-            )
-        }
-        MenuItem("打开", onClick = onOpen, icon = Symbols.Description, supporting = if (stopped) "发消息时自动唤醒" else null)
-        MenuItem("git", onClick = onGit, icon = Symbols.AccountTree)
-        // A running session cannot be removed (session-lifecycle spec), so only one of these shows.
-        if (stopped) {
-            MenuItem("移出列表", onClick = onRemove, icon = Symbols.Delete, danger = true)
-        } else {
-            MenuItem("停止", onClick = onStop, icon = Symbols.PowerSettingsNew, danger = true)
-        }
-    }
-}
 
 @Composable
 private fun RenameDialog(group: SessionGroup, machineName: String, onDismiss: () -> Unit, onSave: (String?) -> Unit) {

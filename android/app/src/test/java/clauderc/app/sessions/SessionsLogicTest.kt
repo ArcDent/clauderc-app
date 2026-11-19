@@ -125,6 +125,52 @@ class SessionsLogicTest {
         removeGate.complete(Unit)
     }
 
+    // The agent answers a removal before a list read earlier reaches the phone; that list must not bring the row back.
+    @Test fun aRemovedRowStaysHiddenUntilAListWithoutItArrives() = runTest(dispatcher) {
+        val fleet = Fleet(relay, scope)
+        val vm = SessionsViewModel("m-1", fleet, relay, profileNames(tmp.root, scope))
+        withTimeout(5_000) { vm.state.first { it.groups != null } }
+        fun shown(id: String) = vm.state.value.groups!!.flatMap { it.sessions }.any { it.id == id }
+        val stopped = vm.state.value.groups!!.flatMap { it.sessions }.first { it.id == "s-stop" }
+
+        // The refresh after the removal still lists it, as a poll begun before the removal would.
+        vm.remove(stopped)
+        assertFalse("the row goes at once", shown("s-stop"))
+        relay.event(Method.SESSIONS_CHANGED, "m-1", SessionList.serializer(), sampleSessions)
+        assertFalse("an old list does not bring it back", shown("s-stop"))
+        val without = sampleSessions.copy(sessions = sampleSessions.sessions.filter { it.id != "s-stop" })
+        relay.event(Method.SESSIONS_CHANGED, "m-1", SessionList.serializer(), without)
+        assertFalse(shown("s-stop"))
+        // Once a list without it came, the row is no longer held back.
+        relay.event(Method.SESSIONS_CHANGED, "m-1", SessionList.serializer(), sampleSessions)
+        assertTrue(shown("s-stop"))
+    }
+
+    @Test fun aRemovedRowStillListedAfterTheHoldShowsAgain() = runTest(dispatcher) {
+        val fleet = Fleet(relay, scope)
+        val vm = SessionsViewModel("m-1", fleet, relay, profileNames(tmp.root, scope))
+        withTimeout(5_000) { vm.state.first { it.groups != null } }
+        fun shown(id: String) = vm.state.value.groups!!.flatMap { it.sessions }.any { it.id == id }
+        vm.remove(vm.state.value.groups!!.flatMap { it.sessions }.first { it.id == "s-stop" })
+        testScheduler.advanceTimeBy(REMOVED_HOLD_MILLIS - 1)
+        assertFalse("hidden for 30 seconds", shown("s-stop"))
+        testScheduler.advanceTimeBy(2)
+        assertTrue("still listed after 30 seconds: shown again", shown("s-stop"))
+    }
+
+    @Test fun aRefusedRemovalBringsTheRowBackWithTheReason() = runTest(dispatcher) {
+        val fleet = Fleet(relay, scope)
+        val vm = SessionsViewModel("m-1", fleet, relay, profileNames(tmp.root, scope))
+        withTimeout(5_000) { vm.state.first { it.groups != null } }
+        val said = mutableListOf<String>()
+        val collecting = launch { vm.messages.collect { said += it } }
+        relay.fail(Method.SESSION_REMOVE, ErrorCode.INTERNAL, "没有移出：worktree 里还有没保存的工作。")
+        vm.remove(vm.state.value.groups!!.flatMap { it.sessions }.first { it.id == "s-stop" })
+        assertTrue(vm.state.value.groups!!.flatMap { it.sessions }.any { it.id == "s-stop" })
+        assertEquals(listOf("没有移出：worktree 里还有没保存的工作。"), said)
+        collecting.cancel()
+    }
+
     @Test fun sessionsChangedUpdatesTheListAndRefreshResubscribes() = runTest(dispatcher) {
         val fleet = Fleet(relay, scope)
         val vm = SessionsViewModel("m-1", fleet, relay, profileNames(tmp.root, scope))
@@ -341,6 +387,25 @@ class SessionsLogicTest {
         assertEquals(4, appDir(again).shown.size)
     }
 
+    @Test fun theBusyQuestionNamesASessionInTheCheckoutNotOneInAWorktree() = runTest(dispatcher) {
+        val working = twoBranches.copy(sessions = twoBranches.sessions.map { if (it.id == "d1") it.copy(state = SessionState.Working) else it })
+        relay.respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), working)
+        relay.respond(Method.DIR_BUSY, DirBusyResponse.serializer(), DirBusyResponse(true))
+        val vm = SessionsViewModel("m-1", Fleet(relay, scope), relay, profileNames(tmp.root, scope))
+        withTimeout(5_000) { vm.state.first { it.groups != null } }
+        vm.switchBranch(appDir(vm), "main")
+        assertEquals("旧分支上的", vm.state.value.switchAsk?.sessionName)
+    }
+
+    @Test fun branchesGitNoLongerListsAreDeleted() {
+        val dir = groupSessions(twoBranches, emptyMap())[0].dirs.single()
+        assertEquals("nothing is deleted before git answers", emptyList<String>(), dir.goneBranches)
+        assertEquals("nor when the read failed", emptyList<String>(), dir.copy(branches = GitBranchesResponse()).goneBranches)
+        assertEquals(listOf("dev"), dir.copy(branches = GitBranchesResponse("main", listOf("main"))).goneBranches)
+        val detached = dir.copy(sessions = dir.sessions + session("h", "h", SessionState.Idle, "default", cwd = "/p/app").copy(branch = "HEAD"))
+        assertEquals(emptyList<String>(), detached.copy(branches = GitBranchesResponse("main", listOf("main", "dev"))).goneBranches)
+    }
+
     @Test fun rowsNameTheirBranchOnlyWhenTheCheckoutSpansBranches() {
         val (app, relay) = groupSessions(branchSessions, emptyMap())[0].dirs
         assertFalse("clauderc-app's own sessions are all on dev; the worktree does not count", app.rowsShowBranch)
@@ -365,7 +430,8 @@ class SessionsLogicTest {
         relay.respond(Method.DIR_BUSY, DirBusyResponse.serializer(), DirBusyResponse(true))
         vm.switchBranch(appDir(vm), "dev")
         assertEquals("not switched yet", 1, relay.sent(Method.GIT_SWITCH).size)
-        assertEquals(BranchSwitch("/p/app", "app", "dev", "worktree 里的"), vm.state.value.switchAsk)
+        // Only the worktree session works: the agent's busy came from elsewhere, so the question names no session.
+        assertEquals(BranchSwitch("/p/app", "app", "dev", null), vm.state.value.switchAsk)
         vm.dismissSwitch()
         assertNull(vm.state.value.switchAsk)
         assertEquals(1, relay.sent(Method.GIT_SWITCH).size)

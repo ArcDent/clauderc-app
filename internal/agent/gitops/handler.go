@@ -140,9 +140,12 @@ func withDir(req protocol.Envelope, body any, dir *string, do func() (any, error
 }
 
 // Busy reports whether a working background session runs in dir or one
-// of its subdirectories (design D9). A blocked session is settled against
-// its transcript first, as for the session list (design D5). Symbolic
-// links are resolved on both sides so /tmp and /private/tmp compare equal.
+// of its subdirectories (design D9). A session in a git worktree only
+// counts for the worktree itself and the directories inside it: it works
+// on a checkout of its own, so the checkout it came from is not busy. A
+// blocked session is settled against its transcript first, as for the
+// session list (design D5). Symbolic links are resolved on both sides so
+// /tmp and /private/tmp compare equal.
 func (h *Handler) Busy(ctx context.Context, dir string) (bool, error) {
 	targets, err := h.opts.Source.Targets(ctx)
 	if err != nil {
@@ -154,12 +157,19 @@ func (h *Handler) Busy(ctx context.Context, dir string) (bool, error) {
 		if t.SessionState(pending) != protocol.StateWorking {
 			continue
 		}
-		cwd := realPath(t.Cwd)
-		if cwd == root || strings.HasPrefix(cwd, strings.TrimSuffix(root, "/")+"/") {
+		if t.Worktree != "" && !within(root, realPath(t.Worktree)) {
+			continue
+		}
+		if within(realPath(t.Cwd), root) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// within reports whether path is base or lies under it.
+func within(path, base string) bool {
+	return path == base || strings.HasPrefix(path, strings.TrimSuffix(base, "/")+"/")
 }
 
 func realPath(p string) string {

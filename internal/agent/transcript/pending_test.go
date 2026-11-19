@@ -126,7 +126,7 @@ func TestCommands(t *testing.T) {
 		}
 	}
 	// Built-in commands, and skills.
-	for _, name := range []string{"model", "compact", "clear", "reload-skills", "reload-plugins", "init", "matt-tdd", "opsx:apply", "dataviz"} {
+	for _, name := range []string{"model", "compact", "clear", "reload-skills", "reload-plugins", "fork", "plan", "init", "matt-tdd", "opsx:apply", "dataviz"} {
 		if count[name] != 1 {
 			t.Errorf("command %q listed %d times, want once", name, count[name])
 		}

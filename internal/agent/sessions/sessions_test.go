@@ -593,3 +593,76 @@ func TestSessionBranches(t *testing.T) {
 		t.Errorf("fork session forkOf %q, want wtree001", g.ForkOf)
 	}
 }
+
+// newSlowFixture is newFixture with an hour between polls, so only Refresh
+// can bring a change.
+func newSlowFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	f.h.Close()
+	f.h = sessions.New(sessions.Options{
+		Source:   discovery.Source{ClaudePath: fakeclaude.Path(), ClaudeDir: f.sample},
+		Push:     agent.PusherFunc(func(e protocol.Envelope) { f.events <- e }),
+		Interval: time.Hour,
+	})
+	t.Cleanup(f.h.Close)
+	if res := f.h.Handle(context.Background(), request("r1", "c1", protocol.MethodSessionsSubscribe)); res.Error != nil {
+		t.Fatalf("subscribe: %+v", res.Error)
+	}
+	return f
+}
+
+func (f *fixture) writeSample(t *testing.T, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(f.sample, name), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// After a remove the list is read and pushed at once, not at the next poll.
+func TestRefreshPushesAtOnce(t *testing.T) {
+	f := newSlowFixture(t)
+	f.writeSample(t, "agents.json", "[]")
+	start := time.Now()
+	f.h.Refresh()
+	list := f.nextEvents(t, "c1")["c1"]
+	if len(list.Sessions) != 0 {
+		t.Fatalf("pushed list = %+v, want no sessions", list)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("the list came %v after Refresh, want within 1s", d)
+	}
+}
+
+// A poll that began before Refresh and ends after it is not pushed: it
+// may still show a session that was just removed.
+func TestRefreshDropsStaleRead(t *testing.T) {
+	f := newSlowFixture(t)
+	// The read Refresh starts sees the session working, then takes 1s.
+	f.setAgents(t, "busy")
+	f.writeSample(t, "agents.delay", "1")
+	before := f.calls(t)
+	f.h.Refresh()
+	deadline := time.Now().Add(2 * time.Second)
+	for f.calls(t) == before {
+		if time.Now().After(deadline) {
+			t.Fatal("the poller did not start a read")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Meanwhile the session is removed.
+	if err := os.Remove(filepath.Join(f.sample, "agents.delay")); err != nil {
+		t.Fatal(err)
+	}
+	f.writeSample(t, "agents.json", "[]")
+	f.h.Refresh()
+	list := f.nextEvents(t, "c1")["c1"]
+	if len(list.Sessions) != 0 {
+		t.Fatalf("first push = %+v, want the list without the removed session", list)
+	}
+	select {
+	case e := <-f.events:
+		t.Fatalf("unexpected second push %s", e.Body)
+	case <-time.After(1500 * time.Millisecond):
+	}
+}

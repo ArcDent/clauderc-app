@@ -9,6 +9,9 @@ import clauderc.app.net.Relay
 import clauderc.app.net.RemoteException
 import clauderc.app.net.call
 import clauderc.app.protocol.Answer
+import clauderc.app.protocol.AutoResume
+import clauderc.app.protocol.ChatAutoResumeRequest
+import clauderc.app.protocol.ChatAutoResumeResponse
 import clauderc.app.protocol.ChatAnswerRequest
 import clauderc.app.protocol.ChatCloseRequest
 import clauderc.app.protocol.ChatCommandsResponse
@@ -33,11 +36,14 @@ import clauderc.app.protocol.Empty
 import clauderc.app.protocol.ErrorCode
 import clauderc.app.protocol.Image
 import clauderc.app.protocol.ItemKind
+import clauderc.app.protocol.Limit
 import clauderc.app.protocol.Method
 import clauderc.app.protocol.ModelOption
 import clauderc.app.protocol.Pending
 import clauderc.app.protocol.ProtocolJson
 import clauderc.app.protocol.Session
+import clauderc.app.protocol.SessionCreateRequest
+import clauderc.app.protocol.SessionCreateResponse
 import clauderc.app.protocol.SessionIdRequest
 import clauderc.app.protocol.SessionState
 import clauderc.app.protocol.ToolResult
@@ -219,6 +225,14 @@ data class ChatUiState(
     val partial: PartialReply? = null,
     /** False until chat.open answered; replies that come in before then were already there and are not typed out. */
     val opened: Boolean = true,
+    /** The plan usage limit the session waits out, with what the agent is to send once it is lifted. */
+    val limit: Limit? = null,
+    /** The text to send once the limit is lifted, as typed; it follows the agent's setting when that changes. */
+    val resumeText: String = RESUME_TEXT,
+    /** True while session.create starts a session in a new worktree of this session's directory. */
+    val creatingWorktree: Boolean = false,
+    /** Why the last session.create from here failed, shown in the worktree dialog. */
+    val worktreeError: String? = null,
 )
 
 /**
@@ -316,6 +330,13 @@ class ChatViewModel(
     private val _messages = Channel<String>(Channel.BUFFERED)
     val messages: Flow<String> = _messages.receiveAsFlow()
 
+    private val _created = Channel<String>(Channel.BUFFERED)
+    /** Emits the id of a session started in a new worktree from here, once the agent has started it. */
+    val created: Flow<String> = _created.receiveAsFlow()
+
+    /** The wait before a text typed while the auto-send is on goes to the agent. */
+    private var resuming: Job? = null
+
     /** The tool_use id this phone just answered, so its own answer is not reported as handled elsewhere. */
     private var answered: String? = null
 
@@ -383,7 +404,7 @@ class ChatViewModel(
                         }
                         is ChatPendingEvent -> onPending(e.pending)
                         is ChatStateEvent -> _state.update {
-                            applyStatus(it, e.state, e.model, e.permissionMode).copy(unknownDialog = e.unknownDialog == true).withScreen(e.state, e.activity, e.partial)
+                            applyStatus(it, e.state, e.model, e.permissionMode).copy(unknownDialog = e.unknownDialog == true).withScreen(e.state, e.activity, e.partial).withLimit(e.limit)
                         }
                     }
                 }
@@ -421,6 +442,12 @@ class ChatViewModel(
         )
     }
 
+    /** The agent's [limit]; a text the agent is newly set to send replaces what was typed. */
+    private fun ChatUiState.withLimit(limit: Limit?): ChatUiState {
+        val set = limit?.autoResume?.text
+        return copy(limit = limit, resumeText = if (set != null && set != this.limit?.autoResume?.text) set else resumeText)
+    }
+
     private fun onPending(p: Pending?) {
         val old = _state.value.pending
         if (p == null && old != null && old.toolUseId != answered) {
@@ -448,7 +475,7 @@ class ChatViewModel(
                         unknownDialog = res.unknownDialog == true,
                         outgoing = outbox.outgoing.value,
                         keys = it.keys + deliveredKeys(before, res.items),
-                    ).let { s -> s.withScreen(res.state, res.activity, res.partial) }
+                    ).let { s -> s.withScreen(res.state, res.activity, res.partial).withLimit(res.limit) }
                 }
             } catch (e: RemoteException) {
                 _state.update { it.copy(loading = false, opened = true) }
@@ -489,17 +516,32 @@ class ChatViewModel(
      * returns its text and pictures to the composer. The send and its bubble outlive the
      * page: one that fails after the page closed is reported by the next page of this session.
      */
-    fun send(text: String): Boolean {
+    fun send(text: String): Boolean = send(text, command = false)
+
+    /**
+     * Sends `/fork` with [instruction], if any, as the composer would, leaving the composer's pictures and
+     * the draft alone. The fork starts as a background session of its own; the page stays on this one.
+     */
+    fun fork(instruction: String): Boolean = send("/fork ${instruction.trim()}".trim(), command = true)
+
+    /** [command] is a message from a dialog, not the composer: it takes no pictures and keeps no draft. */
+    private fun send(text: String, command: Boolean): Boolean {
         val s = _state.value
-        if (!s.online || s.sending || (text.isBlank() && s.attachments.isEmpty())) return false
-        saving?.cancel()
-        unsaved = null
-        val out = Outgoing(cache.nextId(), text.trim(), s.attachments, afterSeq = s.items.lastOrNull()?.seq ?: 0)
+        val images = if (command) emptyList() else s.attachments
+        if (!s.online || s.sending || (text.isBlank() && images.isEmpty())) return false
+        if (!command) {
+            saving?.cancel()
+            unsaved = null
+        }
+        val out = Outgoing(cache.nextId(), text.trim(), images, afterSeq = s.items.lastOrNull()?.seq ?: 0)
         outbox.outgoing.update { it + out }
         _state.update {
-            it.copy(sending = true, waking = it.state == SessionState.Stopped, notice = null, outgoing = outbox.outgoing.value, attachments = emptyList(), attachError = null)
+            it.copy(
+                sending = true, waking = it.state == SessionState.Stopped, notice = null, outgoing = outbox.outgoing.value,
+                attachments = if (command) it.attachments else emptyList(), attachError = if (command) it.attachError else null,
+            )
         }
-        val job = appScope.launch { deliver(out, text) }
+        val job = appScope.launch { deliver(out, text, draft = !command) }
         viewModelScope.launch {
             job.join()
             _state.update { it.copy(sending = false) }
@@ -507,16 +549,16 @@ class ChatViewModel(
         return true
     }
 
-    private suspend fun deliver(out: Outgoing, text: String) {
+    private suspend fun deliver(out: Outgoing, text: String, draft: Boolean) {
         // The text stays the draft until the send succeeds, so a failed one is not lost with the page.
-        val kept = drafts?.let { d -> appScope.launch { d.set(machineId, sessionId, text) } }
+        val kept = if (draft) drafts?.let { d -> appScope.launch { d.set(machineId, sessionId, text) } } else null
         try {
             val images = withContext(background) { out.attachments.map { Image("image/jpeg", Base64.getEncoder().encodeToString(it.jpeg)) } }
             val res = relay.call(Method.CHAT_SEND, machineId, ChatSendRequest(sessionId, text, images.ifEmpty { null }), ChatSendRequest.serializer(), ChatSendResponse.serializer())
             val queued = res.queued == true
             outbox.outgoing.update { o -> o.map { if (it.id == out.id) it.copy(queued = queued, delivered = !queued) else it } }
             kept?.join()
-            drafts?.clear(machineId, sessionId, text)
+            if (draft) drafts?.clear(machineId, sessionId, text)
         } catch (e: RemoteException) {
             fail(out, if (e.code == ErrorCode.NOT_DELIVERED) "消息没有送达，请重试" else e.message ?: "发送失败")
         } catch (e: Exception) {
@@ -708,6 +750,84 @@ class ChatViewModel(
 
     fun removeImage(index: Int) = _state.update { s -> s.copy(attachments = s.attachments.filterIndexed { i, _ -> i != index }, attachError = null) }
 
+    /**
+     * Turns on or off the message the agent sends once the usage limit is lifted, with the typed text. The
+     * switch moves at once and goes back if the agent refuses.
+     */
+    fun setAutoResume(on: Boolean) {
+        val s = _state.value
+        val limit = s.limit ?: return
+        val text = s.resumeText.trim()
+        if (!s.online || (on && text.isEmpty())) return
+        resuming?.cancel()
+        _state.update { it.copy(limit = limit.copy(autoResume = if (on) AutoResume(text, limit.resetsAt.plusSeconds(RESUME_DELAY_SECONDS)) else null)) }
+        viewModelScope.launch {
+            try {
+                val res = relay.call(
+                    Method.CHAT_AUTO_RESUME, machineId, ChatAutoResumeRequest(sessionId, on, text.takeIf { on }),
+                    ChatAutoResumeRequest.serializer(), ChatAutoResumeResponse.serializer(),
+                )
+                _state.update { it.withLimit(res.limit) }
+            } catch (e: Exception) {
+                _state.update { if (it.limit?.resetsAt == limit.resetsAt) it.copy(limit = limit) else it }
+                _messages.send(
+                    when {
+                        e is RemoteException && e.code == ErrorCode.UNKNOWN_METHOD -> "这台目标机的程序还不支持自动发送"
+                        e is RemoteException -> e.message ?: "设置自动发送失败"
+                        else -> "设置自动发送失败：${e.message}"
+                    },
+                )
+            }
+        }
+    }
+
+    /** The text to send once the limit is lifted was edited; while the auto-send is on, it goes to the agent once typing pauses. */
+    fun typedResume(text: String) {
+        _state.update { it.copy(resumeText = text) }
+        resuming?.cancel()
+        if (_state.value.limit?.autoResume == null || text.isBlank()) return
+        resuming = viewModelScope.launch {
+            delay(DRAFT_SAVE_MILLIS)
+            setAutoResume(true)
+        }
+    }
+
+    /**
+     * Starts a session in a new git worktree [name] of the directory this session is listed under, with this
+     * session's profile and [prompt] as its first message; [created] then brings its id.
+     */
+    fun createWorktree(name: String, prompt: String) {
+        val s = _state.value
+        val session = s.session ?: return
+        if (!s.online || s.creatingWorktree) return
+        if (!WORKTREE_NAME.matches(name)) {
+            _state.update { it.copy(worktreeError = WORKTREE_NAME_RULE) }
+            return
+        }
+        _state.update { it.copy(creatingWorktree = true, worktreeError = null) }
+        viewModelScope.launch {
+            val request = SessionCreateRequest(
+                profileId = session.profileId,
+                cwd = session.dir ?: session.cwd,
+                prompt = prompt.trim().ifEmpty { null },
+                worktree = name,
+            )
+            try {
+                val res = relay.call(Method.SESSION_CREATE, machineId, request, SessionCreateRequest.serializer(), SessionCreateResponse.serializer())
+                fleet.refresh(machineId)
+                _state.update { it.copy(creatingWorktree = false) }
+                _created.send(res.sessionId)
+            } catch (e: RemoteException) {
+                _state.update { it.copy(creatingWorktree = false, worktreeError = e.message ?: "新建失败") }
+            } catch (e: Exception) {
+                _state.update { it.copy(creatingWorktree = false, worktreeError = "新建失败：${e.message}") }
+            }
+        }
+    }
+
+    /** The worktree dialog closed or its name changed: its last failure goes. */
+    fun clearWorktreeError() = _state.update { it.copy(worktreeError = null) }
+
     /** The composer's text changed: kept as the draft once typing pauses for half a second. */
     fun typed(text: String) {
         if (drafts == null || agentId != null) return
@@ -738,3 +858,17 @@ private const val INTERRUPTED = "已中断"
 
 /** How long typing pauses before the composer's text is kept as the draft. */
 const val DRAFT_SAVE_MILLIS = 500L
+
+/** What the agent sends once a usage limit is lifted, unless changed. */
+const val RESUME_TEXT = "继续"
+
+/** The agent sends a minute after the reset, so the message does not land on its edge and get refused. */
+private const val RESUME_DELAY_SECONDS = 60L
+
+/** A worktree name session.create takes, as the agent checks it. */
+val WORKTREE_NAME = Regex("^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$")
+
+const val WORKTREE_NAME_RULE = "只能用字母、数字、点、横线和下划线，不能以点或横线开头"
+
+/** The name the worktree dialog suggests: 「wt-」 and the month, day, hour and minute, e.g. 「wt-1119-1530」. */
+fun worktreeName(now: java.time.LocalDateTime): String = "wt-%02d%02d-%02d%02d".format(now.monthValue, now.dayOfMonth, now.hour, now.minute)
