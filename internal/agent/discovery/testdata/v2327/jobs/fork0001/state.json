@@ -1,0 +1,30 @@
+{
+  "state": "done",
+  "detail": "replied FORKED as instructed",
+  "respawnFlags": [
+    "--permission-mode",
+    "manual",
+    "--effort",
+    "low"
+  ],
+  "providerEnv": {},
+  "template": "bg",
+  "intent": "只回复 FORKED",
+  "name": "repo work ⑂ 只回复 FORKED",
+  "nameSource": "auto",
+  "sessionId": "9a1c2a5e-0000-4000-8000-0000000000a2",
+  "resumeSessionId": "9a1c2a5e-0000-4000-8000-0000000000a2",
+  "daemonShort": "fork0001",
+  "cliVersion": "2.1.327",
+  "cwd": "/w/repo",
+  "forkSourceAlive": true,
+  "forkBoundaryAt": "2026-11-19T00:26:00.224Z",
+  "forkSessionId": "9a1c2a5e-0000-4000-8000-0000000000a2",
+  "forkParentSessionId": "9a1c2a5e-0000-4000-8000-0000000000a1",
+  "interactiveLineage": true,
+  "createdAt": "2026-11-19T00:26:02.300Z",
+  "updatedAt": "2026-11-19T00:26:20.025Z",
+  "firstTerminalAt": "2026-11-19T00:26:20.025Z",
+  "lastTerminalAt": "2026-11-19T00:26:20.025Z",
+  "backend": "daemon"
+}

@@ -9,6 +9,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import clauderc.app.protocol.ChatItem
 import clauderc.app.protocol.Command
 import clauderc.app.protocol.PermissionMode
@@ -200,14 +201,13 @@ fun patchStat(result: ToolResult, rows: List<PatchRow>): PatchStat? = when {
 }
 
 /**
- * Whether a tool call joins a merged row: a search, a read or a command; not a slash command,
- * `clauderc show` or a call whose result has pictures, which are shown under it.
+ * Whether a tool call joins a merged row (tool view A): any call but a slash command, a subagent, a
+ * message to another session, `clauderc show` or a call whose result has pictures, which are shown under it.
  */
 fun isMergeable(tool: ToolCall?): Boolean = when {
-    tool == null || isCommand(tool) || !tool.result?.images.isNullOrEmpty() -> false
-    tool.toolName == "Grep" || tool.toolName == "Glob" || tool.toolName == "Read" -> true
+    tool == null || isCommand(tool) || tool.agent != null || isSendMessage(tool) || !tool.result?.images.isNullOrEmpty() -> false
     tool.toolName == "Bash" -> !runsShow(tool)
-    else -> false
+    else -> true
 }
 
 /** Whether a command runs `clauderc show`, however it is written: by name, by full path, after a `cd`. */
@@ -215,7 +215,7 @@ private fun runsShow(tool: ToolCall): Boolean = tool.input.stringField("command"
 
 /**
  * The items as the chat list draws them: two or more mergeable tool calls in a row become one
- * entry, as the CLI merges them; anything else, a reply, an edit or a write, ends the run.
+ * entry, as Claude's desktop app merges them; anything else, a reply or a picture, ends the run.
  */
 fun chatRuns(items: List<ChatItem>): List<List<ChatItem>> {
     val runs = mutableListOf<MutableList<ChatItem>>()
@@ -226,24 +226,74 @@ fun chatRuns(items: List<ChatItem>): List<List<ChatItem>> {
     return runs
 }
 
-/** A merged row's counts, as the CLI words them: 「搜索 1 个模式，读取 2 个文件，列出 1 个目录，运行 1 条命令」. */
-fun groupSummary(tools: List<ToolCall>): String {
-    val n = IntArray(groupWords.size)
-    for (t in tools) {
-        n[
+/**
+ * A merged row's head (.tg-sum): the kinds of call in the order they first come, a kind done once
+ * named with its file, pattern or command in [argColor] mono, more than once counted, e.g.
+ * 「搜索 Envelope，读取 2 个文件，列出 1 个目录，运行 go list ./...」; refused or failed calls are counted
+ * last in [failColor]. A tool with no verb of its own is named by its tool name.
+ */
+fun groupSummary(tools: List<ToolCall>, argColor: Color, failColor: Color): AnnotatedString {
+    val kinds = LinkedHashMap<String, MutableList<ToolCall>>()
+    for (t in tools) kinds.getOrPut(callKind(t)) { mutableListOf() } += t
+    val mono = SpanStyle(fontFamily = MonoFamily, fontSize = 12.sp, color = argColor)
+    return buildAnnotatedString {
+        kinds.entries.forEachIndexed { i, (kind, calls) ->
+            if (i > 0) append("，")
+            val unit = groupUnits[kind]
             when {
-                t.toolName == "Grep" || t.toolName == "Glob" -> 0
-                t.toolName == "Read" -> 1
-                listing.containsMatchIn(t.input.stringField("command").orEmpty().trimStart()) -> 2
-                else -> 3
-            },
-        ]++
+                unit == null -> {
+                    withStyle(mono) { append(kind) }
+                    if (calls.size > 1) append(" ${calls.size} 次")
+                }
+                calls.size == 1 && kind != LISTING -> {
+                    append("$kind ")
+                    withStyle(mono) { append(splitSummary(calls[0]).second) }
+                }
+                else -> append("$kind ${calls.size} $unit")
+            }
+        }
+        val failed = tools.mapNotNull(::failWord)
+        if (failed.isNotEmpty()) {
+            append("，")
+            withStyle(SpanStyle(color = failColor)) { append("${failed.size} 条${failed.first()}") }
+        }
     }
-    return groupWords.indices.filter { n[it] > 0 }.joinToString("，") { "${groupWords[it].first} ${n[it]} ${groupWords[it].second}" }
 }
 
-private val groupWords = listOf("搜索" to "个模式", "读取" to "个文件", "列出" to "个目录", "运行" to "条命令")
+/** A call's kind in a merged row's head: its verb, 「列出」 for an ls, or its tool name. */
+private fun callKind(t: ToolCall): String {
+    val verb = splitSummary(t).first
+    return when {
+        verb == "运行" && listing.containsMatchIn(t.input.stringField("command").orEmpty().trimStart()) -> LISTING
+        verb != null && verb in groupUnits -> verb
+        else -> t.toolName
+    }
+}
+
+/** 「已拒绝」 or 「出错」 for a call that did not go through, as its row says it. */
+fun failWord(t: ToolCall): String? = when {
+    isRefusal(t) -> "已拒绝"
+    t.result?.isError == true -> "出错"
+    else -> null
+}
+
+private const val LISTING = "列出"
+private val groupUnits = mapOf("编辑" to "个文件", "写入" to "个文件", "读取" to "个文件", "搜索" to "个模式", LISTING to "个目录", "运行" to "条命令")
 private val listing = Regex("""^ls(\s|$)""")
+
+/** A merged row's figures: the lines its edits and writes added and deleted; null when they changed none. */
+fun groupStat(tools: List<ToolCall>): PatchStat? {
+    var added = 0
+    var deleted = 0
+    for (t in tools) {
+        val result = t.result ?: continue
+        val stat = patchRows(result)?.let { patchStat(result, it) } ?: continue
+        if (stat.read != null) continue
+        added += stat.added
+        deleted += stat.deleted
+    }
+    return if (added + deleted > 0) PatchStat(added, deleted) else null
+}
 
 /** Whether a finished tool call is `clauderc show`: its pictures stand for it, without the command. */
 fun isShow(tool: ToolCall): Boolean = tool.toolName == "Bash" && runsShow(tool) && !tool.result?.images.isNullOrEmpty()
@@ -281,9 +331,6 @@ fun thumbPixels(img: ToolImage): Pair<Int, Int>? {
 }
 
 private const val THUMB_EDGE = 360
-
-/** Edits and writes show their diff when they come in; reads and the rest start folded. */
-fun opensByDefault(result: ToolResult?): Boolean = result?.patch?.isNotEmpty() == true
 
 /**
  * Splits off the status lines a background session writes on their own line for Claude Code's

@@ -2,6 +2,7 @@ package clauderc.app.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import clauderc.app.data.DraftStore
 import clauderc.app.data.Fleet
 import clauderc.app.net.ConnectionState
 import clauderc.app.net.Relay
@@ -45,6 +46,9 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -288,6 +292,8 @@ class ChatViewModel(
     private val background: CoroutineContext = Dispatchers.Default,
     /** Set for a subagent's page: its transcript, read only, with no commands to fetch. */
     private val agentId: String? = null,
+    /** Where the composer's unsent text is kept; null keeps none. */
+    private val drafts: DraftStore? = null,
 ) : ViewModel() {
     private val cacheKey = "$machineId/$sessionId" + agentId?.let { "/$it" }.orEmpty()
     private val outbox = cache.outbox(cacheKey)
@@ -319,7 +325,20 @@ class ChatViewModel(
     /** True once chat.open was answered, or failed; a reconnect opens again. */
     private var opened = false
 
+    /** Typed text not saved as the draft yet, and the wait before it is. */
+    private var unsaved: String? = null
+    private var saving: Job? = null
+
     init {
+        // The draft goes back into the composer, the cursor after it; not when it is a message still on its way.
+        if (drafts != null && agentId == null) {
+            viewModelScope.launch {
+                val d = drafts.draft(machineId, sessionId).first()
+                if (d.isNotBlank() && outbox.outgoing.value.none { it.text == d.trim() }) {
+                    _state.update { it.copy(restore = Restore(cache.nextId(), d)) }
+                }
+            }
+        }
         viewModelScope.launch { outbox.outgoing.collect { o -> _state.update { it.copy(outgoing = o) } } }
         viewModelScope.launch {
             outbox.failed.filter { it.isNotEmpty() }.collect {
@@ -473,6 +492,8 @@ class ChatViewModel(
     fun send(text: String): Boolean {
         val s = _state.value
         if (!s.online || s.sending || (text.isBlank() && s.attachments.isEmpty())) return false
+        saving?.cancel()
+        unsaved = null
         val out = Outgoing(cache.nextId(), text.trim(), s.attachments, afterSeq = s.items.lastOrNull()?.seq ?: 0)
         outbox.outgoing.update { it + out }
         _state.update {
@@ -487,11 +508,15 @@ class ChatViewModel(
     }
 
     private suspend fun deliver(out: Outgoing, text: String) {
+        // The text stays the draft until the send succeeds, so a failed one is not lost with the page.
+        val kept = drafts?.let { d -> appScope.launch { d.set(machineId, sessionId, text) } }
         try {
             val images = withContext(background) { out.attachments.map { Image("image/jpeg", Base64.getEncoder().encodeToString(it.jpeg)) } }
             val res = relay.call(Method.CHAT_SEND, machineId, ChatSendRequest(sessionId, text, images.ifEmpty { null }), ChatSendRequest.serializer(), ChatSendResponse.serializer())
             val queued = res.queued == true
             outbox.outgoing.update { o -> o.map { if (it.id == out.id) it.copy(queued = queued, delivered = !queued) else it } }
+            kept?.join()
+            drafts?.clear(machineId, sessionId, text)
         } catch (e: RemoteException) {
             fail(out, if (e.code == ErrorCode.NOT_DELIVERED) "消息没有送达，请重试" else e.message ?: "发送失败")
         } catch (e: Exception) {
@@ -550,7 +575,7 @@ class ChatViewModel(
         }
     }
 
-    /** Fetches the whole result of a tool call for 「展开全部」; a failure is reported and the row stays as it was. */
+    /** Fetches the whole result of a tool call cut to 8 KB, when its row opens; a failure is reported and the row stays as it was. */
     fun loadToolOutput(toolUseId: String) {
         val s = _state.value
         if (toolUseId in s.fullResults || toolUseId in s.fetchingResults) return
@@ -683,7 +708,21 @@ class ChatViewModel(
 
     fun removeImage(index: Int) = _state.update { s -> s.copy(attachments = s.attachments.filterIndexed { i, _ -> i != index }, attachError = null) }
 
+    /** The composer's text changed: kept as the draft once typing pauses for half a second. */
+    fun typed(text: String) {
+        if (drafts == null || agentId != null) return
+        unsaved = text
+        saving?.cancel()
+        saving = viewModelScope.launch {
+            delay(DRAFT_SAVE_MILLIS)
+            unsaved = null
+            drafts.set(machineId, sessionId, text)
+        }
+    }
+
     override fun onCleared() {
+        // Leaving the page keeps what was typed in the last half second too.
+        unsaved?.let { text -> drafts?.let { d -> appScope.launch { d.set(machineId, sessionId, text) } } }
         val s = _state.value
         if (s.items.isNotEmpty()) {
             val kept = s.items.takeLast(ChatCache.KEEP)
@@ -696,3 +735,6 @@ class ChatViewModel(
 }
 
 private const val INTERRUPTED = "已中断"
+
+/** How long typing pauses before the composer's text is kept as the draft. */
+const val DRAFT_SAVE_MILLIS = 500L

@@ -304,19 +304,138 @@ func TestCreateClaudeFailures(t *testing.T) {
 	}
 }
 
-// A directory Claude Code has not been trusted in is named with what to do,
-// instead of the fixed message.
+// trustScript is a fake claude for the trust tests. --bg fails as Claude
+// Code does while the marker file exists, and launches otherwise; run
+// without arguments it acts as interactive mode does on prompt: "show"
+// draws the 2.1.327 trust prompt, moves the selection to yes on Down and
+// removes the marker on Enter there, "deaf" does so too but drops the
+// first key, "silent" never draws it, "exit" ends at once. Every call appends
+// "bg" or "ui" to the log file.
+func trustScript(t *testing.T, prompt string) (claude, marker, log string) {
+	t.Helper()
+	dir := t.TempDir()
+	marker, log = filepath.Join(dir, "untrusted"), filepath.Join(dir, "log")
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	claude = writeScript(t, `log=`+log+`
+marker=`+marker+`
+for a in "$@"; do
+	if [ "$a" = --bg ]; then
+		echo bg >>"$log"
+		if [ -f "$marker" ]; then
+			echo 'Error: Workspace not trusted. Please run claude in this directory first.' >&2
+			exit 1
+		fi
+		echo 'backgrounded · 7a7a7a7a · x'
+		exit 0
+	fi
+done
+echo ui >>"$log"
+pwd -P >"$log.cwd"
+case "`+prompt+`" in
+exit) exit 1 ;;
+silent) sleep 30; exit 0 ;;
+esac
+stty raw -echo
+draw() {
+	printf '\033[2J\033[HAccessing workspace:\r\n\r\n %s\r\n\r\nQuick safety check\r\n\r\n%s No, exit\r\n%s Yes, I trust this folder\r\n\r\nEnter to confirm\r\n' "$PWD" "$1" "$2"
+}
+mark=$(printf '\342\235\257')
+draw "$mark" ' '
+# "deaf" drops the first key, as Claude Code may before it reads keys.
+[ "`+prompt+`" = deaf ] && dd bs=1 count=3 >/dev/null 2>&1
+[ "$(dd bs=1 count=3 2>/dev/null | od -An -c | tr -d ' \n')" = '033[B' ] || exit 1
+draw ' ' "$mark"
+if [ "$(dd bs=1 count=1 2>/dev/null | od -An -c | tr -d ' \n')" = '\r' ]; then
+	rm -f "$marker"
+	printf '\033[2J\033[H> \r\n'
+	sleep 30
+fi
+exit 1
+`)
+	return claude, marker, log
+}
+
+func readLog(t *testing.T, path string) string {
+	t.Helper()
+	b, _ := os.ReadFile(path)
+	return strings.Join(strings.Fields(string(b)), " ")
+}
+
+// Without trust, an untrusted directory fails with its own code and
+// claude is not run again.
 func TestCreateUntrustedDir(t *testing.T) {
 	f := newFixture(t)
 	f.job(t, "dflt0001", []string{"--model", "haiku"}, nil, "2026-11-13T09:00:00.000Z")
 	src := f.src
-	src.ClaudePath = writeScript(t, "echo 'Workspace not trusted.' >&2; exit 1\n")
+	var log string
+	src.ClaudePath, _, log = trustScript(t, "show")
 	work := t.TempDir()
 	_, err := lifecycle.New(lifecycle.Options{Source: src}).Create(context.Background(), protocol.SessionCreateRequest{ProfileID: "default", Cwd: work})
-	want := "这个目录还没被信任：" + work + "。请先在目标机上进入这个目录运行一次 claude，接受信任提示后再试"
 	var pe *protocol.Error
-	if !errors.As(err, &pe) || pe.Message != want {
-		t.Fatalf("error = %v, want %q", err, want)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotTrusted || pe.Message != "这个目录还没被 Claude Code 信任："+work+"。请先在目标机上进入这个目录运行一次 claude，接受信任提示后再试" {
+		t.Fatalf("error = %v, want notTrusted naming %s", err, work)
+	}
+	if got := readLog(t, log); got != "bg" {
+		t.Errorf("calls = %q, want one launch", got)
+	}
+}
+
+// With trust, the agent says yes on the trust prompt, in the directory,
+// then launches again; a key the prompt missed is pressed again.
+func TestCreateTrustsFirst(t *testing.T) {
+	for _, prompt := range []string{"show", "deaf"} {
+		t.Run(prompt, func(t *testing.T) { createTrustsFirst(t, prompt) })
+	}
+}
+
+func createTrustsFirst(t *testing.T, prompt string) {
+	f := newFixture(t)
+	f.job(t, "dflt0001", []string{"--model", "haiku"}, nil, "2026-11-13T09:00:00.000Z")
+	src := f.src
+	var marker, log string
+	src.ClaudePath, marker, log = trustScript(t, prompt)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	work := t.TempDir()
+	id, err := lifecycle.New(lifecycle.Options{Source: src}).Create(ctx, protocol.SessionCreateRequest{ProfileID: "default", Cwd: work, Trust: true})
+	if err != nil || id != "7a7a7a7a" {
+		t.Fatalf("Create = %q, %v", id, err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Error("the trust prompt was not answered with yes")
+	}
+	if got := readLog(t, log); got != "bg ui bg" {
+		t.Errorf("calls = %q, want launch, trust prompt, launch", got)
+	}
+	want, _ := filepath.EvalSymlinks(work)
+	if got := readLog(t, log+".cwd"); got != want {
+		t.Errorf("trust prompt ran in %q, want %q", got, want)
+	}
+}
+
+// No prompt, or claude ending before it, fails the create without a
+// second launch.
+func TestCreateTrustFails(t *testing.T) {
+	for _, prompt := range []string{"silent", "exit"} {
+		t.Run(prompt, func(t *testing.T) {
+			f := newFixture(t)
+			f.job(t, "dflt0001", []string{"--model", "haiku"}, nil, "2026-11-13T09:00:00.000Z")
+			src := f.src
+			var log string
+			src.ClaudePath, _, log = trustScript(t, prompt)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_, err := lifecycle.New(lifecycle.Options{Source: src}).Create(ctx, protocol.SessionCreateRequest{ProfileID: "default", Cwd: t.TempDir(), Trust: true})
+			var pe *protocol.Error
+			if !errors.As(err, &pe) || pe.Code != protocol.CodeInternal || !strings.Contains(pe.Message, "Yes, I trust this folder") {
+				t.Fatalf("error = %v, want the trust failure", err)
+			}
+			if got := readLog(t, log); got != "bg ui" {
+				t.Errorf("calls = %q, want no second launch", got)
+			}
+		})
 	}
 }
 

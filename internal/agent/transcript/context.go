@@ -65,20 +65,39 @@ type usageRecord struct {
 // input plus cache reads and writes, as Claude Code's status line counts
 // it. Nil when no reply is found near the end.
 func ContextOf(path string) (*protocol.SessionContext, error) {
+	tail, err := TailOf(path)
+	return tail.Context, err
+}
+
+// Tail is what the session list reads from the end of a transcript.
+type Tail struct {
+	// Context is as ContextOf returns it.
+	Context *protocol.SessionContext
+	// Branch is the git branch of the last main-chain entry that records
+	// one. Empty outside a git repository, where Claude Code records
+	// "HEAD", and on a detached head.
+	Branch string
+}
+
+// TailOf reads ContextOf's context and the branch in one pass over the
+// end of the transcript at path.
+func TailOf(path string) (Tail, error) {
+	var t Tail
 	fh, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return t, err
 	}
 	defer fh.Close()
 	fi, err := fh.Stat()
 	if err != nil {
-		return nil, err
+		return t, err
 	}
+	branchSeen := false
 	for _, tail := range contextTails {
 		from := max(fi.Size()-tail, 0)
 		buf := make([]byte, fi.Size()-from)
 		if _, err := fh.ReadAt(buf, from); err != nil && err != io.EOF {
-			return nil, err
+			return Tail{}, err
 		}
 		if from > 0 {
 			// The first line is cut off.
@@ -88,11 +107,42 @@ func ContextOf(path string) (*protocol.SessionContext, error) {
 				buf = nil
 			}
 		}
-		if ctx := lastContext(buf); ctx != nil || from == 0 {
-			return ctx, nil
+		if t.Context == nil {
+			t.Context = lastContext(buf)
+		}
+		if !branchSeen {
+			t.Branch, branchSeen = lastBranch(buf)
+		}
+		if t.Context != nil && branchSeen || from == 0 {
+			return t, nil
 		}
 	}
-	return nil, nil
+	return t, nil
+}
+
+// lastBranch scans whole lines from the end for the last main-chain entry
+// with a gitBranch; ok is false when none has one.
+func lastBranch(buf []byte) (branch string, ok bool) {
+	for len(buf) > 0 {
+		i := bytes.LastIndexByte(bytes.TrimRight(buf, "\n"), '\n')
+		line := buf[i+1:]
+		buf = buf[:max(i, 0)]
+		if !bytes.Contains(line, []byte(`"gitBranch"`)) {
+			continue
+		}
+		var r struct {
+			GitBranch   *string `json:"gitBranch"`
+			IsSidechain bool    `json:"isSidechain"`
+		}
+		if json.Unmarshal(line, &r) != nil || r.GitBranch == nil || r.IsSidechain {
+			continue
+		}
+		if *r.GitBranch == "HEAD" {
+			return "", true
+		}
+		return *r.GitBranch, true
+	}
+	return "", false
 }
 
 // lastContext scans whole lines from the end for the last main-chain reply

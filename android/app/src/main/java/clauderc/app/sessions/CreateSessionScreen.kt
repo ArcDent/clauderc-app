@@ -34,6 +34,10 @@ import androidx.compose.ui.unit.sp
 import clauderc.app.ui.baseName
 import clauderc.app.ui.components.AppBar
 import clauderc.app.ui.components.BarTitle
+import clauderc.app.ui.components.ClaudercSheet
+import clauderc.app.ui.components.SheetHead
+import clauderc.app.data.UiStyle
+import androidx.compose.foundation.layout.size
 import clauderc.app.ui.components.FieldError
 import clauderc.app.ui.components.FieldLabel
 import clauderc.app.ui.components.SymbolButton
@@ -43,6 +47,7 @@ import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Lift
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Symbols
+import clauderc.app.ui.theme.styled
 
 /** Shows /Users/me/x and /home/me/x as ~/x; requests always carry the full path. */
 fun shortPath(path: String): String = Regex("""^/(Users|home)/[^/]+""").replace(path, "~")
@@ -57,6 +62,8 @@ fun CreateSessionScreen(
     onShowAllDirs: () -> Unit,
     onName: (String) -> Unit,
     onPrompt: (String) -> Unit,
+    onTrust: () -> Unit = {},
+    onDismissTrust: () -> Unit = {},
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
@@ -127,6 +134,44 @@ fun CreateSessionScreen(
                 UnderlineField(state.prompt, onPrompt, singleLine = false, minLines = 2, placeholder = "不填就只启动会话")
             }
             state.error?.let { FieldError(it) }
+        }
+    }
+    state.untrusted?.let { TrustSheet(it, state.trusting, onTrust, onDismissTrust) }
+}
+
+/**
+ * Claude Code does not trust the directory yet: the sheet names it and starts the session after
+ * saying yes to Claude Code's own trust prompt, in one step.
+ */
+@Composable
+private fun TrustSheet(dir: String, trusting: Boolean, onTrust: () -> Unit, onDismiss: () -> Unit) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    ClaudercSheet(onDismiss = onDismiss) {
+        SheetHead("这个目录还没被信任", "Claude Code 信任目录后才能在里面启动会话，之后它能读写和运行这里的文件。")
+        // .trust-dir
+        Row(
+            Modifier
+                .padding(start = sp.page, end = sp.page, top = sp.sp2)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(Clauderc.radii.sm))
+                .background(c.surface)
+                .padding(horizontal = sp.sp4, vertical = sp.sp3),
+            horizontalArrangement = Arrangement.spacedBy(sp.sp3),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Symbols.Folder.styled, contentDescription = null, tint = c.fg3, modifier = Modifier.size(20.dp))
+            Text(shortPath(dir), fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm, color = c.fg)
+        }
+        // .sheet .btns
+        Row(
+            Modifier.fillMaxWidth().padding(start = sp.sp3, end = sp.sp3, top = sp.sp3),
+            horizontalArrangement = Arrangement.spacedBy(if (Clauderc.style == UiStyle.Sticker) sp.sp2 else sp.sp1, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 「取消」 looks the same while it works, as in the mockup; the view model ignores it until the answer.
+            TextAction("取消", onClick = onDismiss)
+            TextAction(if (trusting) "正在信任" else "信任并新建", onClick = onTrust, busy = trusting)
         }
     }
 }

@@ -37,6 +37,10 @@ data class CreateUiState(
     val dirError: String? = null,
     val error: String? = null,
     val submitting: Boolean = false,
+    /** The directory Claude Code does not trust yet, asked about in a sheet; null when none. */
+    val untrusted: String? = null,
+    /** True while the agent says yes to Claude Code's trust prompt and then starts the session. */
+    val trusting: Boolean = false,
 ) {
     val canSubmit get() = canCreate && dir.isNotBlank() && !submitting
 }
@@ -87,25 +91,45 @@ class CreateSessionViewModel(
         val s = _state.value
         if (!s.canSubmit) return
         _state.update { it.copy(submitting = true, error = null, dirError = null) }
+        create(s, trust = false)
+    }
+
+    /** The sheet's 「信任并新建」: the same session.create with trust set; the sheet stays, working, until it answers. */
+    fun trustAndCreate() {
+        val s = _state.value
+        if (s.untrusted == null || s.trusting) return
+        _state.update { it.copy(trusting = true, error = null) }
+        create(s, trust = true)
+    }
+
+    /** The sheet's 「取消」: nothing more is sent. */
+    fun dismissTrust() = _state.update { if (it.trusting) it else it.copy(untrusted = null) }
+
+    private fun create(s: CreateUiState, trust: Boolean) {
         viewModelScope.launch {
             val request = SessionCreateRequest(
                 profileId = profileId,
-                cwd = s.dir.trim(),
+                cwd = s.untrusted ?: s.dir.trim(),
                 name = s.name.trim().ifEmpty { null },
                 prompt = s.prompt.trim().ifEmpty { null },
+                trust = true.takeIf { trust },
             )
             try {
                 val res = relay.call(Method.SESSION_CREATE, machineId, request, SessionCreateRequest.serializer(), SessionCreateResponse.serializer())
                 fleet.refresh(machineId)
-                _state.update { it.copy(submitting = false) }
+                _state.update { it.copy(submitting = false, untrusted = null, trusting = false) }
                 _created.send(res.sessionId)
             } catch (e: RemoteException) {
                 _state.update {
-                    if (e.code == ErrorCode.DIR_NOT_FOUND) it.copy(submitting = false, dirError = "目标机上没有这个目录")
-                    else it.copy(submitting = false, error = e.message)
+                    val done = it.copy(submitting = false, untrusted = null, trusting = false)
+                    when (e.code) {
+                        ErrorCode.NOT_TRUSTED -> if (trust) done.copy(error = e.message) else done.copy(untrusted = request.cwd)
+                        ErrorCode.DIR_NOT_FOUND -> done.copy(dirError = "目标机上没有这个目录")
+                        else -> done.copy(error = e.message)
+                    }
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(submitting = false, error = "启动失败：${e.message}") }
+                _state.update { it.copy(submitting = false, untrusted = null, trusting = false, error = "启动失败：${e.message}") }
             }
         }
     }

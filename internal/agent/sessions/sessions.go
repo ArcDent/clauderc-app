@@ -218,9 +218,9 @@ func (h *Handler) poll(ctx context.Context, done chan<- struct{}) {
 }
 
 // list reads the session list, settles each blocked session against its
-// transcript (design D5, D6) and adds each session's context window use
-// and, for a running session, its subagents that still run. A stopped
-// session has none, even when a meta file was left unfinished.
+// transcript (design D5, D6) and adds each session's context window use,
+// git branch and, for a running session, its subagents that still run. A
+// stopped session has none, even when a meta file was left unfinished.
 func (h *Handler) list(ctx context.Context) (protocol.SessionList, error) {
 	list, targets, err := h.opts.Source.ListTargets(ctx)
 	if err != nil {
@@ -240,7 +240,13 @@ func (h *Handler) list(ctx context.Context) (protocol.SessionList, error) {
 			}
 			list.Sessions[i].State = t.SessionState(pending)
 		}
-		list.Sessions[i].Context = h.contexts.get(h.opts.Source.ClaudeDir, t.SessionID)
+		tail := h.contexts.get(h.opts.Source.ClaudeDir, t.SessionID)
+		list.Sessions[i].Context = tail.Context
+		// The transcript knows the branch the session is on now; the
+		// worktree branch from discovery only stands in until it is read.
+		if tail.Branch != "" {
+			list.Sessions[i].Branch = tail.Branch
+		}
 		seen[t.SessionID] = true
 	}
 	h.contexts.keep(seen)

@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"clauderc/internal/agent/transcript"
-	"clauderc/internal/protocol"
 )
 
-// contexts keeps each session's context window use with the size and time
-// of the transcript it was read from, so an unchanged transcript is not
-// read again on every poll.
+// contexts keeps what each session's transcript ends with, its context
+// window use and git branch, with the size and time of the transcript it
+// was read from, so an unchanged transcript is not read again on every
+// poll.
 type contexts struct {
 	mu      sync.Mutex
 	entries map[string]contextEntry
@@ -21,12 +21,13 @@ type contextEntry struct {
 	path string
 	size int64
 	mod  time.Time
-	ctx  *protocol.SessionContext
+	tail transcript.Tail
 }
 
-// get returns the context of sessionID, nil when its transcript is missing
-// or holds no reply yet.
-func (c *contexts) get(claudeDir, sessionID string) *protocol.SessionContext {
+// get returns the end of sessionID's transcript; its Context is nil when
+// the transcript is missing or holds no reply yet. A transcript that moved,
+// as when the session entered a worktree, is looked up again.
+func (c *contexts) get(claudeDir, sessionID string) transcript.Tail {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[sessionID]
@@ -42,21 +43,21 @@ func (c *contexts) get(claudeDir, sessionID string) *protocol.SessionContext {
 		}
 		if err != nil {
 			delete(c.entries, sessionID)
-			return nil
+			return transcript.Tail{}
 		}
 		e = contextEntry{path: path}
 	} else if fi.Size() == e.size && fi.ModTime().Equal(e.mod) {
-		return e.ctx
+		return e.tail
 	}
-	ctx, err := transcript.ContextOf(e.path)
+	tail, err := transcript.TailOf(e.path)
 	if err != nil {
-		return nil
+		return transcript.Tail{}
 	}
 	if c.entries == nil {
 		c.entries = map[string]contextEntry{}
 	}
-	c.entries[sessionID] = contextEntry{path: e.path, size: fi.Size(), mod: fi.ModTime(), ctx: ctx}
-	return ctx
+	c.entries[sessionID] = contextEntry{path: e.path, size: fi.Size(), mod: fi.ModTime(), tail: tail}
+	return tail
 }
 
 // keep forgets every session not in ids.

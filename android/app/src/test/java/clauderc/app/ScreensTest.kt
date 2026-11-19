@@ -18,6 +18,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.chat.ChatActions
 import clauderc.app.chat.ChatScreen
@@ -112,8 +118,12 @@ class ScreensTest {
     private var style by mutableStateOf(UiStyle.Clear)
     private var started = false
 
-    /** [after] is how long the page runs before the shot; [fresh] starts it anew instead of reusing the last shot's state. */
-    private fun shot(name: String, isDark: Boolean = false, nav: Int? = null, look: UiStyle = UiStyle.Clear, after: Long = 1_000, fresh: Boolean = false, body: @Composable () -> Unit) {
+    /**
+     * [after] is how long the page runs before the shot; [fresh] starts it anew instead of reusing the last
+     * shot's state. [open], when given, then runs (a tap that opens a sheet, say) and the shot lays the
+     * windows of sheets and dialogs over the page.
+     */
+    private fun shot(name: String, isDark: Boolean = false, nav: Int? = null, look: UiStyle = UiStyle.Clear, after: Long = 1_000, fresh: Boolean = false, open: (() -> Unit)? = null, body: @Composable () -> Unit) {
         dark = isDark
         style = look
         content = {
@@ -138,9 +148,44 @@ class ScreensTest {
         }
         compose.waitForIdle()
         compose.mainClock.advanceTimeBy(after)
-        val bitmap = compose.onNodeWithTag("screen").captureToImage().asAndroidBitmap()
+        val bitmap = if (open == null) {
+            compose.onNodeWithTag("screen").captureToImage().asAndroidBitmap()
+        } else {
+            open()
+            // A sheet's window lays out on Robolectric's looper and animates on the test clock: step both.
+            repeat(20) {
+                org.robolectric.shadows.ShadowLooper.idleMainLooper(50, java.util.concurrent.TimeUnit.MILLISECONDS)
+                compose.mainClock.advanceTimeBy(50)
+            }
+            compose.waitForIdle()
+            layered()
+        }
         out!!.mkdirs()
         File(out, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    /**
+     * The page with the windows of open sheets and dialogs drawn over it where they sit on the screen,
+     * dimmed behind as the window asks. Robolectric's captureToImage of such a window gives back the
+     * page, so their views draw themselves.
+     */
+    private fun layered(): Bitmap {
+        val page = compose.onNodeWithTag("screen").captureToImage().asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = android.graphics.Canvas(page)
+        org.robolectric.shadows.ShadowDialog.getShownDialogs().filter { it.isShowing }.forEach { d ->
+            val w = d.window ?: return@forEach
+            if (w.attributes.flags and android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND != 0) {
+                canvas.drawColor(android.graphics.Color.argb((w.attributes.dimAmount * 255).toInt(), 0, 0, 0))
+            }
+            val v = w.decorView
+            val img = Bitmap.createBitmap(v.width, v.height, Bitmap.Config.ARGB_8888)
+            v.draw(android.graphics.Canvas(img))
+            // Robolectric leaves every window at the top left; place it by its gravity as the device would.
+            val r = android.graphics.Rect()
+            android.view.Gravity.apply(w.attributes.gravity, v.width, v.height, android.graphics.Rect(0, 0, page.width, page.height), r)
+            canvas.drawBitmap(img, r.left.toFloat(), r.top.toFloat(), null)
+        }
+        return page
     }
 
     private val log: List<Commit> by lazy {
@@ -341,6 +386,151 @@ class ScreensTest {
         )
         shot("14-term-panel") { clauderc.app.chat.TerminalScreen(term.copy(screen = mcp), onBack = {}, onKey = {}) }
         shot("14-term-ended") { clauderc.app.chat.TerminalScreen(term.copy(session = readme.copy(state = SessionState.Stopped)), onBack = {}, onKey = {}) }
+    }
+
+    /**
+     * Round 5 items 7 and 8 as in the demo's 「打开会话列表」: clauderc-app with its branch, the worktree
+     * session and the fork under 「clauderc 协议」, the rows narrowed to dev, the forks folded, the branch
+     * sheet, and the question before switching relay-svc while 「修复重连」 works there.
+     */
+    @Test fun forksAndBranches() {
+        compose.mainClock.autoAdvance = false
+        val app = "/Users/me/github/clauderc-app"
+        val relaySvc = "/Users/me/github/relay-svc"
+        val known = mapOf(
+            app to clauderc.app.protocol.GitBranchesResponse("dev", listOf("dev", "main", "feat-tools", "worktree-tools-view")),
+            relaySvc to clauderc.app.protocol.GitBranchesResponse("fix-reconnect", listOf("fix-reconnect", "main")),
+            "/Users/me/github/infra" to clauderc.app.protocol.GitBranchesResponse("main", listOf("main")),
+        )
+        val groups = groupSessions(clauderc.app.testing.branchSessions, mapOf("api.anthropic.com" to "官方")).map { it.copy(branches = known) }
+        val list = SessionsUiState(machine("m-1", "工作室 Mac mini"), groups)
+        fun withDefault(change: (clauderc.app.sessions.SessionGroup) -> clauderc.app.sessions.SessionGroup) =
+            list.copy(groups = groups.map { if (it.profile.id == "default") change(it) else it })
+        val filtered = withDefault { it.copy(branchFilters = mapOf(app to "dev")) }
+        val folded = withDefault { it.copy(foldedForks = setOf("s1")) }
+        val asking = list.copy(switchAsk = clauderc.app.sessions.BranchSwitch(relaySvc, "relay-svc", "main", "修复重连"))
+        for ((tail, isDark, s) in styleVariants) {
+            shot("16-sessions-forks$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(list, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("16-sessions-filtered$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(filtered, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("16-sessions-fork-folded$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(folded, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot(
+                "16-branch-sheet$tail", isDark, nav = 1, look = s, fresh = true,
+                open = { compose.onNode(androidx.compose.ui.test.hasText("dev") and androidx.compose.ui.test.hasClickAction()).performClick() },
+            ) { SessionsScreen(list, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("16-switch-busy$tail", isDark, nav = 1, look = s, fresh = true, open = {}) { SessionsScreen(asking, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+        }
+    }
+
+    /**
+     * Round 5 items 9 and 11 as in the demo's 「自动演示一遍」 and 「新建到 new-repo」: a draft in place of
+     * 周报整理's second line and back in its composer, and the sheet for a directory Claude Code does not
+     * trust yet, before and while it trusts.
+     */
+    @Test fun draftsAndTrust() {
+        compose.mainClock.autoAdvance = false
+        val list = SessionsUiState(
+            machine("m-1", "工作室 Mac mini"), groupSessions(sampleSessions, mapOf("api.anthropic.com" to "官方")),
+            drafts = mapOf("s-idle" to "改一下标题"),
+        )
+        val chat = ChatUiState(
+            session = session("s-idle", "周报整理", SessionState.Idle, "default"), loading = false, model = "claude-opus-5-5", permissionMode = "default",
+            items = listOf(ChatItem(1, ItemKind.USER, text = "把这周的周报整理一下。"), ChatItem(2, ItemKind.ASSISTANT, text = "整理好了，按项目分了三段。")),
+            restore = clauderc.app.chat.Restore(1, "改一下标题"),
+        )
+        val dir = "/Users/me/github/new-repo"
+        val create = CreateUiState(
+            profileTitle = "默认", templateName = "clauderc 协议", dir = dir,
+            recent = listOf(dir, "/Users/me/github/SmallProjects/android/clauderc-app", "/Users/me/github/infra", "/Users/me/github/relay-svc", "/Users/me/notes", "/Users/me/github/site"),
+            untrusted = dir,
+        )
+        for ((tail, isDark, s) in styleVariants) {
+            shot("17-sessions-draft$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(list, {}, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("17-chat-draft$tail", isDark, look = s, fresh = true) { ChatScreen(chat, ChatActions()) }
+            shot("18-trust-sheet$tail", isDark, look = s, fresh = true, open = {}) { CreateSessionScreen(create, {}, {}, {}, {}, {}, {}, {}) }
+            shot("18-trust-busy$tail", isDark, look = s, fresh = true, open = {}) { CreateSessionScreen(create.copy(trusting = true), {}, {}, {}, {}, {}, {}, {}) }
+        }
+    }
+
+    /**
+     * Round 5 item 10, tool view A, as in the demo's 「打开示例会话」: five calls in a row as one line, a
+     * cut read on its own, a write and a test run as one line with the lines they added; then the five
+     * opened with one call opened into its box, and the cut read fetching its whole text.
+     */
+    @Test fun toolViewA() {
+        compose.mainClock.autoAdvance = false
+        fun numbered(lines: List<String>, total: Int = lines.size, cut: Boolean = false) =
+            ToolResult(lines.mapIndexed { i, l -> "${i + 1}\t$l" }.joinToString("\n"), lines = total, truncated = if (cut) true else null)
+        fun call(seq: Long, id: String, name: String, summary: String, input: Pair<String, String>, result: ToolResult) =
+            ChatItem(seq, ItemKind.TOOL, tool = ToolCall(id, name, summary, buildJsonObject { put(input.first, input.second) }, result))
+        val goMod = listOf("module clauderc", "", "go 1.27.3", "", "require (", "\tgithub.com/coder/websocket v1.8.13", "\tmodernc.org/sqlite v1.38.0", ")")
+        val rules = List(64) { listOf("# clauderc 开发规则", "", "用手机远程查看和操作目标机上的 claude 后台会话。", "", "## 目录结构", "")[it % 6] }
+        val design = listOf("# 设计：远程会话控制", "", "## D1 消息信封", "", "所有消息都包在同一个信封里：", "", "```json", "{ \"v\": 1, \"kind\": \"req\", \"id\": \"42\", \"method\": \"chat.open\" }", "```")
+        val items = listOf(
+            ChatItem(1, ItemKind.USER, text = "给 internal/protocol 加上消息信封的编解码，版本号不是 1 时返回错误。"),
+            ChatItem(2, ItemKind.ASSISTANT, text = "好的。我先看一下模块路径和现有目录。"),
+            call(3, "g1", "Grep", "搜索 Envelope", "pattern" to "Envelope", ToolResult("No files found")),
+            call(4, "r1", "Read", "读取 go.mod", "file_path" to "/p/go.mod", numbered(goMod)),
+            call(5, "r2", "Read", "读取 AGENTS.md", "file_path" to "/p/AGENTS.md", numbered(rules)),
+            call(6, "b1", "Bash", "运行 ls internal/protocol", "command" to "ls internal/protocol", ToolResult("")),
+            call(7, "b2", "Bash", "运行 go list ./...", "command" to "go list ./...", ToolResult("clauderc/cmd/agent\nclauderc/cmd/relay")),
+            ChatItem(8, ItemKind.ASSISTANT, text = "目录还是空的。协议约定写在 design.md 里，我先对一下。"),
+            call(9, "d1", "Read", "读取 design.md", "file_path" to "/p/design.md", numbered(design, 182, cut = true)),
+            ChatItem(10, ItemKind.ASSISTANT, text = "我新建 `envelope.go`，定义 `Envelope` 和 `Encode`、`Decode`，`v` 不等于 1 时返回 `ErrVersion`。"),
+            call(11, "w1", "Write", "写入 envelope.go", "file_path" to "/p/envelope.go", ToolResult("File created successfully", patch = listOf(Hunk(0, 0, 1, envelopeGo.size, envelopeGo.map { "+$it" })))),
+            call(12, "b3", "Bash", "运行 go test ./internal/protocol/...", "command" to "go test ./internal/protocol/...", ToolResult("--- PASS: TestEnvelopeRoundTrip (0.00s)\nok  \tclauderc/internal/protocol\t0.412s")),
+            ChatItem(13, ItemKind.ASSISTANT, text = "测试通过，覆盖了 req、res、evt 三种消息的往返编解码。"),
+        )
+        val chat = ChatUiState(
+            session = session("s1", "clauderc 协议", SessionState.Idle, "default", context = SessionContext(254_185, 1_000_000)), loading = false, items = items,
+            model = "claude-opus-5-5", permissionMode = "default",
+        )
+        val fetching = chat.copy(items = items.take(9), fetchingResults = setOf("d1"))
+        for ((tail, isDark, s) in styleVariants) {
+            shot("19-tools-folded$tail", isDark, look = s, fresh = true) { ChatScreen(chat, ChatActions()) }
+            shot(
+                "19-tools-call$tail", isDark, look = s, fresh = true,
+                open = {
+                    compose.onAllNodesWithTag("toolGroup")[0].performClick()
+                    compose.mainClock.advanceTimeBy(600)
+                    compose.onNodeWithText("AGENTS.md").performClick()
+                },
+            ) { ChatScreen(chat.copy(items = items.take(8)), ChatActions()) }
+            shot("19-tools-fetching$tail", isDark, look = s, fresh = true, open = { compose.onNodeWithText("design.md").performClick() }) { ChatScreen(fetching, ChatActions()) }
+        }
+    }
+
+    /** Round 5 item 13: git's 「最近的目录」 with eight directories, its outline only along the sheet's edge. */
+    @Test fun recentDirsSheet() {
+        compose.mainClock.autoAdvance = false
+        val dirs = listOf(
+            "/Users/me/github/TEST/QA", "/Users/me/github/TEST/STUDY", "/Users/me/github/SmallProjects/android/clauderc-app",
+            "/Users/me/homework/machine-learning", "/Users/me/homework/思政报告", "/Users/me/homework/physics-experiment",
+            "/Users/me/homework/cry-liquid", "/Users/me/notes",
+        )
+        for ((tail, isDark, s) in styleVariants) {
+            shot("21-recent-dirs$tail", isDark, nav = 2, look = s, fresh = true, open = { compose.onAllNodesWithText("选择目录")[0].performClick() }) {
+                GitScreen(GitUiState(dirs = dirs), GitActions())
+            }
+        }
+    }
+
+    /** Round 5 item 12: 设置's 「动画」 group with 「总是播放加载动画」 off and on, scrolled into view. */
+    @Test fun animationSwitch() {
+        compose.mainClock.autoAdvance = false
+        for ((tail, isDark, s) in styleVariants) for (on in listOf(false, true)) {
+            val look = Appearance(s, ThemeMode.Light, AccentChoice.Blue)
+            shot(
+                "20-settings-animation-${if (on) "on" else "off"}$tail", isDark, nav = 3, look = s, fresh = true,
+                // Swiped to the end, clear of the nav bar. The scroll animates: let the clock run for it, or it never ends with the clock held.
+                open = {
+                    compose.mainClock.autoAdvance = true
+                    repeat(2) { compose.onNodeWithTag("screen").performTouchInput { swipeUp() } }
+                    compose.mainClock.autoAdvance = false
+                },
+            ) {
+                SettingsScreen(look, Color(0xFF007AFF), wallpaperAvailable = true, onStyle = { _, _ -> }, onMode = { _, _ -> }, onAccent = { _, _ -> }, alwaysLoading = on)
+            }
+        }
     }
 
     /**

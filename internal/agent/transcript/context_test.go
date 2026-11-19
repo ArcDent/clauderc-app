@@ -89,3 +89,19 @@ func TestContextOfLooksFurtherBehindLongLines(t *testing.T) {
 		t.Errorf("ContextOf = %+v, %v", got, err)
 	}
 }
+func TestForkSourceText(t *testing.T) {
+	marker := func(who string) string {
+		return "<task-notification>\n<fork-source>\nThis session began as a fork (copy) of another session that is still running: " +
+			who + " The conversation up to 2026-11-19T00:26:00.224Z is shared history with it.\n</fork-source>\n</task-notification>"
+	}
+	for _, tc := range []struct{ who, want string }{
+		{"a session whose self-reported name is 'repo work'.", "以上来自「repo work」"},
+		{"a session whose self-reported name is 'it's done'.", "以上来自「it's done」"},
+		{"a session whose self-reported name is ''.", "以上来自另一个会话"},
+		{"an unnamed session.", "以上来自另一个会话"},
+	} {
+		if got := taskNotificationText(marker(tc.who)); got != tc.want {
+			t.Errorf("%q: got %q, want %q", tc.who, got, tc.want)
+		}
+	}
+}

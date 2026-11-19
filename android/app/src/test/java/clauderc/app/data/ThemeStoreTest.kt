@@ -36,6 +36,20 @@ class ThemeStoreTest {
         assertEquals(Appearance(UiStyle.Grid, ThemeMode.Dark, AccentChoice.Green), second.appearance.first())
     }
 
+    /** 「总是播放加载动画」 starts off and stays on after a fresh store on the same file. */
+    @Test fun alwaysPlayLoadingStartsOffAndIsKept() = runTest {
+        val file = File(tmp.root, "animation.preferences_pb")
+        val job = Job()
+        val first = ThemeStore(PreferenceDataStoreFactory.create(scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + job), produceFile = { file }))
+        assertEquals(false, first.alwaysLoading.first())
+        first.setAlwaysLoading(true)
+        job.cancelAndJoin()
+
+        val second = ThemeStore(PreferenceDataStoreFactory.create(scope = backgroundScope, produceFile = { file }))
+        assertEquals(true, second.alwaysLoading.first())
+        assertEquals("the look is untouched", Appearance(), second.appearance.first())
+    }
+
     /** Phones that picked a style before 清玻 / 格栅 / 贴纸 keep the closest one: 极简 is 清玻, 卡片 is 贴纸. */
     @Test fun readsTheOldStyleNames() = runTest {
         for ((stored, style) in listOf("Minimal" to UiStyle.Clear, "Card" to UiStyle.Sticker)) {

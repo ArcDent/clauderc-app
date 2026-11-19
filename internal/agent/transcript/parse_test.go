@@ -394,7 +394,7 @@ more detail
 	})
 
 	t.Run("no summary", func(t *testing.T) {
-		line := `{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\n<fork-source>x</fork-source>\n</task-notification>"}}`
+		line := `{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\n<other-event>x</other-event>\n</task-notification>"}}`
 		got := notices(parseLines(t, line))
 		if len(got) != 1 || got[0] != "|后台任务通知" {
 			t.Fatalf("notices %q, want 后台任务通知", got)

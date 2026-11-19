@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,6 +39,11 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -77,23 +81,14 @@ fun ClaudercSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> 
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         // 清玻's glass tint over the sheet colour: the sheet sits in its own window, where the page behind cannot be blurred.
-        modifier = when (ui) {
-            UiStyle.Sticker -> Modifier.border(2.dp, c.ink, shape)
-            UiStyle.Clear -> Modifier.topHighlight(c.rim)
-            UiStyle.Grid -> Modifier
-        },
         containerColor = if (ui == UiStyle.Clear) c.pane.compositeOver(c.sheet) else c.sheet,
         contentColor = c.fg,
         scrimColor = c.scrim,
         shape = shape,
-        dragHandle = {
-            Box(
-                Modifier
-                    .padding(top = Clauderc.spacing.sp3, bottom = Clauderc.spacing.sp5)
-                    .size(32.dp, 4.dp)
-                    .background(c.surface2, RoundedCornerShape(2.dp)),
-            )
-        },
+        // The sheet's outline is drawn from its handle, which moves with the sheet. Drawn from the sheet's
+        // modifier it would stay where the sheet starts: ModalBottomSheet applies that modifier before it
+        // moves the sheet into place, so the outline's lower edge ran across the list.
+        dragHandle = { SheetHandle(corner) },
     ) {
         Column(
             Modifier
@@ -104,6 +99,49 @@ fun ClaudercSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> 
         ) {
             CompositionLocalProvider(LocalOverlayActions provides true) { content() }
         }
+    }
+}
+
+/**
+ * The sheet's short handle, as wide as the sheet so it can draw the sheet's edge: 贴纸's 2dp ink outline
+ * along the top and down both sides with no bottom edge (border-bottom: 0), clipped by the sheet's own
+ * shape where it ends; 清玻's 1dp rim along the top.
+ */
+@Composable
+private fun SheetHandle(corner: Dp) {
+    val c = Clauderc.colors
+    val ui = Clauderc.style
+    Box(
+        Modifier.fillMaxWidth().drawBehind {
+            when (ui) {
+                UiStyle.Sticker -> {
+                    val w = 2.dp.toPx()
+                    val half = w / 2
+                    val r = corner.toPx() - half
+                    // Far past the handle: the sheet clips the sides where it ends.
+                    val far = size.height + 100_000f
+                    val edge = Path().apply {
+                        moveTo(half, far)
+                        lineTo(half, half + r)
+                        arcTo(Rect(half, half, half + 2 * r, half + 2 * r), 180f, 90f, false)
+                        lineTo(size.width - half - r, half)
+                        arcTo(Rect(size.width - half - 2 * r, half, size.width - half, half + 2 * r), 270f, 90f, false)
+                        lineTo(size.width - half, far)
+                    }
+                    drawPath(edge, c.ink, style = Stroke(w))
+                }
+                UiStyle.Clear -> drawRect(c.rim, size = Size(size.width, 1.dp.toPx()))
+                UiStyle.Grid -> Unit
+            }
+        },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .padding(top = Clauderc.spacing.sp3, bottom = Clauderc.spacing.sp5)
+                .size(32.dp, 4.dp)
+                .background(c.surface2, RoundedCornerShape(2.dp)),
+        )
     }
 }
 
@@ -149,12 +187,13 @@ fun MenuItem(
     danger: Boolean = false,
     checked: Boolean = false,
     enabled: Boolean = true,
+    modifier: Modifier = Modifier,
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val fg = if (danger) c.danger else c.fg
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)

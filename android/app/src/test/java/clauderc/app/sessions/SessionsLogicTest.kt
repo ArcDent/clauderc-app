@@ -4,8 +4,12 @@ import clauderc.app.data.Fleet
 import clauderc.app.machines.MachinesViewModel
 import clauderc.app.net.ConnectionState
 import clauderc.app.net.RelayLink
+import clauderc.app.protocol.DirBusyResponse
+import clauderc.app.protocol.DirRequest
 import clauderc.app.protocol.DirsRecentResponse
 import clauderc.app.protocol.ErrorCode
+import clauderc.app.protocol.GitBranchesResponse
+import clauderc.app.protocol.GitSwitchRequest
 import clauderc.app.protocol.Machine
 import clauderc.app.protocol.MachinesListResponse
 import clauderc.app.protocol.Method
@@ -17,6 +21,7 @@ import clauderc.app.protocol.SessionState
 import clauderc.app.protocol.UsageResponse
 import clauderc.app.protocol.UsageWindow
 import clauderc.app.testing.FakeRelay
+import clauderc.app.testing.branchSessions
 import clauderc.app.testing.decode
 import clauderc.app.testing.eventually
 import clauderc.app.testing.machine
@@ -32,6 +37,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -243,6 +249,132 @@ class SessionsLogicTest {
         assertTrue(store.collapsedDirs("m-2").first().isEmpty())
         store.setDirCollapsed("m-1", "default", "/p/app", false)
         eventually { store.collapsedDirs("m-1").first { it.size == 1 } }
+    }
+
+    @Test fun worktreeSessionsAreListedUnderTheirOriginalDirectory() {
+        val dirs = groupSessions(branchSessions, emptyMap())[0].dirs
+        assertEquals(listOf("/Users/me/github/clauderc-app", "/Users/me/github/relay-svc"), dirs.map { it.cwd })
+        assertEquals(listOf("s1", "s12", "s9", "s13"), dirs[0].sessions.map { it.id })
+        assertEquals("clauderc-app", dirs[0].title)
+        // An older agent sends no dir: the session stays under its own working directory.
+        assertEquals(listOf("/w/a"), dirGroups(listOf(session("x", "x", SessionState.Idle, "default", cwd = "/w/a"))).map { it.cwd })
+    }
+
+    @Test fun forksFollowTheirSourceAndStandAloneWithoutIt() {
+        val (app, relay) = groupSessions(branchSessions, emptyMap())[0].dirs
+        assertEquals("the fork leaves its own place", listOf("s1", "s12", "s9"), app.rows.map { it.session.id })
+        assertEquals(listOf("s13"), app.rows[0].forks.map { it.id })
+        assertEquals("the source of s14 is not listed", listOf("s10", "s2", "s14"), relay.rows.map { it.session.id })
+        assertTrue(relay.rows.all { it.forks.isEmpty() })
+        // The title is Claude Code's own name, with nothing added.
+        assertEquals("clauderc 协议 ⑂ 补错误码测试", display(app.rows[0].forks[0]))
+        assertEquals("排查日志 ⑂ 只看 relay 部分", display(relay.rows[2].session))
+    }
+
+    @Test fun aForkOfAForkHangsUnderTheFirstSessionOfTheChain() {
+        val rows = forkTree(
+            listOf(
+                session("c", "c", SessionState.Idle, "default").copy(forkOf = "b"),
+                session("a", "a", SessionState.Idle, "default"),
+                session("b", "b", SessionState.Idle, "default").copy(forkOf = "a"),
+                session("x", "x", SessionState.Idle, "default").copy(forkOf = "y"),
+                session("y", "y", SessionState.Idle, "default").copy(forkOf = "x"),
+            ),
+            folded = setOf("a", "x"),
+        )
+        assertEquals(listOf("a", "x", "y"), rows.map { it.session.id })
+        assertEquals(listOf("c", "b"), rows[0].forks.map { it.id })
+        assertTrue(rows[0].forksCollapsed)
+        assertFalse("a session without forks has nothing to fold", rows[1].forksCollapsed)
+    }
+
+    @Test fun foldedForksAreKeptPerMachine() = runTest(dispatcher) {
+        val store = profileNames(tmp.root, scope)
+        store.setForksCollapsed("m-1", "s1", true)
+        eventually { store.collapsedForks("m-1").first { it.isNotEmpty() } }
+        assertEquals(setOf("s1"), store.collapsedForks("m-1").first())
+        assertTrue(store.collapsedForks("m-2").first().isEmpty())
+        val group = groupSessions(branchSessions, emptyMap())[0].copy(foldedForks = store.collapsedForks("m-1").first())
+        assertTrue(group.dirs.first { it.title == "clauderc-app" }.rows[0].forksCollapsed)
+        store.setForksCollapsed("m-1", "s1", false)
+        eventually { store.collapsedForks("m-1").first { it.isEmpty() } }
+    }
+
+    /** The checkout is on main; one older session last wrote on dev, and a worktree session works on dev. */
+    private val twoBranches = SessionList(
+        listOf(
+            session("m1", "改标题", SessionState.Idle, "default", minutesAgo = 1, cwd = "/p/app").copy(branch = "main"),
+            session("d1", "旧分支上的", SessionState.Idle, "default", minutesAgo = 30, cwd = "/p/app").copy(branch = "dev"),
+            session("w1", "worktree 里的", SessionState.Working, "default", minutesAgo = 3, cwd = "/p/app/.claude/worktrees/wt")
+                .copy(dir = "/p/app", branch = "dev", worktree = clauderc.app.protocol.SessionWorktree("wt", "/p/app/.claude/worktrees/wt")),
+            session("f1", "改标题 ⑂ 再改一版", SessionState.Idle, "default", minutesAgo = 5, cwd = "/p/app").copy(branch = "main", forkOf = "m1"),
+        ),
+        sampleSessions.profiles,
+    )
+
+    private fun appDir(vm: SessionsViewModel) = vm.state.value.groups!![0].dirs.single()
+
+    @Test fun choosingABranchKeepsItsSessionsWorktreesIncludedUntilAllBranches() = runTest(dispatcher) {
+        relay.respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), twoBranches)
+        relay.respond(Method.GIT_BRANCHES, GitBranchesResponse.serializer(), GitBranchesResponse("main", listOf("main", "dev")))
+        val fleet = Fleet(relay, scope)
+        val store = profileNames(tmp.root, scope)
+        val vm = SessionsViewModel("m-1", fleet, relay, store)
+        withTimeout(5_000) { vm.state.first { it.groups != null && appDir(vm).branches != null } }
+        assertEquals("the directory reads its branches once", listOf("/p/app"), relay.sent(Method.GIT_BRANCHES).map { it.decode(DirRequest.serializer()).dir })
+        assertEquals("main", appDir(vm).branch)
+
+        vm.filterBranch(vm.state.value.groups!![0], appDir(vm), "dev")
+        assertEquals(listOf("w1", "d1"), appDir(vm).rows.map { it.session.id })
+        assertEquals("the title shows the chosen branch", "dev", appDir(vm).branch)
+        assertEquals("main", appDir(vm).currentBranch)
+
+        vm.filterBranch(vm.state.value.groups!![0], appDir(vm), null)
+        assertEquals(listOf("m1", "w1", "d1"), appDir(vm).rows.map { it.session.id })
+        assertEquals(listOf("f1"), appDir(vm).rows[0].forks.map { it.id })
+
+        // The filter lives in the view model only: a new one, as after a restart, shows every branch.
+        vm.filterBranch(vm.state.value.groups!![0], appDir(vm), "dev")
+        val again = SessionsViewModel("m-1", fleet, relay, store)
+        withTimeout(5_000) { again.state.first { it.groups != null } }
+        assertNull(appDir(again).branchFilter)
+        assertEquals(4, appDir(again).shown.size)
+    }
+
+    @Test fun rowsNameTheirBranchOnlyWhenTheCheckoutSpansBranches() {
+        val (app, relay) = groupSessions(branchSessions, emptyMap())[0].dirs
+        assertFalse("clauderc-app's own sessions are all on dev; the worktree does not count", app.rowsShowBranch)
+        assertTrue("relay-svc has fix-reconnect and main", relay.rowsShowBranch)
+        assertEquals("before git answers, the latest session in the checkout gives the branch", "fix-reconnect", relay.currentBranch)
+        assertNull(dirGroups(listOf(session("x", "x", SessionState.Idle, "default", cwd = "/tmp/x"))).single().branch)
+    }
+
+    @Test fun switchingRunsGitSwitchAndAsksFirstWhileASessionWorks() = runTest(dispatcher) {
+        relay.respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), twoBranches)
+        relay.respond(Method.DIR_BUSY, DirBusyResponse.serializer(), DirBusyResponse(false))
+        val vm = SessionsViewModel("m-1", Fleet(relay, scope), relay, profileNames(tmp.root, scope))
+        withTimeout(5_000) { vm.state.first { it.groups != null } }
+        val messages = mutableListOf<String>()
+        val collect = scope.launch { vm.messages.collect { messages += it } }
+
+        vm.switchBranch(appDir(vm), "dev")
+        assertEquals(listOf(GitSwitchRequest("/p/app", "dev")), relay.sent(Method.GIT_SWITCH).map { it.decode(GitSwitchRequest.serializer()) })
+        assertEquals(listOf("已切换到 dev"), messages)
+        assertNull(vm.state.value.switchAsk)
+
+        relay.respond(Method.DIR_BUSY, DirBusyResponse.serializer(), DirBusyResponse(true))
+        vm.switchBranch(appDir(vm), "dev")
+        assertEquals("not switched yet", 1, relay.sent(Method.GIT_SWITCH).size)
+        assertEquals(BranchSwitch("/p/app", "app", "dev", "worktree 里的"), vm.state.value.switchAsk)
+        vm.dismissSwitch()
+        assertNull(vm.state.value.switchAsk)
+        assertEquals(1, relay.sent(Method.GIT_SWITCH).size)
+
+        vm.switchBranch(appDir(vm), "dev")
+        vm.confirmSwitch()
+        assertEquals(2, relay.sent(Method.GIT_SWITCH).size)
+        assertNull(vm.state.value.switchAsk)
+        collect.cancel()
     }
 
     @Test fun usageIsReadWhenThePageOpensAndOnRefresh() = runTest(dispatcher) {

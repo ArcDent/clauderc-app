@@ -83,6 +83,9 @@ const (
 	CodeNotDelivered ErrorCode = "notDelivered"
 	// CodeDirNotFound: the given directory does not exist.
 	CodeDirNotFound ErrorCode = "dirNotFound"
+	// CodeNotTrusted: Claude Code has not been told to trust the directory;
+	// session.create with trust set says yes to its prompt first.
+	CodeNotTrusted ErrorCode = "notTrusted"
 	// CodeNotGitRepo: the directory is not inside a git repository.
 	CodeNotGitRepo ErrorCode = "notGitRepo"
 	// CodeNeedsConfirmation: the user must confirm before retrying, e.g.

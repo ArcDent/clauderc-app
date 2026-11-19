@@ -91,19 +91,12 @@ object Motion {
     /** The tool row chevron and the group fold arrow turn like the mockup's transform transition. */
     fun <T> turn(): FiniteAnimationSpec<T> = tween(t.durS, easing = t.easeEmph)
 
-    /** A long tool detail folding back after 「收起」 moves on screen as a whole, so it starts and ends slow (durL). */
-    fun <T> settle(): FiniteAnimationSpec<T> = tween(t.durL, easing = t.easeReveal)
-
     /**
      * Rows newly shown in a tool detail fade in from the top down, each 16ms after the one above and at
      * most 12 apart; this is row [i]'s progress [millis] after they started (demo.html fadeRows).
      */
     fun rowIn(i: Int, millis: Float): Float = t.easeEmph.transform(((millis - minOf(i, 12) * 16) / t.durM).coerceIn(0f, 1f))
     val rowsInMillis: Int get() = t.durM + 12 * 16
-
-    /** On 「收起」 the extra rows fade out from the bottom up, each 8ms after the one below and at most 6 apart. */
-    fun rowOut(j: Int, millis: Float): Float = t.easeEmphIn.transform(((millis - minOf(j, 6) * 8) / t.durS).coerceIn(0f, 1f))
-    val rowsOutMillis: Int get() = t.durS + 6 * 8
 
     /**
      * The nav bar's indicator keeps pace with the tab swap: the edge on the side of travel leads,

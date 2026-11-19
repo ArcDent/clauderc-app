@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.datastore.preferences.preferencesDataStore
 import clauderc.app.chat.ChatCache
 import clauderc.app.data.CredentialStore
+import clauderc.app.data.DraftStore
 import clauderc.app.data.Fleet
 import clauderc.app.data.KeystoreCipher
 import clauderc.app.data.ProfileNameStore
@@ -14,6 +15,7 @@ import clauderc.app.net.RelayConnection
 import clauderc.app.net.RelayHub
 import clauderc.app.pair.OkHttpPairingApi
 import clauderc.app.pair.PairingApi
+import clauderc.app.ui.components.LoadingFirsts
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +30,7 @@ import okhttp3.OkHttpClient
 
 private val Context.credentialData by preferencesDataStore("credential")
 private val Context.settingsData by preferencesDataStore("settings")
+private val Context.draftData by preferencesDataStore("drafts")
 
 enum class MainTab { Machines, Sessions, Git, Settings }
 
@@ -67,11 +70,15 @@ class AppContainer(context: Context) {
         }
     }
     val profileNames = ProfileNameStore(context.settingsData)
+    val drafts = DraftStore(context.draftData)
     val theme = ThemeStore(context.settingsData)
     val pairing: PairingApi = OkHttpPairingApi(http)
     val fleet = Fleet(connection, scope)
     val selection = Selection()
     val chatCache = ChatCache()
+
+    /** The places that showed their first load since this launch, for 「总是播放加载动画」. */
+    val loadingFirsts = LoadingFirsts()
 
     private val _notices = Channel<String>(Channel.BUFFERED)
 

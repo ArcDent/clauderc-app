@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-032",
+  "method": "session.create",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"profileId": "default", "cwd": "/Users/me/code/new-repo", "prompt": "看一下这个仓库", "trust": true}
+}

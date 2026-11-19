@@ -2,9 +2,14 @@ package transcript
 
 import (
 	"bytes"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"reflect"
 	"sort"
+	"strings"
 	"sync"
 
 	"clauderc/internal/protocol"
@@ -86,10 +91,48 @@ func Open(path string) (*Follower, error) {
 }
 
 // Poll reads what was appended since the last call and returns the items
-// it added or changed, in seq order.
+// it added or changed, in seq order. A transcript that moved to another
+// project directory is followed there (see relocate).
 func (f *Follower) Poll() ([]Item, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	items, err := f.poll()
+	if errors.Is(err, fs.ErrNotExist) {
+		return f.relocate(err)
+	}
+	return items, err
+}
+
+// relocate follows a transcript Claude Code moved to the project directory
+// of a new working directory, as it does when the session enters a
+// worktree (2.1.327): the file is looked up again by its session id and
+// read from the start, and the items that are new or differ from those
+// read before come back. gone is returned when no other file is found.
+func (f *Follower) relocate(gone error) ([]Item, error) {
+	sessionID := strings.TrimSuffix(filepath.Base(f.tail.path), ".jsonl")
+	claudeDir := filepath.Dir(filepath.Dir(filepath.Dir(f.tail.path)))
+	path, err := Find(claudeDir, sessionID)
+	if err != nil || path == f.tail.path {
+		return nil, gone
+	}
+	g := &Follower{t: newTranscript(), tail: tail{path: path}, dir: subagentsDir(path)}
+	if _, err := g.poll(); err != nil {
+		return nil, err
+	}
+	var items []Item
+	for i, it := range g.t.items {
+		if i >= len(f.t.items) || !reflect.DeepEqual(it, f.t.items[i]) {
+			items = append(items, it)
+		}
+	}
+	g.tail.reads += f.tail.reads
+	g.t.agents.meta.reads += f.t.agents.meta.reads
+	f.t, f.tail, f.dir = g.t, g.tail, g.dir
+	return items, nil
+}
+
+// poll is Poll without the lock and the move.
+func (f *Follower) poll() ([]Item, error) {
 	lines, err := f.tail.lines()
 	if err != nil {
 		return nil, err

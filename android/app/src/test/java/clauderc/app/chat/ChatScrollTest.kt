@@ -49,6 +49,9 @@ class ChatScrollTest {
     )
     private var bottomPadding = 0.dp
 
+    /** The tool calls whose whole text the page asked for. */
+    private val fetched = mutableListOf<String>()
+
     /**
      * These check the list's own scrolling, so they run in 格栅, which stacks the bar and the input
      * above and below the list: its edges are where the messages start and end. 清玻 floats both over
@@ -59,7 +62,7 @@ class ChatScrollTest {
         compose.setContent {
             ClaudercTheme(darkTheme = false, style = style) {
                 bottomPadding = Clauderc.spacing.sp5
-                ChatScreen(state, ChatActions())
+                ChatScreen(state, ChatActions(onToolOutput = { fetched += it }))
             }
         }
         compose.mainClock.advanceTimeBy(1_000)
@@ -181,28 +184,24 @@ class ChatScrollTest {
         compose.onNodeWithText(head).performClick()
         val (shut, _) = framesWhile(head, 40, "读完了")
         shut.forEachIndexed { i, t -> assertEquals("folding, frame ${i + 1}: the head moved", before, t, 1f) }
-        compose.onNodeWithText("└ f4.go").assertExists()
+        compose.onNodeWithText("f4.go").assertDoesNotExist()
     }
 
-    @Test fun expandingALongReadInFullKeepsTheRowInPlace() {
+    @Test fun openingALongReadKeepsTheRowInPlace() {
         withRead(300)
         show()
-        compose.onNodeWithText("design.md").performClick()
-        compose.mainClock.advanceTimeBy(1_000)
         val before = bounds("design.md").top
-        compose.onNodeWithText("展开全部 · 共 300 行").performClick()
+        compose.onNodeWithText("design.md").performClick()
         val (tops, _) = framesWhile("design.md", 40, "读完了")
         tops.forEachIndexed { i, t -> assertEquals("frame ${i + 1}: the tapped row moved", before, t, 1f) }
         compose.mainClock.advanceTimeBy(1_000)
         assertEquals("after the animation the row is where it was", before, bounds("design.md").top, 1f)
     }
 
-    @Test fun foldingALongReadInFullKeepsTheRowInPlace() {
+    @Test fun foldingALongReadKeepsTheRowInPlace() {
         withRead(300)
         show()
         compose.onNodeWithText("design.md").performClick()
-        compose.mainClock.advanceTimeBy(1_000)
-        compose.onNodeWithText("展开全部 · 共 300 行").performClick()
         compose.mainClock.advanceTimeBy(1_000)
         val before = bounds("design.md").top
         compose.onNodeWithText("design.md").performClick()
@@ -210,7 +209,7 @@ class ChatScrollTest {
         tops.forEachIndexed { i, t -> assertEquals("frame ${i + 1}: the tapped row moved", before, t, 1f) }
     }
 
-    @Test fun expandingACutReadInARunInFullKeepsTheRowInPlace() {
+    @Test fun openingACutReadInARunFetchesItsWholeTextAndKeepsTheRowInPlace() {
         fun logLines(n: Int) = (0 until n).joinToString("\n") { "${it + 1}\t2026-11-17T03:${"%02d".format(it / 60)}:${"%02d".format(it % 60)} INFO request id=r-${"%04d".format(it)} method=chat.items took=${it % 37}ms" }
         fun call(id: String, name: String, summary: String, result: ToolResult) = ToolCall(id, name, summary, JsonNull, result)
         val cut = ToolResult(logLines(120), lines = 601, truncated = true)
@@ -232,15 +231,15 @@ class ChatScrollTest {
         compose.mainClock.autoAdvance = true
         compose.onNodeWithTag("toolGroup").performClick()
         compose.onNodeWithText("big.log").performScrollTo().performClick()
-        compose.onNodeWithText("展开全部 · 共 601 行").performScrollTo()
+        // Opening the cut read asks for its whole text at once.
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
-        val before = bounds("big.log").top
-        compose.onNodeWithText("展开全部 · 共 601 行").performClick()
+        assertEquals(listOf("t3"), fetched)
         state = state.copy(fetchingResults = setOf("t3"))
         compose.mainClock.advanceTimeBy(500)
+        val before = bounds("big.log").top
         state = state.copy(fetchingResults = emptySet(), fullResults = mapOf("t3" to whole))
-        // The whole text is far taller than the screen: what is below the screen is added in one go at the end.
+        // The whole text swaps in inside the box, which keeps its height: the row stays where it is.
         val tops = List(40) {
             compose.mainClock.advanceTimeByFrame()
             compose.onAllNodesWithText("big.log").fetchSemanticsNodes().firstOrNull { it.layoutInfo.isPlaced }?.boundsInRoot?.top ?: Float.NaN

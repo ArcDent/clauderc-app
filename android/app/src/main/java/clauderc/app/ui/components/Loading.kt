@@ -20,6 +20,8 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -89,15 +91,39 @@ enum class LoadingArt {
 
 /** Loads shorter than this show no art: it would only flash. */
 const val LOADING_DELAY_MILLIS = 300L
+
+/** With 「总是播放加载动画」 on, a place's first load keeps its art up at least this long, however soon the data comes. */
+const val FIRST_LOAD_HOLD_MILLIS = 1500L
+
+/** The places that have shown their first load since the app started; one per [LoadingArt], each place having its own. */
+class LoadingFirsts {
+    private val played = mutableSetOf<LoadingArt>()
+
+    /** True the first time [art]'s place asks, false after. */
+    @Synchronized fun claim(art: LoadingArt): Boolean = played.add(art)
+}
+
+/**
+ * How the loading covers behave: with [always] on (设置 · 动画 · 总是播放加载动画) each place's first load
+ * since the app started is covered at once and held [FIRST_LOAD_HOLD_MILLIS]; after that, and with it
+ * off, only loads past [LOADING_DELAY_MILLIS] are.
+ */
+class LoadingPolicy(val always: Boolean = false, private val firsts: LoadingFirsts = LoadingFirsts()) {
+    /** Whether this load of [art]'s place is its first one to play; only counts while [always] is on. */
+    fun first(art: LoadingArt): Boolean = always && firsts.claim(art)
+}
+
+val LocalLoadingPolicy = staticCompositionLocalOf { LoadingPolicy() }
 private const val COVER_IN_MILLIS = 240
 private const val COVER_OUT_MILLIS = 380
 
 /**
  * Lays [art] over [content] once [loading] has lasted [LOADING_DELAY_MILLIS], [top] down from the top
- * so the bar above stays, and keeps the content out of sight while it loads. When loading ends the
- * art fades out growing to 1.12x and the content rises 14dp into place; a load that ended before
- * the art came up just shows the content. [splash] paints the page under the art, for the cover over
- * the whole app. [label] goes under the art, [title] into its text where it has some.
+ * so the bar above stays, and keeps the content out of sight while it loads; a place's first load
+ * under [LocalLoadingPolicy]'s 「总是播放加载动画」 is covered at once and for [FIRST_LOAD_HOLD_MILLIS] at
+ * least. When loading ends the art fades out growing to 1.12x and the content rises 14dp into place; a
+ * load that ended before the art came up just shows the content. [splash] paints the page under the
+ * art, for the cover over the whole app. [label] goes under the art, [title] into its text where it has some.
  */
 @Composable
 fun LoadingCover(
@@ -111,17 +137,22 @@ fun LoadingCover(
     content: @Composable () -> Unit,
 ) {
     val m = Clauderc.motion
+    val policy = LocalLoadingPolicy.current
     var covered by remember { mutableStateOf(false) }
     val cover = remember { Animatable(0f) }
     // Starts hidden when loading, so the page does not flash for the frame before the effect runs.
     val rise = remember { Animatable(if (loading) 0f else 1f) }
+    // The frame time a first load's art stays up until.
+    var holdUntil by remember { mutableLongStateOf(0L) }
     LaunchedEffect(loading) {
         if (loading) {
             rise.snapTo(0f)
-            delay(LOADING_DELAY_MILLIS)
+            if (policy.first(art)) holdUntil = withFrameMillis { it } + FIRST_LOAD_HOLD_MILLIS else delay(LOADING_DELAY_MILLIS)
             covered = true
             cover.animateTo(1f, tween(COVER_IN_MILLIS, easing = m.easeEmph))
         } else if (covered) {
+            val left = holdUntil - withFrameMillis { it }
+            if (left > 0) delay(left)
             launch { rise.animateTo(1f, tween(m.durM, delayMillis = 120, easing = m.easeEmph)) }
             cover.animateTo(0f, tween(COVER_OUT_MILLIS, easing = m.easeEmphIn))
             covered = false

@@ -112,10 +112,12 @@ fun TextAction(
     modifier: Modifier = Modifier,
     tone: TextTone = TextTone.Accent,
     enabled: Boolean = true,
+    /** Working on it: a spinner before the text and no taps; 贴纸 keeps the sticker's colours. */
+    busy: Boolean = false,
 ) {
     val c = Clauderc.colors
     val color = when {
-        !enabled -> c.fg3
+        !enabled || busy -> c.fg3
         tone == TextTone.Accent -> c.accent
         tone == TextTone.Quiet -> c.fg2
         tone == TextTone.Danger -> c.danger
@@ -136,11 +138,11 @@ fun TextAction(
                 .pressShrink(press)
                 .height(38.dp)
                 .sticker(bg, if (enabled) c.ink else c.fg3, 999.dp, drop = if (enabled) PushDepth else 0.dp, source = press)
-                .clickable(press, PressIndication(fg), enabled = enabled, role = Role.Button, onClick = onClick)
+                .clickable(press, PressIndication(fg), enabled = enabled && !busy, role = Role.Button, onClick = onClick)
                 .padding(horizontal = Clauderc.spacing.sp4),
             contentAlignment = Alignment.Center,
         ) {
-            Text(text, color = fg, fontSize = Clauderc.fontSizes.label, fontWeight = FontWeight.ExtraBold)
+            BusyLabel(text, fg, FontWeight.ExtraBold, busy)
         }
         return
     }
@@ -149,11 +151,20 @@ fun TextAction(
             .pressShrink(press)
             .height(40.dp)
             .clip(CircleShape)
-            .clickable(press, PressIndication(color), enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(press, PressIndication(color), enabled = enabled && !busy, role = Role.Button, onClick = onClick)
             .padding(horizontal = Clauderc.spacing.sp3),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, color = color, fontSize = Clauderc.fontSizes.label, fontWeight = FontWeight.Medium)
+        BusyLabel(text, color, FontWeight.Medium, busy)
+    }
+}
+
+/** A text button's label, after a 12dp spinner while [busy] (.tbtn:disabled with .spin). */
+@Composable
+private fun BusyLabel(text: String, color: Color, weight: FontWeight, busy: Boolean) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp2), verticalAlignment = Alignment.CenterVertically) {
+        if (busy) Spinner(size = 12.dp, color = color)
+        Text(text, color = color, fontSize = Clauderc.fontSizes.label, fontWeight = weight)
     }
 }
 

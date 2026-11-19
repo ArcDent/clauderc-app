@@ -8,6 +8,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
@@ -500,11 +503,14 @@ class ChatScreenTest {
         ),
     )
 
-    @Test fun anEditShowsItsDiffOpenInTheDiffColorsNumberedFromTheHunk() {
+    @Test fun anEditStartsFoldedAndOpensIntoItsDiffInTheDiffColorsNumberedFromTheHunk() {
         val c = showTools(edit)
-        // Open from the start, with the counts at the end of the row.
+        // Folded like every tool row, with the counts at the end of the row.
         compose.onNodeWithText("+1").assertIsDisplayed()
         compose.onNodeWithText("−1").assertIsDisplayed()
+        compose.onAllNodesWithTag("patchRow").assertCountEquals(0)
+        compose.onNodeWithText("envelope.go").performClick()
+        compose.waitForIdle()
         assertEquals(4, compose.onAllNodesWithTag("patchRow").fetchSemanticsNodes().size)
         // Line numbers: the context line and the deleted one from the old start, the added one from the new start.
         assertEquals(listOf("8", "9", "9", "10"), (0..3).map { i -> compose.onAllNodesWithTag("patchRow", useUnmergedTree = true)[i].onChildAt(0).fetchSemanticsNode().config[SemanticsProperties.Text].first().text })
@@ -517,6 +523,8 @@ class ChatScreenTest {
         val write = tool("toolu_W", "Write", "写入 errors.go", ToolResult("File created successfully at: errors.go", patch = listOf(Hunk(0, 0, 1, 3, listOf("+package protocol", "+", "+type Error struct{}")))))
         val c = showTools(write)
         compose.onNodeWithText("+3").assertIsDisplayed()
+        compose.onNodeWithText("errors.go").performClick()
+        compose.waitForIdle()
         assertEquals(3, compose.onAllNodesWithText("+", useUnmergedTree = true).fetchSemanticsNodes().size)
         (0..2).forEach { assertColor(c.addBg, rowColor(it), "row $it") }
     }
@@ -532,61 +540,106 @@ class ChatScreenTest {
         compose.onNodeWithText("hello", useUnmergedTree = true).assertIsDisplayed()
     }
 
-    @Test fun pastSixRowsOnly6ShowUntilExpandAllAndCollapseTakesThemBack() {
-        val write = tool("toolu_W", "Write", "写入 envelope.go", ToolResult(patch = listOf(Hunk(0, 0, 1, 20, List(20) { "+line ${it + 1}" }))))
+    @Test fun aLongResultOpensWholeInABoxThatScrollsInside() {
+        val write = tool("toolu_W", "Write", "写入 envelope.go", ToolResult(patch = listOf(Hunk(0, 0, 1, 300, List(300) { "+line ${it + 1}" }))))
         showTools(write)
-        compose.onAllNodesWithTag("patchRow").assertCountEquals(6)
-        compose.onNodeWithText("展开全部 · 共 20 行").performClick()
+        compose.onNodeWithText("envelope.go").performClick()
         compose.waitForIdle()
-        compose.onAllNodesWithTag("patchRow").assertCountEquals(20)
-        compose.onNodeWithText("收起").performScrollTo().performClick()
-        compose.waitForIdle()
-        compose.onAllNodesWithTag("patchRow").assertCountEquals(6)
-        compose.onNodeWithText("展开全部 · 共 20 行").assertIsDisplayed()
+        compose.onAllNodesWithTag("patchRow").assertCountEquals(300)
+        val box = compose.onNodeWithTag("toolBox")
+        assertTrue("the box stops at 232dp", box.fetchSemanticsNode().boundsInRoot.height <= 232 * compose.density.density + 1f)
+        compose.onNodeWithText("line 300", useUnmergedTree = true).assertIsNotDisplayed()
+        box.performScrollToNode(hasText("line 300"))
+        compose.onNodeWithText("line 300", useUnmergedTree = true).assertIsDisplayed()
+        assertEquals(0, compose.onAllNodes(hasText("展开全部", substring = true)).fetchSemanticsNodes().size)
+        assertEquals(0, compose.onAllNodes(hasText("收起")).fetchSemanticsNodes().size)
     }
 
-    @Test fun aCutResultFetchesTheWholeTextOnceAndShowsIt() {
+    @Test fun aCutResultFetchesItsWholeTextAsItOpensWithASpinner() {
         val cut = ToolResult((1..10).joinToString("\n") { "$it\tline $it" }, lines = 30, truncated = true)
         val whole = ToolResult((1..30).joinToString("\n") { "$it\tline $it" }, lines = 30)
         val asked = mutableListOf<String>()
         var state by mutableStateOf(baseState().copy(items = listOf(ChatItem(1, ItemKind.TOOL, tool = tool("toolu_big", "Read", "读取 design.md", cut))), hasMore = false))
         val actions = ChatActions(onToolOutput = { asked += it; state = state.copy(fetchingResults = setOf(it)) })
         compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, actions) } }
+        assertTrue("nothing is fetched while it is folded", asked.isEmpty())
         compose.onNodeWithText("design.md").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("展开全部 · 共 30 行").performClick()
-        compose.onNodeWithText("正在取全文").assertIsDisplayed()
-        compose.onNodeWithTag("patchMore").performClick()
         assertEquals(listOf("toolu_big"), asked)
+        compose.onNodeWithText("正在取全文").assertIsDisplayed()
+        compose.onNode(hasContentDescription("加载中") and hasAnyAncestor(hasTestTag("fetching")), useUnmergedTree = true).assertExists()
+        compose.onAllNodesWithTag("patchRow").assertCountEquals(10)
         state = state.copy(fetchingResults = emptySet(), fullResults = mapOf("toolu_big" to whole))
         compose.waitForIdle()
         compose.onAllNodesWithTag("patchRow").assertCountEquals(30)
-        compose.onNodeWithText("line 30", useUnmergedTree = true).assertExists()
-        compose.onNodeWithText("收起").assertExists()
+        compose.onNodeWithText("正在取全文").assertDoesNotExist()
+        // Folded and opened again: the whole text is already here.
+        compose.onNodeWithText("design.md").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("design.md").performClick()
+        compose.waitForIdle()
         assertEquals(1, asked.size)
+        assertEquals(0, compose.onAllNodes(hasText("展开全部", substring = true)).fetchSemanticsNodes().size)
     }
 
-    @Test fun aRunOfCallsIsOneRowThatOpensIntoTheCallsOneByOne() {
-        fun call(id: String, name: String, summary: String, k: String, v: String) =
-            ChatItem(0, ItemKind.TOOL, tool = ToolCall(id, name, summary, buildJsonObject { put(k, v) }, ToolResult("")))
+    private fun numbered(n: Int, word: String) = ToolResult((1..n).joinToString("\n") { "$it\t$word $it" }, lines = n)
+
+    @Test fun fiveCallsInARowAreOneLineThatOpensIntoFoldedCallsEachOpeningIntoItsResult() {
+        fun call(id: String, name: String, summary: String, k: String, v: String, result: ToolResult) =
+            ChatItem(0, ItemKind.TOOL, tool = ToolCall(id, name, summary, buildJsonObject { put(k, v) }, result))
         val run = listOf(
-            call("t1", "Grep", "搜索 Envelope", "pattern", "Envelope"),
-            call("t2", "Read", "读取 go.mod", "file_path", "/p/go.mod"),
-            call("t3", "Read", "读取 AGENTS.md", "file_path", "/p/AGENTS.md"),
-            call("t4", "Bash", "运行 ls src", "command", "ls src"),
-            call("t5", "Bash", "运行 go test", "command", "go test"),
+            call("t1", "Grep", "搜索 Envelope", "pattern", "Envelope", ToolResult("No files found")),
+            call("t2", "Read", "读取 go.mod", "file_path", "/p/go.mod", numbered(8, "mod")),
+            call("t3", "Read", "读取 AGENTS.md", "file_path", "/p/AGENTS.md", numbered(64, "rule")),
+            call("t4", "Bash", "运行 ls internal/protocol", "command", "ls internal/protocol", ToolResult("")),
+            call("t5", "Bash", "运行 go list ./...", "command", "go list ./...", ToolResult("clauderc/cmd/agent")),
         ).mapIndexed { i, it -> it.copy(seq = i + 1L) }
-        show(baseState().copy(items = run, hasMore = false))
-        compose.onNodeWithText("搜索 1 个模式，读取 2 个文件，列出 1 个目录，运行 1 条命令").assertIsDisplayed()
-        compose.onNodeWithText("└ go test").assertIsDisplayed()
+        show(baseState().copy(items = listOf(ChatItem(0, ItemKind.ASSISTANT, text = "我先看一下。")) + run, hasMore = false))
+        compose.onNodeWithText("搜索 Envelope，读取 2 个文件，列出 1 个目录，运行 go list ./...").assertIsDisplayed()
+        assertEquals("one line for the five", 1, compose.onAllNodesWithTag("toolGroup").fetchSemanticsNodes().size)
         compose.onNodeWithText("AGENTS.md").assertDoesNotExist()
+
         compose.onNodeWithTag("toolGroup").performClick()
         compose.waitForIdle()
-        listOf("Envelope", "go.mod", "AGENTS.md", "ls src", "go test").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+        listOf("Envelope", "go.mod", "AGENTS.md", "ls internal/protocol", "go list ./...").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+        compose.onAllNodesWithTag("patchRow").assertCountEquals(0)
+        compose.onAllNodesWithTag("toolBox").assertCountEquals(0)
+
+        // One call opens into its whole result, in a box that stops at 232dp and scrolls inside.
+        compose.onNodeWithText("AGENTS.md").performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithTag("patchRow").assertCountEquals(64)
+        val box = compose.onNodeWithTag("toolBox")
+        assertTrue(box.fetchSemanticsNode().boundsInRoot.height <= 232 * compose.density.density + 1f)
+        box.performScrollToNode(hasText("rule 64"))
+        compose.onNodeWithText("rule 64", useUnmergedTree = true).assertIsDisplayed()
+
         compose.onNodeWithTag("toolGroup").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("AGENTS.md").assertDoesNotExist()
-        compose.onNodeWithText("└ go test").assertIsDisplayed()
+        assertEquals(0, compose.onAllNodes(hasText("└", substring = true)).fetchSemanticsNodes().size)
+    }
+
+    @Test fun editsAndWritesJoinARunWithTheirLinesCountedAndALoneCallIsItsOwnRow() {
+        val write = tool("t1", "Write", "写入 envelope.go", ToolResult(patch = listOf(Hunk(0, 0, 1, 3, listOf("+package protocol", "+", "+type Envelope struct{}")))))
+        val test = ToolCall("t2", "Bash", "运行 go test ./internal/protocol/...", buildJsonObject { put("command", "go test ./internal/protocol/...") }, ToolResult("ok"))
+        val lone = ToolCall("t3", "Bash", "运行 go vet ./...", buildJsonObject { put("command", "go vet ./...") }, ToolResult("vet: all good"))
+        show(
+            baseState().copy(
+                items = listOf(
+                    ChatItem(1, ItemKind.TOOL, tool = write), ChatItem(2, ItemKind.TOOL, tool = test),
+                    ChatItem(3, ItemKind.ASSISTANT, text = "测试通过。"), ChatItem(4, ItemKind.TOOL, tool = lone),
+                ),
+                hasMore = false,
+            ),
+        )
+        compose.onNodeWithText("写入 envelope.go，运行 go test ./internal/protocol/...").assertIsDisplayed()
+        compose.onNode(hasText("+3") and hasAnyAncestor(hasTestTag("toolGroup")), useUnmergedTree = true).assertExists()
+        // The lone command is a row of its own, and opens straight into its whole result.
+        assertEquals(1, compose.onAllNodesWithTag("toolGroup").fetchSemanticsNodes().size)
+        compose.onNodeWithText("go vet ./...").performClick()
+        compose.waitForIdle()
+        compose.onNode(hasText("vet: all good", substring = true)).assertIsDisplayed()
     }
 
     // plans.md 7: pictures in tool results and from clauderc show.

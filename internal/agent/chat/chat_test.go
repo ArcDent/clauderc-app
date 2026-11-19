@@ -872,3 +872,107 @@ func TestErrorMessagesAreChinese(t *testing.T) {
 }
 
 const twoQuestionInputForMessages = twoQuestionInput
+
+// A /fork copy starts with its source's history; the grey line where its
+// own conversation starts names the source. The transcript is the real
+// fork in discovery's v2327 sample.
+func TestForkStartsWithSourceLine(t *testing.T) {
+	f := newFixture(t, setup{})
+	raw, err := os.ReadFile(filepath.Join("..", "discovery", "testdata", "v2327", "projects", "-w-repo", "9a1c2a5e-0000-4000-8000-0000000000a2.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.transcript, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var res protocol.ChatOpenResponse
+	if err := json.Unmarshal(f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID}), &res); err != nil {
+		t.Fatal(err)
+	}
+	at := -1
+	for i, it := range res.Items {
+		if strings.HasPrefix(it.Text, "以上来自") {
+			if at >= 0 {
+				t.Fatalf("second source line at %d: %+v", i, it)
+			}
+			at = i
+		}
+	}
+	if at <= 0 || at+1 >= len(res.Items) {
+		t.Fatalf("no source line inside the items: %+v", res.Items)
+	}
+	line, before, after := res.Items[at], res.Items[at-1], res.Items[at+1]
+	if line.Kind != protocol.ItemNotice || line.Text != "以上来自「repo work」" || line.Title != "" {
+		t.Errorf("source line = %+v", line)
+	}
+	if before.Kind != protocol.ItemAssistant || !strings.HasPrefix(before.Text, "已在 README.md 末尾加上") {
+		t.Errorf("before the line: %+v, want the source's last reply", before)
+	}
+	if after.Kind != protocol.ItemUser || after.Text != "只回复 FORKED" {
+		t.Errorf("after the line: %+v, want the fork's first message", after)
+	}
+}
+
+func TestNoSourceLineWithoutFork(t *testing.T) {
+	f := newFixture(t, setup{})
+	var res protocol.ChatOpenResponse
+	if err := json.Unmarshal(f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID}), &res); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range res.Items {
+		if strings.HasPrefix(it.Text, "以上来自") {
+			t.Fatalf("source line in a session that is no fork: %+v", it)
+		}
+	}
+}
+
+// Entering a worktree moves the transcript to the worktree's project
+// directory; an open chat keeps going from there without sending again
+// what the phone already has, and a permission prompt after the move
+// still reaches it.
+func TestChatFollowsMovedTranscript(t *testing.T) {
+	f := newFixture(t, setup{})
+	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
+	moved := filepath.Join(f.sample, "projects", "-w-x--claude-worktrees-fox", sessionID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(moved), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(f.transcript, moved); err != nil {
+		t.Fatal(err)
+	}
+	f.transcript = moved
+	f.appendTranscript(t, userLine("after the move"))
+	e := f.nextEvent(t, protocol.EventChatItems, 3*time.Second)
+	var items protocol.ChatItemsEvent
+	if err := json.Unmarshal(e.Body, &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items.Items) != 1 || items.Items[0].Seq != 61 || items.Items[0].Text != "after the move" {
+		t.Fatalf("chat.items after the move = %s", e.Body)
+	}
+
+	f.appendTranscript(t, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_m1","name":"Edit","input":{"file_path":"/w/x/.claude/worktrees/fox/a.txt","old_string":"a","new_string":"b"}}]}}`+"\n")
+	f.setAgents(t, "waiting", "blocked", "7")
+	e = f.nextEvent(t, protocol.EventChatPending, 3*time.Second)
+	var ev protocol.ChatPendingEvent
+	if err := json.Unmarshal(e.Body, &ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.Pending == nil || ev.Pending.ToolUseID != "toolu_m1" || ev.Pending.Kind != protocol.PendingPermission {
+		t.Fatalf("chat.pending after the move = %s", e.Body)
+	}
+	// Nothing from before the move came again.
+	for len(f.events) > 0 {
+		e := <-f.events
+		if e.Method != protocol.EventChatItems {
+			continue
+		}
+		var more protocol.ChatItemsEvent
+		_ = json.Unmarshal(e.Body, &more)
+		for _, it := range more.Items {
+			if it.Seq <= 60 {
+				t.Fatalf("item %d sent again after the move: %+v", it.Seq, it)
+			}
+		}
+	}
+}

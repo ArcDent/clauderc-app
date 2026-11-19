@@ -6,7 +6,7 @@ import urllib.request
 OUT = sys.argv[1]
 BASE = "https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsoutlined/{name}/{style}/24px.svg"
 
-OUTLINE = """account_tree add alt_route arrow_back arrow_upward check check_box check_box_outline_blank
+OUTLINE = """account_tree add alt_route animation arrow_back arrow_upward check check_box check_box_outline_blank
 chevron_right close cloud_off computer contrast delete description dns download edit error expand_more folder
 forum image more_vert palette photo_camera power_settings_new radio_button_checked radio_button_unchecked
 refresh settings style upload wallpaper warning terminal keyboard_arrow_left keyboard_arrow_up keyboard_arrow_down

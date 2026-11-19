@@ -1,6 +1,15 @@
 package clauderc.app.settings
 
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.em
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.graphicsLayer
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.components.topLine
 import clauderc.app.ui.components.GridRule
@@ -87,8 +96,8 @@ val AccentChoice.label: String
     }
 
 /**
- * The 设置 tab: 样式, 深浅色 and, in the card style, 主题色. Every option previews itself with a
- * small phone drawn in its own colours. Each callback also gets the centre of the option that was
+ * The 设置 tab: 样式, 深浅色, in the card style 主题色, and 动画. Every look option previews itself with a
+ * small phone drawn in its own colours. Each look callback also gets the centre of the option that was
  * tapped, in root coordinates, so the new theme can spread out from there.
  */
 @Composable
@@ -99,6 +108,9 @@ fun SettingsScreen(
     onStyle: (UiStyle, Offset) -> Unit,
     onMode: (ThemeMode, Offset) -> Unit,
     onAccent: (AccentChoice, Offset) -> Unit,
+    /** 「总是播放加载动画」. */
+    alwaysLoading: Boolean = false,
+    onAlwaysLoading: (Boolean) -> Unit = {},
 ) {
     val c = Clauderc.colors
     val dark = c.isDark
@@ -125,6 +137,100 @@ fun SettingsScreen(
                     val choices = AccentChoice.entries.filter { it != AccentChoice.Wallpaper || wallpaperAvailable }
                     Swatches(choices, look.accent, dark, onAccent)
                 }
+            }
+            SettingsGroup(Symbols.Animation, "动画") {
+                SwitchRow("总是播放加载动画", "每次打开 APP，各页第一次加载都放一遍", alwaysLoading, onAlwaysLoading)
+            }
+        }
+    }
+}
+
+/** .swrow: a title over a grey line, the whole row a switch. */
+@Composable
+private fun SwitchRow(title: String, text: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    val ui = Clauderc.style
+    val press = remember { MutableInteractionSource() }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .toggleable(on, press, null, role = Role.Switch, onValueChange = onChange)
+            .padding(
+                start = when (ui) { UiStyle.Clear -> sp.sp1; UiStyle.Sticker -> sp.sp2; UiStyle.Grid -> sp.sp4 },
+                end = when (ui) { UiStyle.Clear -> sp.sp1; UiStyle.Sticker -> sp.sp2; UiStyle.Grid -> sp.sp4 },
+                top = 8.dp,
+                bottom = 4.dp,
+            ),
+        horizontalArrangement = Arrangement.spacedBy(sp.sp4),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, fontSize = Clauderc.fontSizes.body, color = c.fg)
+            Text(
+                text,
+                fontSize = if (ui == UiStyle.Grid) 11.5.sp else Clauderc.fontSizes.caption,
+                fontFamily = if (ui == UiStyle.Grid) MonoFamily else null,
+                lineHeight = 1.45.em,
+                color = c.fg3,
+            )
+        }
+        Switch(on, press)
+    }
+}
+
+/**
+ * .switch in each style. 清玻: a 48 × 28 pill, grey off and accent on, its white knob springing across
+ * and stretching while pressed. 格栅: a square 44 × 24 outline whose square knob steps across, filled
+ * solid when on. 贴纸: a 52 × 30 ink-outlined sticker on a hard shadow, accent when on, its ringed
+ * knob tilting as it lands; it sinks onto its shadow while pressed.
+ */
+@Composable
+private fun Switch(on: Boolean, press: MutableInteractionSource) {
+    val c = Clauderc.colors
+    val m = Clauderc.motion
+    val pressed by press.collectIsPressedAsState()
+    when (Clauderc.style) {
+        UiStyle.Clear -> {
+            val track by animateColorAsState(if (on) c.accent else c.fg.copy(alpha = 0.18f), tween(m.durS, easing = m.easeEmph), label = "track")
+            val wide by animateDpAsState(if (pressed) 28.dp else 22.dp, tween(m.durS, easing = m.easeEmph), label = "knobWidth")
+            val x by animateDpAsState(if (on) (if (pressed) 14.dp else 20.dp) else 0.dp, tween(m.durM, easing = m.easeSpring), label = "knob")
+            Box(Modifier.size(48.dp, 28.dp).clip(RoundedCornerShape(14.dp)).background(track)) {
+                Box(
+                    Modifier
+                        .offset(x = 3.dp + x, y = 3.dp)
+                        .size(wide, 22.dp)
+                        .knobShadow()
+                        .background(Color.White, RoundedCornerShape(11.dp)),
+                )
+            }
+        }
+        UiStyle.Grid -> {
+            // steps(3, end): the knob jumps a third of the way at a time.
+            val p by animateFloatAsState(if (on) 1f else 0f, tween(m.durS, easing = { t -> kotlin.math.floor(t * 3f) / 3f }), label = "knob")
+            Box(Modifier.size(44.dp, 24.dp).background(if (on) c.fg else Color.Transparent).border(2.dp, c.fg)) {
+                Box(Modifier.offset(x = 5.dp + 20.dp * p, y = 5.dp).size(14.dp).background(if (on) c.bg else c.fg))
+            }
+        }
+        UiStyle.Sticker -> {
+            val fill by animateColorAsState(if (on) c.accent else c.card, tween(m.durS, easing = m.easeEmph), label = "track")
+            val x by animateDpAsState(if (on) 22.dp else 0.dp, tween(m.durM, easing = m.easeSpring), label = "knob")
+            val tilt by animateFloatAsState(if (on) -8f else 0f, tween(m.durM, easing = m.easeSpring), label = "tilt")
+            val sink by animateDpAsState(if (pressed) 3.dp else 0.dp, tween(m.durS, easing = m.easeEmph), label = "sink")
+            Box(
+                Modifier
+                    .offset(y = sink)
+                    .size(52.dp, 30.dp)
+                    .sticker(fill, c.ink, 15.dp, drop = 3.dp - sink),
+            ) {
+                Box(
+                    Modifier
+                        .offset(x = 5.dp + x, y = 5.dp)
+                        .size(20.dp)
+                        .graphicsLayer { rotationZ = tilt }
+                        .background(c.card, CircleShape)
+                        .border(2.dp, c.ink, CircleShape),
+                )
             }
         }
     }
@@ -161,6 +267,22 @@ private fun SettingsGroup(icon: ImageVector, title: String, content: @Composable
             }
         }
         content()
+    }
+}
+
+/**
+ * The 清玻 knob's soft shadow (box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28)) drawn as two faint rings 1dp
+ * down, not as elevation: the theme circle's snapshot of the old page would leave elevation out.
+ */
+private fun Modifier.knobShadow(): Modifier = drawBehind {
+    for ((grow, alpha) in listOf(1.5.dp to 0.08f, 0.75.dp to 0.12f)) {
+        val g = grow.toPx()
+        drawRoundRect(
+            Color.Black.copy(alpha = alpha),
+            Offset(-g, -g + 1.dp.toPx()),
+            Size(size.width + 2 * g, size.height + 2 * g),
+            CornerRadius(size.height / 2 + g),
+        )
     }
 }
 
