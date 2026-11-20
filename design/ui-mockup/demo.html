@@ -5,7 +5,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;700&display=swap">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300..500,0..1,0&icon_names=account_tree,add,alt_route,animation,arrow_back,arrow_upward,backspace,battery_full,call_split,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,contrast,delete,description,dns,download,edit,error,expand_more,folder,forum,image,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,keyboard_return,keyboard_tab,lock,more_vert,palette,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,settings,signal_cellular_alt,stop,style,terminal,upload,wallpaper,warning,wifi&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300..500,0..1,0&icon_names=account_tree,add,alt_route,animation,arrow_back,arrow_upward,backspace,battery_full,call_split,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,contrast,delete,description,dns,download,edit,error,expand_more,folder,forum,image,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,keyboard_return,keyboard_tab,lock,more_vert,palette,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,settings,signal_cellular_alt,stop,style,terminal,upload,visibility,visibility_off,wallpaper,warning,wifi&display=block">
 <style>
 /* 下面这段从 index.html 原样复制：APP 主题变量、通用样式和各页面样式。改设计稿时两边一起改。 */
 :root {
@@ -374,8 +374,6 @@ button { cursor: pointer; }
 
 /* ---------- 新建会话 ---------- */
 .form { padding: 0 var(--sp-page) var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-6); }
-.tier-line { font-size: var(--fs-label); color: var(--c-fg-2); line-height: 1.6; }
-.tier-line .mono { font-size: var(--fs-mono-sm); color: var(--c-fg-3); }
 .field { display: flex; flex-direction: column; gap: var(--sp-2); }
 .field label { font-size: var(--fs-caption); color: var(--c-fg-2); }
 .input { width: 100%; border: 0; border-bottom: 1px solid var(--c-surface-2); border-radius: 0; background: none; padding: 10px 0; font-size: var(--fs-body); color: var(--c-fg); }
@@ -829,7 +827,6 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-style="card"] .offline-line { background: var(--c-card); }
 /* 新建会话：每个输入项一张卡片 */
 [data-style="card"] .form { padding: 0 var(--sp-4) var(--sp-8); gap: var(--sp-3); }
-[data-style="card"] .tier-line { padding: var(--sp-1) var(--sp-2) var(--sp-2); }
 [data-style="card"] .field { padding: var(--sp-3) var(--sp-4) var(--sp-2); background: var(--c-card); border-radius: var(--r-card); }
 [data-style="card"] .input { border-bottom-color: var(--c-line); }
 /* 设置：每组一张卡片，标题在卡片里 */
@@ -887,8 +884,9 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 .drow .mono { font-size: var(--fs-mono); }
 .dsum { flex: 1; min-width: 0; font-size: var(--fs-caption); color: var(--c-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .drow .chev { color: var(--c-fg-3); transform: rotate(180deg); transition: transform var(--dur-s) var(--ease-emph); }
-.dgroup.folded .drow .chev { transform: none; }
-.dgroup.folded .dkids { display: none; }
+/* 目录收起用自己的类名：.folded 是代码差异页「已折叠」提示块的卡片样式，混用会在收起后突然套上卡片 */
+.dgroup.dir-folded .drow .chev { transform: none; }
+.dgroup.dir-folded .dkids { display: none; }
 .dkids .row { padding-left: calc(var(--sp-page) + 32px); }
 [data-style="card"] .drow { padding-left: var(--sp-4); }
 [data-style="card"] .dkids .row { padding-left: calc(var(--sp-4) + 32px); }
@@ -1229,7 +1227,6 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-style="glass"] .slash { background: var(--c-sheet); -webkit-backdrop-filter: blur(30px) saturate(1.8); backdrop-filter: blur(30px) saturate(1.8); border-radius: 22px; }
 [data-dir="sticker"] .slash { border: 2px solid var(--k-ink); box-shadow: 0 4px 0 var(--k-ink); }
 [data-style="glass"] .form { padding: 0 0 var(--sp-8); gap: var(--sp-3); }
-[data-style="glass"] .tier-line { padding: var(--sp-1) calc(var(--sp-4) + var(--sp-2)) var(--sp-2); }
 [data-style="glass"] .field { padding: var(--sp-3) var(--sp-4) var(--sp-2); }
 [data-style="glass"] .input { border-bottom-color: var(--c-line); }
 
@@ -1605,7 +1602,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-dir="sticker"] .tool-detail.tbox::-webkit-scrollbar-thumb { background: var(--k-ink); }
 
 /* ================= 第六轮：已删分支、git 入口、Fork 和 Worktree、限额自动发送、移出收起、左滑停止和移出（待批） ================= */
-.r6-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.knob-btns { display: flex; flex-wrap: wrap; gap: 6px; }
 /* 分支弹层：已经删掉的分支，名字浅一级 */
 .mi .mono-name.gone { color: var(--c-fg-2); }
 /* git 入口点开的小菜单：从图标下面长出来，不压暗页面，点别处收起 */
@@ -1655,6 +1652,43 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-dir="grid"] .swipe-act .ms { width: 36px; height: 36px; border-radius: 0; }
 [data-dir="sticker"] .swipe-act { font-weight: 800; }
 [data-dir="sticker"] .swipe-act .ms { border: 2px solid var(--k-ink); box-shadow: 0 3px 0 var(--k-ink); }
+
+/* ================= 第七轮：新建会话填接口地址、API key 和各档模型（待批） ================= */
+/* key 和眼睛按钮同一行，眼睛只占右边一点 */
+.key-row { display: flex; align-items: center; gap: var(--sp-1); }
+.key-row .input { flex: 1; min-width: 0; }
+.key-row .icon-btn { color: var(--c-fg-3); }
+.key-row .icon-btn[aria-pressed="true"] { color: var(--c-fg-2); }
+/* 模型：一行收着，右边写跟随目标机或已填几项；点开七个档位，裁着长出来，不淡入 */
+.mfold { width: 100%; border: 0; background: none; display: flex; align-items: center; gap: var(--sp-2); padding: 2px 0; text-align: left; color: inherit; border-radius: var(--r-sm); position: relative; }
+.mfold .mlbl { flex: 1; font-size: var(--fs-caption); color: var(--c-fg-2); }
+.mfold .msum { font-size: var(--fs-caption); color: var(--c-fg-3); }
+.mfold .ms { color: var(--c-fg-3); transition: transform var(--dur-m) var(--ease-emph); }
+.mfold[aria-expanded="true"] .ms { transform: rotate(180deg); }
+.mbody { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-m) var(--ease-emph); }
+.mbody > div { overflow: hidden; min-height: 0; }
+.mfield.open .mbody { grid-template-rows: 1fr; }
+.mrow { display: flex; align-items: center; gap: var(--sp-4); }
+.mrow > span { flex: none; width: 52px; font-size: var(--fs-label); color: var(--c-fg-2); }
+.mrow .input { flex: 1; min-width: 0; font-size: 13px; }
+[data-dir="grid"] .mrow > span { font-family: var(--font-mono); }
+/* 档位单选沿用目录列表的样子；第二行是说明文字，不用等宽 */
+.r-path span.plain { font-family: inherit; font-size: var(--fs-caption); }
+[data-dir="grid"] .r-path span.plain { font-family: var(--font-mono); font-size: 11px; }
+.r-path b.mono { font-family: var(--font-mono); font-size: 14px; }
+/* 选「自己填」时地址和 key 在档位列表下面长出来，裁着长、不淡入，和模型展开一样 */
+.cbody { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-m) var(--ease-emph); }
+.cbody > div { overflow: hidden; min-height: 0; padding-left: 40px; }
+.pfield.custom .cbody { grid-template-rows: 1fr; }
+.csub { display: flex; flex-direction: column; gap: 2px; padding-top: var(--sp-3); }
+.csub > span { font-size: var(--fs-caption); color: var(--c-fg-2); }
+/* 表单错误的浮动卡片：贴着顶栏下沿滑出，被下沿裁着；底色掺一点红，图标是红的 */
+.fnote-clip { position: absolute; left: 0; right: 0; z-index: 5; overflow: hidden; padding: var(--sp-2) var(--sp-3) 14px; pointer-events: none; }
+.fnote { pointer-events: auto; display: flex; align-items: center; gap: var(--sp-3); min-height: 52px; padding: var(--sp-3) var(--sp-4); border-radius: 16px; background: color-mix(in srgb, var(--c-danger) 12%, var(--c-sheet)); color: var(--c-fg); font-size: var(--fs-label); line-height: 1.45; box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-danger) 30%, transparent), 0 8px 18px -8px rgba(0, 0, 0, 0.35); cursor: pointer; }
+.fnote .ms { color: var(--c-danger); font-size: 22px; font-variation-settings: "FILL" 1; }
+[data-dir="clear"] .fnote { background: color-mix(in srgb, var(--c-danger) 12%, var(--k-pane)); -webkit-backdrop-filter: blur(22px) saturate(1.8); backdrop-filter: blur(22px) saturate(1.8); box-shadow: inset 0 1px 1px var(--k-rimc), 0 0 0 0.5px color-mix(in srgb, var(--c-danger) 40%, transparent), 0 10px 22px -10px rgba(0, 0, 0, 0.3); }
+[data-dir="grid"] .fnote { border-radius: 0; font-family: var(--font-mono); box-shadow: 0 0 0 1px var(--c-danger), 4px 4px 0 color-mix(in srgb, var(--c-danger) 35%, transparent); }
+[data-dir="sticker"] .fnote { border-radius: var(--k-r); border: 2px solid var(--k-ink); box-shadow: 0 4px 0 var(--k-ink); font-weight: 700; background: color-mix(in srgb, var(--c-danger) 18%, var(--c-sheet)); }
 </style>
 
 <!-- 第四轮：卡通图标（24 格，2 像素圆头线，APP 里照这些路径画） -->
@@ -1688,20 +1722,13 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     </div>
     <div class="themes" role="group" aria-label="样式" id="styleSet"></div>
 
-    <section class="knob" id="r6">
-      <h2>第六轮（待批）</h2>
-      <h3>已删除的分支</h3>
-      <p class="desk-note" style="margin:0">「旧版重连实验」停在已经删掉的 fix-old-relay 上，分支弹层里单独一行，能点它筛选，没有「切换」。</p>
-      <div class="r6-btns"><button type="button" class="desk-btn" data-r6="branches">打开 clauderc-app 的分支</button></div>
-      <h3>聊天页的 git 入口</h3>
-      <p class="desk-note" style="margin:0">顶栏的 git 图标点开是一个小菜单：Fork、Worktree、看 git。</p>
-      <div class="r6-btns"><button type="button" class="desk-btn" data-r6="menu">打开菜单</button><button type="button" class="desk-btn" data-r6="fork">Fork 对话框</button><button type="button" class="desk-btn" data-r6="wt">Worktree 对话框</button></div>
-      <h3>限额自动发送</h3>
-      <p class="desk-note" style="margin:0">「批量改测试」撞到 5 小时限额。打开开关后，重置后 1 分钟目标机替你发出框里的话；没打开就只是到点收起。</p>
-      <div class="r6-btns"><button type="button" class="desk-btn" data-r6="limit">打开撞到限额的会话</button><button type="button" class="desk-btn" data-r6="reset">快进到重置后 1 分钟</button></div>
-      <h3>左滑停止和移出</h3>
-      <p class="desk-note" style="margin:0">会话页任一行按住往左拖：运行中的露出「停止」，停了的露出「移出」；点别处收回。圆点和 fork 连线不动。行尾的 ⋮ 菜单去掉了，git 从聊天页顶栏进。移出后那一行收起。</p>
-      <div class="r6-btns"><button type="button" class="desk-btn" data-r6="swipe">演示左滑</button><button type="button" class="desk-btn" data-r6="remove">移出「landing 页」</button></div>
+    <section class="knob" id="r7">
+      <h2>第七轮（待批）</h2>
+      <h3>新建会话</h3>
+      <p class="desk-note" style="margin:0">入口只有会话页右上角一个。先选档位：目标机上已有的档位直接选，沿用它的接口和模型，新会话归到那个档位；官方就是账户登录，默认选它；选「自己填」才露出接口地址和 API key，两项都要填，新会话归到那个地址的档位。</p>
+      <p class="desk-note" style="margin:0">模型默认收着。选了档位，七个框里就是这个档位现在用的值，摘要写沿用档位的几项；改哪个框就只换那一项，摘要变成改了几项；清空的框跟目标机走。换档位会换成新档位的值，选自己填时框里的值不动。写法和环境变量一样，可以带 [1M]。新会话启动后，这个档位的模型就是这次的值。</p>
+      <p class="desk-note" style="margin:0">填错了不再在输入框下面写红字：输入框标红，顶栏下面滑出一张卡片，4 秒后、点一下、或者标红的项改过了就收回。聊天页的 Worktree 照抄当前会话，不用填。</p>
+      <div class="knob-btns"><button type="button" class="desk-btn" data-r7="open">打开新建页</button><button type="button" class="desk-btn" data-r7="custom">选自己填</button><button type="button" class="desk-btn" data-r7="models">展开模型</button><button type="button" class="desk-btn" data-r7="preset">选档位改一项模型启动</button><button type="button" class="desk-btn" data-r7="half">自己填只填地址</button><button type="button" class="desk-btn" data-r7="endpoint">自己填好接口启动</button></div>
       <label class="check"><input type="checkbox" data-k="slow">慢放 5 倍</label>
     </section>
   </aside>
@@ -1925,10 +1952,13 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   function sess(id, title, dir, state, time, extra) {
     return Object.assign({ id: id, title: title, dir: dir, state: state, time: time, model: "Opus 5.5", mode: "默认询问", msgs: null, pending: null, l3: "", timers: null, queue: [] }, extra || {});
   }
+  // 第七轮：各档位现在用的模型，取自档位里最近一个会话的启动参数和环境
+  var M_ROUTER = { main: "claude-opus-5-5[1M]", default: "claude-opus-5-5[1M]", opus: "claude-opus-5-5[1M]", sonnet: "claude-sonnet-5-5[1M]", haiku: "hy-4-flash[1M]", fable: "claude-fable-5-2", subagent: "claude-sonnet-5-5[1M]" };
+  var M_ANY = { main: "claude-opus-5-5[1M]", opus: "claude-opus-5-5[1M]", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5", subagent: "claude-sonnet-5-5" };
   function groups0() {
     return {
       m1: [
-        { id: "default", name: "默认", def: "默认", host: "", rename: true, create: true, folded: false, sessions: [
+        { id: "default", name: "默认", def: "默认", host: "", rename: true, create: true, folded: false, models: M_ROUTER, sessions: [
           sess("s1", "clauderc 协议", "clauderc-app", "need", "2 分钟前", { pending: "permission", ctx: 25, l3: "go vet ./... && go test ./internal/protocol/...", msgs: clone(PROTO_MSGS), branch: "dev" }),
           sess("s2", "修复重连", "relay-svc", "work", "刚刚", Object.assign({ ctx: 62, turnAt: Date.now() - 95000, branch: "fix-reconnect" }, relayAgents())),
           // 第五轮：在 worktree 里的会话，归在原目录下，行里带 worktree 标记和它的分支
@@ -1946,18 +1976,18 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
           // 第六轮：停在已经删掉的分支上
           sess("s15", "旧版重连实验", "clauderc-app", "stop", "3 天前", { ctx: 64, branch: "fix-old-relay" })
         ] },
-        { id: "official", name: "官方", def: "官方", host: "api.anthropic.com", rename: true, create: true, folded: false, sessions: [
+        { id: "official", name: "官方", def: "官方", host: "api.anthropic.com", rename: true, create: true, folded: false, models: { main: "claude-opus-5-5" }, sessions: [
           sess("s4", "迁移脚本审查", "infra", "need", "5 分钟前", { pending: "question", ctx: 33, l3: "错误码用哪种命名风格？", branch: "main" }),
           sess("s11", "部署脚本", "infra", "idle", "40 分钟前", { ctx: 12, branch: "main" }),
           sess("s5", "landing 页", "site", "stop", "昨天", { ctx: 71, branch: "redesign" })
         ] },
-        { id: "anyrouter", name: "anyrouter.top", def: "anyrouter.top", host: "", mono: true, rename: true, create: true, folded: false, sessions: [] },
+        { id: "anyrouter", name: "anyrouter.top", def: "anyrouter.top", host: "", mono: true, rename: true, create: true, folded: false, models: M_ANY, sessions: [] },
         { id: "other", name: "其他", def: "其他", host: "读不到启动参数", plain: true, rename: false, create: false, folded: false, sessions: [
           sess("s6", "scratch", "scratch", "idle", "3 天前")
         ] }
       ],
       m2: [
-        { id: "default", name: "默认", def: "默认", host: "", rename: true, create: true, folded: false, sessions: [
+        { id: "default", name: "默认", def: "默认", host: "", rename: true, create: true, folded: false, models: M_ROUTER, sessions: [
           sess("s7", "config-update-local-relay", "clauderc-app", "idle", "3 分钟前", { ctx: 54, branch: "main" }),
           sess("s8", "物理实验数据表", "physics-experiment", "idle", "10 分钟前", { ctx: 22 })
         ] }
@@ -2321,7 +2351,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   // ---------- 按压反馈 ----------
   // 「叠层加缩小」是 APP 现在的效果，照 Press.kt；「水波纹」是改之前 Compose 的默认效果：颜色取主题正文色，按下时 10% 不透明度。
   // 在可滚动的区域里，Compose 要等 100ms 确认不是滚动才算按下，三种样式都照这个等。
-  var PRESS = ".dbr, .swrow, .row, .mi, .btn, .icon-btn, .choice, .tool-row, .tmore, .timg, .crow, .frow-main, .tbtn, .recent button, .send, .nav-item, .thumb-add, .gh-name, .branch-btn, .tab, .bar-sub button, .more-link, .slash li button, .vf, .thumb .x, .opt, .sw, .arow, .key";
+  var PRESS = ".mfold, .dbr, .swrow, .row, .mi, .btn, .icon-btn, .choice, .tool-row, .tmore, .timg, .crow, .frow-main, .tbtn, .recent button, .send, .nav-item, .thumb-add, .gh-name, .branch-btn, .tab, .bar-sub button, .more-link, .slash li button, .vf, .thumb .x, .opt, .sw, .arow, .key";
   var SHRINK = ".btn, .icon-btn, .send, .tbtn, .nav-item, .thumb-add, .gh-name, .branch-btn, .bar-sub button, .thumb .x, .opt, .sw, .key";
   var P = null;
   app.addEventListener("pointerdown", function (e) {
@@ -2823,7 +2853,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     var n = pane("sessions");
     if (!n) return;
     var m = machine();
-    var html = '<header class="appbar"></header><div class="content">';
+    // 第七轮：新建不再按档位，入口只有顶栏右上角这一个
+    var html = '<header class="appbar">' + (m ? '<span class="grow"></span><button type="button" class="icon-btn" data-act="create" aria-label="新建会话"><span class="ms">add</span></button>' : "") + '</header><div class="content">';
     if (!m) { paint(n, html + '<div class="hero"><h1>会话</h1></div></div>'); return; }
     html += '<div class="hero" style="padding-bottom:var(--sp-2)"><h1><span class="hl">' + esc(m.name) + "</span></h1><p>claude " + esc(m.ver) + "</p></div>" + usageHtml(m);
     groupsOf(m.id).forEach(function (g) {
@@ -2832,8 +2863,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
         (g.rename ? '<button type="button" class="gh-name' + (g.mono ? " mono" : "") + '" data-act="rename" data-group="' + g.id + '">' + esc(g.name) + '<span class="ms">edit</span></button>' : '<span class="gh-name">' + esc(g.name) + "</span>") +
         '<span class="gh-dom' + (g.plain ? " plain" : "") + '">' + esc(g.host) + "</span>" +
         '<span class="gh-sum">' + g.sessions.length + " 个会话" + (need ? ' · <span class="need">' + need + " 个等你</span>" : "") + "</span>" +
-        '<button type="button" class="icon-btn sm gh-fold" data-act="fold" data-group="' + g.id + '" aria-label="折叠' + esc(g.name) + '档位" aria-expanded="' + !g.folded + '"><span class="ms">expand_more</span></button>' +
-        (g.create ? '<button type="button" class="icon-btn sm" data-act="create" data-group="' + g.id + '" aria-label="在' + esc(g.name) + '档位新建会话"><span class="ms">add</span></button>' : "") + "</div>";
+        '<button type="button" class="icon-btn sm gh-fold" data-act="fold" data-group="' + g.id + '" aria-label="折叠' + esc(g.name) + '档位" aria-expanded="' + !g.folded + '"><span class="ms">expand_more</span></button></div>';
       html += g.sessions.length ? '<div class="list">' + groupBody(g) + "</div>" : '<p class="g-empty">没有会话</p>';
     });
     paint(n, html + '<p class="foot"></p></div>');
@@ -2859,7 +2889,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       var shown = f ? d.sessions.filter(function (s) { return s.branch === f; }) : d.sessions, need = shown.filter(isNeed).length;
       // 第五轮：目录标题右边是当前分支（筛选时是筛的那个分支，标成强调色）；折叠区铺满整行，分支按钮浮在上面
       var br = info ? '<button type="button" class="dbr' + (f ? " on" : "") + '" data-act="dir-branch" data-key="' + esc(key) + '" aria-label="' + esc(d.dir) + ' 的分支">' + esc(f || info.cur) + '<span class="ms">expand_more</span></button>' : "";
-      return '<div class="dgroup' + (folded ? " folded" : "") + '"><div class="drow dhead"><button type="button" class="dfold" data-act="fold-dir" data-key="' + esc(key) + '" aria-expanded="' + !folded + '" aria-label="折叠 ' + esc(d.dir) + '"></button>' +
+      return '<div class="dgroup' + (folded ? " dir-folded" : "") + '"><div class="drow dhead"><button type="button" class="dfold" data-act="fold-dir" data-key="' + esc(key) + '" aria-expanded="' + !folded + '" aria-label="折叠 ' + esc(d.dir) + '"></button>' +
         '<span class="ms">folder</span><span class="mono">' + esc(d.dir) + "</span>" + br + '<span class="dsum">' + shown.length + " 个" + (need ? ' · <span class="need">' + need + " 个等你</span>" : "") + "</span>" +
         '<span class="ms chev">expand_more</span></div><div class="dkids">' + dirRows(d.sessions, shown) + "</div></div>";
     }).join("");
@@ -2889,9 +2919,9 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       var h = kids.offsetHeight;
       box.querySelector(".chev").style.transform = "none";
       kids.animate([{ height: h + "px", opacity: 1 }, { height: "0px", opacity: 0 }], { duration: dur("durS"), easing: ez("emphIn") })
-        .finished.then(function () { kids.style.overflow = ""; box.querySelector(".chev").style.transform = ""; box.classList.add("folded"); }, noop);
+        .finished.then(function () { kids.style.overflow = ""; box.querySelector(".chev").style.transform = ""; box.classList.add("dir-folded"); }, noop);
     } else {
-      box.classList.remove("folded");
+      box.classList.remove("dir-folded");
       var h2 = kids.offsetHeight;
       kids.animate([{ height: "0px", opacity: 0 }, { height: h2 + "px", opacity: 1 }], { duration: dur("durM"), easing: ez("emph") })
         .finished.then(function () { kids.style.overflow = ""; }, noop);
@@ -3039,17 +3069,40 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   }
 
   // ---------- 新建会话 ----------
+  // 第七轮：模型的七个档位，写法和对应的环境变量一样，占位符就写变量名
+  var TIERS = [["main", "主模型", "ANTHROPIC_MODEL"], ["default", "默认", "ANTHROPIC_DEFAULT_MODEL"], ["opus", "Opus", "ANTHROPIC_DEFAULT_OPUS_MODEL"],
+    ["sonnet", "Sonnet", "ANTHROPIC_DEFAULT_SONNET_MODEL"], ["haiku", "Haiku", "ANTHROPIC_DEFAULT_HAIKU_MODEL"], ["fable", "Fable", "ANTHROPIC_DEFAULT_FABLE_MODEL"],
+    ["subagent", "子代理", "CLAUDE_CODE_SUBAGENT_MODEL"]];
+  // 第七轮：档位单选。目标机上已有的档位直接选，沿用它的接口，七个模型框填上它现在用的值；官方就是账户登录，没有这个档位也列出来；最后一项自己填地址和 key
+  function presetsOf(mid) {
+    var list = groupsOf(mid).filter(function (g) { return g.create; }).map(function (g) {
+      var sys = g.id === "default" || g.id === "official";
+      return { id: g.id, name: g.name, sub: g.id === "default" ? "跟目标机的全局设置" : g.id === "official" ? "账户登录" : "沿用这个档位的地址和 key", mono: !sys && g.mono, models: g.models || {} };
+    });
+    if (!list.some(function (x) { return x.id === "official"; })) list.push({ id: "official", name: "官方", sub: "账户登录", models: {} });
+    return list.concat([{ id: "custom", name: "自己填", sub: "新的接口地址和 API key" }]);
+  }
   function buildCreate(page) {
-    var g = findGroup(page.route.group), tmpl = g.sessions[0];
+    var IN = ' autocomplete="off" spellcheck="false" autocapitalize="off"';
     page.el.innerHTML = '<header class="appbar"><button type="button" class="icon-btn" data-act="back" aria-label="关闭"><span class="ms">close</span></button><div class="bar-title"><h1>新建会话</h1></div><button type="button" class="tbtn" data-act="submit">启动</button></header>' +
-      '<div class="content"><form class="form"><div class="tier-line">' + esc(g.name) + "档位" + (g.host && !g.plain ? ' <span class="mono">' + esc(g.host) + "</span>" : "") + "<br>" + (tmpl ? "沿用「" + esc(tmpl.title) + "」的启动参数" : "沿用这个档位最近一次的启动参数") + "</div>" +
-      '<div class="field"><label>工作目录</label><input class="input mono dir-in" value="' + esc(page.route.dir || RECENT[2]) + '" placeholder="/path/to/project" autocomplete="off" spellcheck="false"><span class="ferr" hidden>目标机上没有这个目录</span><ul class="recent"></ul><button type="button" class="more-link" data-act="all-dirs">全部 ' + RECENT.length + " 个</button></div>" +
+      '<div class="content"><form class="form">' +
+      '<div class="field"><label>工作目录</label><input class="input mono dir-in" value="' + esc(page.route.dir || RECENT[2]) + '" placeholder="/path/to/project"' + IN + '><ul class="recent"></ul><button type="button" class="more-link" data-act="all-dirs">全部 ' + RECENT.length + " 个</button></div>" +
+      '<div class="field pfield"><label>档位</label><ul class="recent presets" role="radiogroup"></ul>' +
+      '<div class="cbody"><div><label class="csub"><span>接口地址</span><input class="input mono url-in" inputmode="url" placeholder="https://"' + IN + "></label>" +
+      '<div class="csub"><span>API key</span><div class="key-row"><input class="input mono key-in" type="password"' + IN + '><button type="button" class="icon-btn sm" data-act="key-eye" aria-label="显示 key" aria-pressed="false"><span class="ms">visibility</span></button></div></div></div></div></div>' +
+      '<div class="field mfield"><button type="button" class="mfold" data-act="mfold" aria-expanded="false"><span class="mlbl">模型</span><span class="msum">跟随档位</span><span class="ms">expand_more</span></button>' +
+      '<div class="mbody"><div>' + TIERS.map(function (t) { return '<label class="mrow"><span>' + t[1] + '</span><input class="input mono m-in" data-tier="' + t[0] + '" placeholder="' + t[2] + '"' + IN + "></label>"; }).join("") +
+      "</div></div></div>" +
       '<div class="field"><label>会话名，可不填</label><input class="input name-in" autocomplete="off"></div>' +
-      '<div class="field"><label>第一句话，可不填</label><textarea class="input prompt-in" rows="2" placeholder="不填就只启动会话"></textarea></div></form></div>';
+      '<div class="field"><label>第一句话，可不填</label><textarea class="input prompt-in" rows="2" placeholder="不填就只启动会话"></textarea></div></form></div>' +
+      '<div class="fnote-clip" hidden><div class="fnote" role="alert" data-act="note-close"><span class="ms">error</span><span class="fn-text"></span></div></div>';
     page.dirIn = $(".dir-in", page.el);
+    page.urlIn = $(".url-in", page.el);
+    page.keyIn = $(".key-in", page.el);
     page.nameIn = $(".name-in", page.el);
     page.promptIn = $(".prompt-in", page.el);
     page.allDirs = false;
+    page.preset = "official";
     page.renderDirs = function () {
       var cur = page.dirIn.value.trim(), list = page.allDirs ? RECENT : RECENT.slice(0, 5);
       $(".recent", page.el).innerHTML = list.map(function (d) {
@@ -3058,15 +3111,103 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       }).join("");
       $(".more-link", page.el).hidden = page.allDirs;
     };
-    page.setErr = function (on) { page.dirIn.classList.toggle("error", on); $(".ferr", page.el).hidden = !on; };
+    page.renderPresets = function () {
+      $(".presets", page.el).innerHTML = presetsOf(S.machineId).map(function (x) {
+        var on = x.id === page.preset;
+        return '<li><button type="button" role="radio" aria-checked="' + on + '" data-act="pick-preset" data-v="' + esc(x.id) + '"><span class="ms">' + (on ? "radio_button_checked" : "radio_button_unchecked") + '</span><span class="r-path"><b' + (x.mono ? ' class="mono"' : "") + ">" + esc(x.name) + '</b><span class="plain">' + esc(x.sub) + "</span></span></button></li>";
+      }).join("");
+    };
+    // 第七轮：目录不对也用浮动卡片提示，输入框只标红
+    page.setErr = function (on) { page.dirIn.classList.toggle("error", on); if (on) noteShow(page, "目标机上没有这个目录"); else noteSettle(page); };
+    page.models = function () {
+      var out = {};
+      $$(".m-in", page.el).forEach(function (i) { if (i.value.trim()) out[i.dataset.tier] = i.value.trim(); });
+      return out;
+    };
+    // 选了档位：和档位的值一样写沿用几项，改过写改了几项；自己填写已填几项；一项都没有就跟目标机走
+    page.syncModels = function () {
+      var m = page.models(), n = Object.keys(m).length, base = page.preset === "custom" ? null : page.presetModels || {};
+      var changed = base ? TIERS.filter(function (t) { return (m[t[0]] || "") !== (base[t[0]] || ""); }).length : 0;
+      $(".msum", page.el).textContent = changed ? "改了 " + changed + " 项" : !n ? "跟随目标机" : base ? "沿用档位的 " + n + " 项" : "已填 " + n + " 项";
+    };
     $(".form", page.el).addEventListener("submit", function (e) { e.preventDefault(); });
+    page.el.addEventListener("input", function (e) {
+      var t = e.target;
+      if (t === page.urlIn || t === page.keyIn) { page.urlIn.classList.remove("error"); page.keyIn.classList.remove("error"); noteSettle(page); }
+      if (t.classList.contains("m-in")) { t.classList.remove("error"); noteSettle(page); page.syncModels(); }
+    });
     page.renderDirs();
+    pickPreset(page, "official");
+  }
+  function setModelsOpen(p, open) {
+    var f = $(".mfield", p.el);
+    f.classList.toggle("open", open);
+    $(".mfold", f).setAttribute("aria-expanded", String(open));
+  }
+  // 第七轮：选「自己填」时地址和 key 从档位列表下面长出来，裁着长、不淡入；换回别的档位就收起，标红一并清掉。
+  // 选档位时七个模型框换成这个档位的值，之前改的不留；选自己填时模型框保持原样
+  function pickPreset(p, id) {
+    p.preset = id;
+    p.renderPresets();
+    if (id !== "custom") {
+      p.presetModels = presetsOf(S.machineId).filter(function (x) { return x.id === id; })[0].models;
+      $$(".m-in", p.el).forEach(function (i) { i.value = p.presetModels[i.dataset.tier] || ""; i.classList.remove("error"); });
+    }
+    $(".pfield", p.el).classList.toggle("custom", id === "custom");
+    if (id !== "custom") { p.urlIn.classList.remove("error"); p.keyIn.classList.remove("error"); noteSettle(p); }
+    p.syncModels();
+  }
+  // 第七轮：表单的错误不再写在输入框下面，改成从顶栏下沿滑出的浮动卡片，被顶栏下沿裁着、不淡入；
+  // 4 秒后、点一下卡片、或者标红的项都改过了，就收回去。卡片还在时再点启动，卡片左右轻晃一下
+  function noteShow(p, msg) {
+    var clip = $(".fnote-clip", p.el), card = $(".fnote", clip), bar = $(".appbar", p.el);
+    $(".fn-text", card).textContent = msg;
+    clip.style.top = bar.offsetTop + bar.offsetHeight + "px";
+    clearTimeout(p.noteTimer);
+    p.noteTimer = setTimeout(function () { noteHide(p); }, 4000);
+    if (p.noteOn) {
+      card.animate([{ translate: "0" }, { translate: "-5px 0" }, { translate: "5px 0" }, { translate: "0" }], { duration: dur("durS"), easing: "ease-in-out" });
+      return;
+    }
+    p.noteOn = true;
+    clip.hidden = false;
+    if (card._a) card._a.cancel();
+    card._a = card.animate([{ transform: "translateY(calc(-100% - 16px))" }, { transform: "none" }], { duration: dur("durM"), easing: ez("emph"), fill: "both" });
+  }
+  function noteHide(p) {
+    if (!p.noteOn) return;
+    p.noteOn = false;
+    clearTimeout(p.noteTimer);
+    var clip = $(".fnote-clip", p.el), card = $(".fnote", clip);
+    if (card._a) card._a.cancel();
+    card._a = card.animate([{ transform: "none" }, { transform: "translateY(calc(-100% - 16px))" }], { duration: dur("durS"), easing: ez("emphIn"), fill: "both" });
+    card._a.finished.then(function () { if (!p.noteOn) clip.hidden = true; }, noop);
+  }
+  // 标红的项都改过了才收卡片
+  function noteSettle(p) { if (!$(".input.error", p.el)) noteHide(p); }
+  // 第七轮：自己填时地址和 key 都要填，地址只认 http 和 https，模型名不能有空格；不过就标红、弹卡片，不启动
+  function checkCreate(p) {
+    var bad = [], msg = "";
+    if (p.preset === "custom") {
+      var url = p.urlIn.value.trim(), key = p.keyIn.value.trim();
+      if (!url) bad.push(p.urlIn);
+      if (!key) bad.push(p.keyIn);
+      if (bad.length) msg = "地址和 key 都要填";
+      else if (!/^https?:\/\/[^\s\/]+/.test(url)) { bad.push(p.urlIn); msg = "地址要以 http:// 或 https:// 开头"; }
+    }
+    var mbad = $$(".m-in", p.el).filter(function (i) { return /\s/.test(i.value.trim()); });
+    if (mbad.length) { setModelsOpen(p, true); bad = bad.concat(mbad); msg = msg || "模型名不能有空格"; }
+    bad.forEach(function (i) { i.classList.add("error"); });
+    if (msg) noteShow(p, msg);
+    return !msg;
   }
   function submitCreate(btn) {
     var p = pageOf(btn);
     if (!p || p.busy) return;
     var dir = p.dirIn.value.trim();
     if (RECENT.indexOf(dir) === -1) { p.setErr(true); return; }
+    if (!checkCreate(p)) return;
+    noteHide(p);
     p.busy = true;
     btn.textContent = "正在启动";
     btn.disabled = true;
@@ -3077,11 +3218,25 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       createNow(p, dir);
     }, 500);
   }
+  // 第七轮：自己填的新会话按接口地址归档位，没有就新开一个；官方档位不在时也新开
+  function groupForHost(host, name) {
+    var list = groupsOf(S.machineId);
+    var g = list.filter(function (x) { return x.host === host || x.def === host; })[0];
+    if (g) return g;
+    g = { id: "ep-" + host, name: name || host, def: name || host, host: name ? host : "", mono: !name, rename: true, create: true, folded: false, sessions: [] };
+    var other = list.filter(function (x) { return x.id === "other"; })[0];
+    list.splice(other ? list.indexOf(other) : list.length, 0, g);
+    return g;
+  }
   function createNow(p, dir) {
-    var name = p.nameIn.value.trim(), prompt = p.promptIn.value.trim(), g = findGroup(p.route.group);
+    var name = p.nameIn.value.trim(), prompt = p.promptIn.value.trim(), url = p.urlIn.value.trim();
+    var g = p.preset === "custom" ? groupForHost(url.replace(/^https?:\/\//, "").split(/[\/?#]/)[0])
+      : p.preset === "official" ? groupForHost("api.anthropic.com", "官方") : findGroup(p.preset);
     (function () {
-      var s = sess("n" + (++seq), name || baseName(dir), baseName(dir), "idle", "刚刚", { msgs: [{ k: "day", text: "今天 " + clock() }] });
+      var s = sess("n" + (++seq), name || baseName(dir), baseName(dir), "idle", "刚刚", { msgs: [{ k: "day", text: "今天 " + clock() }], model: p.models().main || "Opus 5.5" });
       g.sessions.unshift(s);
+      // 档位的模型跟着最近一个会话走，下次选这个档位就是这次填的值
+      g.models = p.models();
       refreshHome();
       // 和 APP 一样：会话页进来时把新建页从返回栈里拿掉，返回直接回到列表
       push({ name: "chat", id: s.id }, true);
@@ -4396,7 +4551,18 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     },
     "rename-save": function (t) { var g = findGroup(t.dataset.group), v = $("input", ov.el).value.trim(); g.name = v || g.def; closeOverlay(); refreshHome(); },
     "rename-reset": function (t) { var g = findGroup(t.dataset.group); g.name = g.def; closeOverlay(); refreshHome(); },
-    create: function (t) { push({ name: "create", group: t.dataset.group }); },
+    create: function () { push({ name: "create" }); },
+    // 第七轮：眼睛按钮切换 key 明文；「模型」一行展开收起七个档位
+    "key-eye": function (t) {
+      var p = pageOf(t), on = t.getAttribute("aria-pressed") !== "true";
+      t.setAttribute("aria-pressed", String(on));
+      t.setAttribute("aria-label", on ? "隐藏 key" : "显示 key");
+      $(".ms", t).textContent = on ? "visibility_off" : "visibility";
+      p.keyIn.type = on ? "text" : "password";
+    },
+    mfold: function (t) { setModelsOpen(pageOf(t), t.getAttribute("aria-expanded") !== "true"); },
+    "pick-preset": function (t) { pickPreset(pageOf(t), t.dataset.v); },
+    "note-close": function (t) { noteHide(pageOf(t)); },
     "open-chat": function (t) { openChat(t.dataset.id); },
     "menu-stop": function (t) {
       var s = findSession(t.dataset.v);
@@ -4779,7 +4945,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   function bindPick() {
     renderDirDesk();
     bindDirDesk();
-    bindR6();
+    bindR7();
   }
 
   // ---------- 第六轮：git 入口、Fork、Worktree ----------
@@ -4801,7 +4967,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   function wtDialog(p) {
     var d = new Date(), z = function (n) { return (n < 10 ? "0" : "") + n; };
     var name = "wt-" + z(d.getMonth() + 1) + z(d.getDate()) + "-" + z(d.getHours()) + z(d.getMinutes());
-    var o = openOverlay(dialog("在新 worktree 里开会话", '<p>在 <span class="mono">' + esc(p.s.dir) + "</span> 下另开一个 worktree，用这个会话的档位启动。</p>" +
+    var o = openOverlay(dialog("在新 worktree 里开会话", '<p>在 <span class="mono">' + esc(p.s.dir) + "</span> 下另开一个 worktree，照这个会话的接口和模型启动。</p>" +
       '<div class="field"><label>worktree 名</label><input class="input mono wt-name" value="' + name + '" autocomplete="off" spellcheck="false"><p class="fhint">只能用字母、数字、点、横线和下划线</p></div>' +
       '<div class="field"><label>第一句话</label><input class="input wt-first" placeholder="可以不填" autocomplete="off"></div>',
       '<button type="button" class="tbtn" data-act="dlg-cancel">取消</button><button type="button" class="tbtn" data-act="wt-ok">新建</button>'), "dialog");
@@ -4951,56 +5117,58 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     }
   });
 
-  // ---------- 第六轮：侧栏 ----------
+  // ---------- 第七轮：侧栏 ----------
   function toSessions() {
     goHome();
     S.machineId = "m1";
     renderSessions();
     if (S.tab !== "sessions") switchTab("sessions", false);
   }
-  function openIn(id) { toSessions(); push({ name: "chat", id: id }); }
-  function inChat(id, then) {
-    var s = findSession(id);
-    if (!(top().route.name === "chat" && top().s === s)) openIn(id);
-    setTimeout(function () { var p = top(); if (p.route.name === "chat" && p.s === s) then(p); }, dur("durM") + 80);
+  // 打开新建页（已经开着就用它），等转场走完再 then
+  function inCreate(then) {
+    var p = top();
+    if (p.route.name === "create") { then(p); return; }
+    toSessions();
+    push({ name: "create" });
+    setTimeout(function () { var q = top(); if (q.route.name === "create") then(q); }, dur("durM") + 80);
   }
-  var R6 = {
-    branches: function () {
-      toSessions();
-      var d = $('.dbr[data-key="default:clauderc-app"]', pane("sessions"));
-      if (d) { d.closest(".dgroup").scrollIntoView({ block: "start" }); branchSheet("default:clauderc-app"); }
+  function typeIn(input, v) { input.value = v; input.dispatchEvent(new Event("input", { bubbles: true })); }
+  var R7 = {
+    open: function () { inCreate(function () {}); },
+    custom: function () { inCreate(function (p) { pickPreset(p, p.preset === "custom" ? "official" : "custom"); }); },
+    models: function () { inCreate(function (p) { setModelsOpen(p, !$(".mfield", p.el).classList.contains("open")); }); },
+    preset: function () {
+      inCreate(function (p) {
+        pickPreset(p, "anyrouter");
+        setModelsOpen(p, true);
+        setTimeout(function () { typeIn($('.m-in[data-tier="haiku"]', p.el), "hy-4-flash[1M]"); }, dur("durM"));
+        setTimeout(function () { if (top() === p) submitCreate($('[data-act="submit"]', p.el)); }, dur("durM") + 600);
+      });
     },
-    menu: function () { inChat("s1", function (p) { gitMenu($('[data-act="chat-git"]', p.el)); }); },
-    fork: function () { inChat("s1", forkDialog); },
-    wt: function () { inChat("s1", wtDialog); },
-    limit: function () { openIn("s16"); },
-    reset: function () {
-      var s = findSession("s16");
-      if (!s.limit) { toast("「批量改测试」现在没停在限额上，先点重置 demo"); return; }
-      inChat("s16", function () { limitReset(s); });
+    half: function () {
+      inCreate(function (p) {
+        pickPreset(p, "custom");
+        typeIn(p.urlIn, "https://anyrouter.example");
+        typeIn(p.keyIn, "");
+        setTimeout(function () { if (top() === p) submitCreate($('[data-act="submit"]', p.el)); }, dur("durM") + 300);
+      });
     },
-    swipe: function () {
-      toSessions();
-      var row = $('.srow[data-sid="s2"]', pane("sessions"));
-      if (!row) return;
-      row.scrollIntoView({ block: "center" });
-      if (swOpen && swOpen !== row) swClose();
-      swSet(row, -SW_W, true);
-      swOpen = row;
-      note("左滑露出「停止」", dur("durM"), ez("emph"));
-    },
-    remove: function () {
-      toSessions();
-      if (!findSession("s5")) { toast("「landing 页」已经移出了，先点重置 demo"); return; }
-      var row = $('.srow[data-sid="s5"]', pane("sessions"));
-      if (row) row.scrollIntoView({ block: "center" });
-      ACT["menu-remove"]({ dataset: { v: "s5" } });
+    endpoint: function () {
+      inCreate(function (p) {
+        pickPreset(p, "custom");
+        typeIn(p.urlIn, "https://anyrouter.example");
+        typeIn(p.keyIn, "sk-demo-0123456789");
+        setModelsOpen(p, true);
+        typeIn($('.m-in[data-tier="main"]', p.el), "claude-opus-5-5[1M]");
+        typeIn($('.m-in[data-tier="haiku"]', p.el), "hy-4-flash[1M]");
+        setTimeout(function () { if (top() === p) submitCreate($('[data-act="submit"]', p.el)); }, dur("durM") + 600);
+      });
     }
   };
-  function bindR6() {
+  function bindR7() {
     $(".desk").addEventListener("click", function (e) {
-      var b = e.target.closest("[data-r6]");
-      if (b) R6[b.dataset.r6]();
+      var b = e.target.closest("[data-r7]");
+      if (b) R7[b.dataset.r7]();
     });
   }
 

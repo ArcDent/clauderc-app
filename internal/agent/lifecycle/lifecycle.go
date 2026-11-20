@@ -7,10 +7,13 @@ package lifecycle
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,11 +22,13 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"clauderc/internal/agent"
 	"clauderc/internal/agent/attach"
 	"clauderc/internal/agent/config"
 	"clauderc/internal/agent/discovery"
+	"clauderc/internal/keyfile"
 	"clauderc/internal/protocol"
 )
 
@@ -44,6 +49,13 @@ const (
 // Options configures a Handler.
 type Options struct {
 	Source discovery.Source
+	// Dir holds the files new sessions launch with, written with mode 600:
+	// the account login's copy of the user settings and the keys of custom
+	// endpoints; normally config.Config.LaunchDir. Create fails without it.
+	Dir string
+	// ExtraFlags go to claude before --bg on every create; only tests set
+	// them, to pick a permission mode or effort.
+	ExtraFlags []string
 	// WakeTimeout defaults to DefaultWakeTimeout.
 	WakeTimeout time.Duration
 	// PollInterval is how often Wake re-reads the session list; tests
@@ -126,25 +138,24 @@ func (h *Handler) Handle(ctx context.Context, req protocol.Envelope) protocol.En
 	}
 }
 
-// Create starts a background session in the requested profile and returns
-// its short id. The launch flags and providerEnv come from the profile's
-// most recent session, or from the template cache once jobs/ has none
-// left; claude gets the flags plus --bg, -n <name> when a name is given,
-// -w <worktree> when a worktree is asked for, and "--" and the first
-// message when one is given. A missing working directory
-// or a profile without a template fails before claude runs.
+// Create starts a background session and returns its short id. Its
+// launch flags and extra environment come from launchConfig; claude gets
+// them plus ExtraFlags, --bg, -n <name> when a name is given, -w
+// <worktree> when a worktree is asked for, and "--" and the first message
+// when one is given. A missing working directory or a request launchConfig
+// refuses fails before claude runs.
 func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest) (string, error) {
 	if err := checkDir(req.Cwd, "目录不存在："+req.Cwd); err != nil {
 		return "", err
 	}
 	if req.Worktree != "" && !worktreeName.MatchString(req.Worktree) {
-		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "worktree 名只能用字母、数字、点、横线和下划线，不能以点或横线开头"}
+		return "", invalid("worktree 名只能用字母、数字、点、横线和下划线，不能以点或横线开头")
 	}
-	t, ok := h.opts.Source.LaunchTemplate(req.ProfileID)
-	if !ok {
-		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: "这个档位不能新建会话"}
+	flags, env, err := h.launchConfig(req)
+	if err != nil {
+		return "", err
 	}
-	args := append(slices.Clone(t.Flags), "--bg")
+	args := append(append(flags, h.opts.ExtraFlags...), "--bg")
 	if req.Name != "" {
 		args = append(args, "-n", req.Name)
 	}
@@ -156,13 +167,13 @@ func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest)
 		args = append(args, "--", req.Prompt)
 	}
 	const failed = "启动 claude 失败，请在目标机上查看日志"
-	out, err := h.run(ctx, req.Cwd, t.ProviderEnv, "--bg", args)
+	out, err := h.run(ctx, req.Cwd, env, "--bg", args)
 	if err != nil && untrusted(out) && req.Trust {
-		if err := attach.Trust(ctx, req.Cwd, []string{h.opts.Source.ClaudePath}, envList(t.ProviderEnv)); err != nil {
+		if err := attach.Trust(ctx, req.Cwd, []string{h.opts.Source.ClaudePath}, envList(env)); err != nil {
 			h.opts.Logger.Error("trust prompt", "err", err)
 			return "", &protocol.Error{Code: protocol.CodeInternal, Message: "没能在目标机上确认信任这个目录，请在目标机上进入 " + req.Cwd + " 运行一次 claude，选「Yes, I trust this folder」后再试"}
 		}
-		out, err = h.run(ctx, req.Cwd, t.ProviderEnv, "--bg", args)
+		out, err = h.run(ctx, req.Cwd, env, "--bg", args)
 	}
 	if err != nil {
 		if untrusted(out) {
@@ -176,6 +187,185 @@ func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest)
 	}
 	h.opts.Changed()
 	return id, nil
+}
+
+// firstPartyURL is the API the account login talks to.
+const firstPartyURL = "https://api.anthropic.com"
+
+// accountPreset is the profile the account login's sessions fall into; as
+// a preset it means the account login, never that profile's template.
+const accountPreset = "api.anthropic.com"
+
+// accountSettingsFile, in Options.Dir, is the account login's copy of the
+// user settings.
+const accountSettingsFile = "account-settings.json"
+
+// maxModelLen caps a model name.
+const maxModelLen = 128
+
+// launchConfig returns the launch flags and extra environment of a new
+// session (design D8): with FromSession those of that session; otherwise
+// the custom endpoint's or the account login's flags plus one variable per
+// model tier given.
+func (h *Handler) launchConfig(req protocol.SessionCreateRequest) ([]string, map[string]string, error) {
+	if req.FromSession != "" {
+		if req.Preset != "" || req.BaseURL != "" || req.APIKey != "" || len(req.Models) > 0 {
+			return nil, nil, invalid("照抄会话时不能再选档位，也不能填接口地址、API key 和模型")
+		}
+		t, ok := h.opts.Source.SessionTemplate(req.FromSession)
+		if !ok {
+			return nil, nil, invalid("找不到这个会话的启动记录，不能照抄")
+		}
+		return slices.Clone(t.Flags), t.ProviderEnv, nil
+	}
+	env := map[string]string{}
+	for tier, model := range req.Models {
+		name, ok := discovery.ModelEnv[tier]
+		if !ok {
+			return nil, nil, invalid("不认识的模型档位：" + string(tier))
+		}
+		if model == "" || len(model) > maxModelLen || strings.ContainsFunc(model, blank) {
+			return nil, nil, invalid("模型名不能为空、不能含空格，最长 128 个字符：" + string(tier))
+		}
+		env[name] = model
+	}
+	if req.Preset != "" && (req.BaseURL != "" || req.APIKey != "") {
+		return nil, nil, invalid("选了档位就不能再填接口地址和 API key")
+	}
+	if (req.BaseURL == "") != (req.APIKey == "") {
+		return nil, nil, invalid("接口地址和 API key 要么都填，要么都不填")
+	}
+	if req.Preset != "" && req.Preset != accountPreset {
+		return h.presetConfig(req.Preset, env)
+	}
+	if h.opts.Dir == "" {
+		return nil, nil, h.internal("启动 claude 失败，请在目标机上查看日志", errors.New("lifecycle: Options.Dir is not set"))
+	}
+	var flags []string
+	var err error
+	if req.BaseURL != "" {
+		flags, err = h.endpointFlags(req.BaseURL, req.APIKey)
+	} else {
+		flags, err = h.accountFlags()
+	}
+	return flags, env, err
+}
+
+// presetConfig starts on an existing profile's endpoint. Of the profile's
+// template only --settings and providerEnv are kept, the latter without
+// the model variables: the models are the request's, and every other flag
+// follows the target machine's settings.
+func (h *Handler) presetConfig(id string, models map[string]string) ([]string, map[string]string, error) {
+	t, ok, err := h.opts.Source.Template(id)
+	if err != nil {
+		return nil, nil, h.internal("读取档位的启动记录失败，请在目标机上查看日志", err)
+	}
+	if !ok {
+		return nil, nil, invalid("这个档位没有启动记录，不能用来新建")
+	}
+	flags := []string{}
+	for i, f := range t.Flags {
+		if f == "--settings" && i+1 < len(t.Flags) {
+			flags = append(flags, f, t.Flags[i+1])
+			break
+		}
+	}
+	env := map[string]string{}
+	for k, v := range t.ProviderEnv {
+		env[k] = v
+	}
+	for _, name := range discovery.ModelEnv {
+		delete(env, name)
+	}
+	for k, v := range models {
+		env[k] = v
+	}
+	return flags, env, nil
+}
+
+// endpointFlags points claude at a custom endpoint: the key goes to a file
+// in Options.Dir named after its hash, which apiKeyHelper reads, so it is
+// never on a command line or in a job record.
+func (h *Handler) endpointFlags(baseURL, key string) ([]string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || strings.ContainsFunc(baseURL, blank) {
+		return nil, invalid("接口地址要以 http:// 或 https:// 开头，不能含空格")
+	}
+	if strings.ContainsFunc(key, blank) {
+		return nil, invalid("API key 不能含空格或换行")
+	}
+	sum := sha256.Sum256([]byte(key))
+	path := filepath.Join(h.opts.Dir, "keys", hex.EncodeToString(sum[:8])+".key")
+	if err := keyfile.Write(path, []byte(key)); err != nil {
+		return nil, h.internal("保存 API key 失败，请在目标机上查看日志", err)
+	}
+	settings, err := json.Marshal(map[string]any{
+		"env":          map[string]string{"ANTHROPIC_BASE_URL": baseURL},
+		"apiKeyHelper": "cat '" + strings.ReplaceAll(path, "'", `'\''`) + "'",
+	})
+	if err != nil {
+		return nil, h.internal("启动 claude 失败，请在目标机上查看日志", err)
+	}
+	return []string{"--settings", string(settings)}, nil
+}
+
+// accountFlags starts claude on the account login. The user settings may
+// point every launch at a gateway, which Claude Code then refuses to leave
+// (No LLM gateway), so they are left out and a copy without the gateway
+// is passed instead; project settings still apply.
+func (h *Handler) accountFlags() ([]string, error) {
+	data, err := accountSettings(filepath.Join(h.opts.Source.ClaudeDir, "settings.json"))
+	if err != nil {
+		return nil, h.internal("读取目标机的 Claude Code 设置失败，请在目标机上查看日志", err)
+	}
+	path := filepath.Join(h.opts.Dir, accountSettingsFile)
+	if err := keyfile.Write(path, data); err != nil {
+		return nil, h.internal("启动 claude 失败，请在目标机上查看日志", err)
+	}
+	return []string{"--setting-sources", "project,local", "--settings", path}, nil
+}
+
+// accountSettings returns the user settings at path, {} when there are
+// none, without what points claude at a gateway: apiKeyHelper, the API key
+// and token variables and every *_BASE_URL and CLAUDE_CODE_USE_* variable.
+// ANTHROPIC_BASE_URL is then the first-party API, so the session is
+// listed under it.
+func accountSettings(path string) ([]byte, error) {
+	settings := map[string]any{}
+	raw, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if err == nil {
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		if err := dec.Decode(&settings); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	delete(settings, "apiKeyHelper")
+	env, _ := settings["env"].(map[string]any)
+	if env == nil {
+		env = map[string]any{}
+	}
+	for name := range env {
+		if name == "ANTHROPIC_API_KEY" || name == "ANTHROPIC_AUTH_TOKEN" || strings.HasSuffix(name, "_BASE_URL") || strings.HasPrefix(name, "CLAUDE_CODE_USE_") {
+			delete(env, name)
+		}
+	}
+	env["ANTHROPIC_BASE_URL"] = firstPartyURL
+	settings["env"] = env
+	return json.MarshalIndent(settings, "", "  ")
+}
+
+// blank reports a rune that has no place in a model name, URL or key.
+func blank(r rune) bool {
+	return unicode.IsSpace(r) || unicode.IsControl(r)
+}
+
+// invalid is a CodeInvalidParams error with msg for the phone.
+func invalid(msg string) error {
+	return &protocol.Error{Code: protocol.CodeInvalidParams, Message: msg}
 }
 
 // Stop stops the running session with short id id; a session that is

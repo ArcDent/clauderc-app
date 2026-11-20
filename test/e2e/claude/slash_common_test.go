@@ -38,7 +38,7 @@ func (s *session) commandOutput(t *testing.T, name string) string {
 func TestSlashCommon(t *testing.T) {
 	probe := probeRepo(t)
 	t.Run("fork", func(t *testing.T) {
-		s := launchAt(t, "slash-fork", profileID, probe, true)
+		s := launchAt(t, "slash-fork", plain, probe, true)
 		s.send("/fork 只回复 FORKED")
 		out := s.commandOutput(t, "/fork")
 		if !strings.Contains(out, "⑂") {
@@ -61,7 +61,7 @@ func TestSlashCommon(t *testing.T) {
 		})
 	})
 	t.Run("plan", func(t *testing.T) {
-		s := launchAt(t, "slash-plan", profileID, probe, true)
+		s := launchAt(t, "slash-plan", plain, probe, true)
 		s.send("/plan")
 		if out := s.commandOutput(t, "/plan"); !strings.Contains(strings.ToLower(out), "plan mode") {
 			t.Errorf("/plan 输出 %q，want 打开计划模式", out)

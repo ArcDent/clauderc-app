@@ -12,7 +12,9 @@ import clauderc.app.protocol.GitBranchesResponse
 import clauderc.app.protocol.GitSwitchRequest
 import clauderc.app.protocol.Machine
 import clauderc.app.protocol.MachinesListResponse
+import clauderc.app.protocol.ModelTier
 import clauderc.app.protocol.Method
+import clauderc.app.protocol.Profile
 import clauderc.app.protocol.ProfileKind
 import clauderc.app.protocol.SessionCreateRequest
 import clauderc.app.protocol.SessionCreateResponse
@@ -26,6 +28,7 @@ import clauderc.app.testing.decode
 import clauderc.app.testing.eventually
 import clauderc.app.testing.machine
 import clauderc.app.testing.profileNames
+import clauderc.app.testing.sampleProfiles
 import clauderc.app.testing.sampleSessions
 import clauderc.app.testing.session
 import kotlinx.coroutines.CoroutineScope
@@ -210,12 +213,25 @@ class SessionsLogicTest {
         assertEquals("any", eventually { restarted.names("m-1").first { it.isNotEmpty() } }["anyrouter.top"])
     }
 
-    @Test fun createSendsTheChosenParameters() = runTest(dispatcher) {
+    private val officialModels = mapOf(ModelTier.Main to "claude-opus-5-5")
+    private val anyModels = sampleProfiles.first { it.id == "anyrouter.top" }.models!!
+
+    /** A form on m-1; the fleet answers on the test dispatcher, so the profiles are there at once. */
+    private fun createForm(): CreateSessionViewModel {
+        val vm = CreateSessionViewModel("m-1", Fleet(relay, scope), relay, profileNames(tmp.root, scope))
+        assertTrue(vm.state.value.presets.any { it.id == "anyrouter.top" })
+        return vm
+    }
+
+    private fun lastCreate() = relay.sent(Method.SESSION_CREATE).last().decode(SessionCreateRequest.serializer())
+
+    @Test fun officialSendsNoEndpointButItsModels() = runTest(dispatcher) {
         relay.respond(Method.DIRS_RECENT, DirsRecentResponse.serializer(), DirsRecentResponse(listOf("/Users/me/github/infra", "/Users/me/notes")))
         relay.respond(Method.SESSION_CREATE, SessionCreateResponse.serializer(), SessionCreateResponse("b2"))
-        val fleet = Fleet(relay, scope)
-        val vm = CreateSessionViewModel("m-1", "api.anthropic.com", fleet, relay, profileNames(tmp.root, scope))
-        assertEquals("迁移脚本审查", vm.state.value.templateName)
+        val vm = createForm()
+        assertEquals(ACCOUNT_PRESET, vm.state.value.preset)
+        assertEquals(officialModels, vm.state.value.models)
+        assertEquals("沿用档位的 1 项", vm.state.value.modelsSummary)
         assertEquals(listOf("/Users/me/github/infra", "/Users/me/notes"), vm.state.value.recent)
 
         vm.pickDir("/Users/me/notes")
@@ -223,31 +239,109 @@ class SessionsLogicTest {
         vm.submit()
         val req = relay.sent(Method.SESSION_CREATE).single()
         assertEquals("m-1", req.machine)
-        assertEquals(SessionCreateRequest("api.anthropic.com", "/Users/me/notes", name = null, prompt = "检查测试是否通过"), req.decode(SessionCreateRequest.serializer()))
+        // The account login: no preset, address or key, and the profile's models as they stand.
+        assertEquals(SessionCreateRequest("/Users/me/notes", models = officialModels, prompt = "检查测试是否通过"), req.decode(SessionCreateRequest.serializer()))
         assertEquals("b2", withTimeout(5_000) { vm.created.first() })
 
         vm.setDir("  /tmp/typed  ")
         vm.setName("check")
         vm.setPrompt("")
         vm.submit()
-        assertEquals(SessionCreateRequest("api.anthropic.com", "/tmp/typed", name = "check"), relay.sent(Method.SESSION_CREATE).last().decode(SessionCreateRequest.serializer()))
+        assertEquals(SessionCreateRequest("/tmp/typed", name = "check", models = officialModels), lastCreate())
     }
 
-    @Test fun missingDirectoryShowsAnErrorUnderTheField() = runTest(dispatcher) {
-        relay.fail(Method.SESSION_CREATE, ErrorCode.DIR_NOT_FOUND, "no such directory")
-        val vm = CreateSessionViewModel("m-1", "default", Fleet(relay, scope), relay, profileNames(tmp.root, scope))
-        vm.setDir("/Users/me/github/clauderc-ap")
+    @Test fun aProfileSendsItsIdAndTheModelsAsEdited() = runTest(dispatcher) {
+        relay.respond(Method.SESSION_CREATE, SessionCreateResponse.serializer(), SessionCreateResponse("b3"))
+        val vm = createForm()
+        vm.setDir("/Users/me/notes")
+        vm.pickPreset("anyrouter.top")
+        assertEquals(anyModels, vm.state.value.models)
+        assertEquals("沿用档位的 5 项", vm.state.value.modelsSummary)
+
+        vm.setModel(ModelTier.Haiku, "hy-4-flash[1M]")
+        vm.setModel(ModelTier.Sonnet, "")
+        assertEquals("改了 2 项", vm.state.value.modelsSummary)
         vm.submit()
-        assertEquals("目标机上没有这个目录", vm.state.value.dirError)
-        assertFalse(vm.state.value.submitting)
+        val want = anyModels - ModelTier.Sonnet + (ModelTier.Haiku to "hy-4-flash[1M]")
+        assertEquals(SessionCreateRequest("/Users/me/notes", preset = "anyrouter.top", models = want), lastCreate())
+        assertEquals("hy-4-flash[1M]", lastCreate().models!![ModelTier.Haiku])
+        assertFalse("a cleared tier is left out", ModelTier.Sonnet in lastCreate().models!!)
+
+        // Another profile drops what was typed and takes its own models.
+        vm.pickPreset("default")
+        assertEquals(sampleProfiles.first { it.id == "default" }.models, vm.state.value.models)
     }
 
-    @Test fun otherProfileCannotCreate() = runTest(dispatcher) {
-        val vm = CreateSessionViewModel("m-1", "other", Fleet(relay, scope), relay, profileNames(tmp.root, scope))
-        vm.setDir("/tmp")
-        assertFalse(vm.state.value.canSubmit)
+    @Test fun customNeedsBothAddressAndKey() = runTest(dispatcher) {
+        relay.respond(Method.SESSION_CREATE, SessionCreateResponse.serializer(), SessionCreateResponse("b4"))
+        val vm = createForm()
+        vm.setDir("/Users/me/notes")
+        vm.pickPreset(CUSTOM_PRESET)
+        assertEquals("「自己填」 keeps the fields as they were", officialModels, vm.state.value.models)
+        assertEquals("已填 1 项", vm.state.value.modelsSummary)
+
+        vm.setUrl("https://anyrouter.example")
+        vm.submit()
+        assertTrue("nothing is sent with one of the two", relay.sent(Method.SESSION_CREATE).isEmpty())
+        assertEquals("地址和 key 都要填", vm.state.value.note?.text)
+        assertEquals(setOf(CreateField.Key), vm.state.value.badFields)
+
+        vm.setKey("sk-1")
+        assertNull("fixing the red field takes the card away", vm.state.value.note)
+        assertTrue(vm.state.value.badFields.isEmpty())
+
+        vm.setUrl("ftp://anyrouter.example")
+        vm.submit()
+        assertEquals("地址要以 http:// 或 https:// 开头", vm.state.value.note?.text)
+        assertTrue(relay.sent(Method.SESSION_CREATE).isEmpty())
+
+        vm.setUrl(" https://anyrouter.example ")
+        vm.submit()
+        assertEquals(SessionCreateRequest("/Users/me/notes", baseUrl = "https://anyrouter.example", apiKey = "sk-1", models = officialModels), lastCreate())
+    }
+
+    @Test fun aModelWithASpaceIsRefusedAndOpensTheModels() = runTest(dispatcher) {
+        val vm = createForm()
+        vm.setDir("/Users/me/notes")
+        vm.setModel(ModelTier.Opus, "claude opus")
         vm.submit()
         assertTrue(relay.sent(Method.SESSION_CREATE).isEmpty())
+        val s = vm.state.value
+        assertEquals("模型名不能有空格", s.note?.text)
+        assertTrue(s.modelsOpen)
+        assertEquals(setOf(ModelTier.Opus), s.badModels)
+
+        // Raised again while it shows: a new serial, so the card shakes.
+        val first = s.note!!.serial
+        vm.submit()
+        assertTrue(vm.state.value.note!!.serial > first)
+        vm.dismissNote()
+        assertNull(vm.state.value.note)
+    }
+
+    @Test fun missingDirectoryMarksTheFieldAndRaisesTheCard() = runTest(dispatcher) {
+        relay.fail(Method.SESSION_CREATE, ErrorCode.DIR_NOT_FOUND, "no such directory")
+        val vm = createForm()
+        vm.setDir("/Users/me/github/clauderc-ap")
+        vm.submit()
+        assertEquals("目标机上没有这个目录", vm.state.value.note?.text)
+        assertEquals(setOf(CreateField.Dir), vm.state.value.badFields)
+        assertFalse(vm.state.value.submitting)
+        vm.setDir("/Users/me/github/clauderc-app")
+        assertNull(vm.state.value.note)
+    }
+
+    @Test fun presetsFollowTheGroupsWithoutOtherAndEndWithCustom() {
+        val options = presetOptions(sampleSessions, mapOf("anyrouter.top" to "any"))
+        assertEquals(listOf("default", ACCOUNT_PRESET, "anyrouter.top", CUSTOM_PRESET), options.map { it.id })
+        assertEquals(listOf("默认", "api.anthropic.com", "any", "自己填"), options.map { it.title })
+        assertEquals(listOf("跟目标机的全局设置", "账户登录", "沿用这个档位的地址和 key", "新的接口地址和 API key"), options.map { it.sub })
+        assertEquals(anyModels, options[2].models)
+
+        // The account login is offered before any session used it.
+        val bare = presetOptions(SessionList(profiles = listOf(Profile("default", ProfileKind.Default))), emptyMap())
+        assertEquals(listOf("default", ACCOUNT_PRESET, CUSTOM_PRESET), bare.map { it.id })
+        assertEquals("账户登录", bare[1].sub)
     }
 
     @Test fun eachGroupSplitsByDirectoryWithPendingDirectoriesFirst() {

@@ -50,6 +50,7 @@ import clauderc.app.net.RelayLink
 import clauderc.app.pair.PairScreen
 import clauderc.app.pair.PairUiState
 import java.time.Instant
+import clauderc.app.protocol.ModelTier
 import clauderc.app.protocol.UsageWindow
 import clauderc.app.protocol.UsageStale
 import clauderc.app.protocol.UsageResponse
@@ -76,10 +77,14 @@ import clauderc.app.protocol.ToolCall
 import clauderc.app.protocol.ToolImage
 import clauderc.app.protocol.ToolResult
 import clauderc.app.sessions.CreateSessionScreen
+import clauderc.app.sessions.CUSTOM_PRESET
+import clauderc.app.sessions.CreateField
 import clauderc.app.sessions.CreateUiState
+import clauderc.app.sessions.FormNote
 import clauderc.app.sessions.SessionsScreen
 import clauderc.app.sessions.SessionsUiState
 import clauderc.app.sessions.groupSessions
+import clauderc.app.sessions.presetOptions
 import clauderc.app.settings.SettingsScreen
 import clauderc.app.testing.T0
 import clauderc.app.testing.machine
@@ -498,7 +503,7 @@ class ScreensTest {
         )
         val dir = "/Users/me/github/new-repo"
         val create = CreateUiState(
-            profileTitle = "默认", templateName = "clauderc 协议", dir = dir,
+            dir = dir, presets = presetOptions(sampleSessions, mapOf("api.anthropic.com" to "官方")),
             recent = listOf(dir, "/Users/me/github/SmallProjects/android/clauderc-app", "/Users/me/github/infra", "/Users/me/github/relay-svc", "/Users/me/notes", "/Users/me/github/site"),
             untrusted = dir,
         )
@@ -794,7 +799,16 @@ class ScreensTest {
             model = "claude-opus-5-5", permissionMode = "default",
             pending = Pending("t3", PendingKind.PERMISSION, "Bash", buildJsonObject { put("command", "go vet ./... && go test ./internal/protocol/...") }),
         )
-        val create = CreateUiState(profileTitle = "默认", dir = "~/github/infra", recent = listOf("~/github/SmallProjects/android/clauderc-app", "~/github/infra", "~/github/relay-svc", "~/notes", "~/github/site"))
+        // Round 7 as index.html draws it: anyrouter.top chosen, the models open with Haiku changed; then 「自己填」
+        // with an address and key, and the floating card for a missing key.
+        val presets = presetOptions(sampleSessions, mapOf("api.anthropic.com" to "官方"))
+        val anyModels = presets.first { it.id == "anyrouter.top" }.models
+        val create = CreateUiState(
+            dir = "~/github/infra", recent = listOf("~/github/SmallProjects/android/clauderc-app", "~/github/infra", "~/github/relay-svc", "~/notes", "~/github/site"),
+            presets = presets, preset = "anyrouter.top", models = anyModels + (ModelTier.Haiku to "hy-4-flash[1M]"), presetModels = anyModels, modelsOpen = true,
+        )
+        val createCustom = create.copy(preset = CUSTOM_PRESET, presetModels = null, baseUrl = "https://anyrouter.example", apiKey = "sk-example-0123456789", modelsOpen = false)
+        val createNote = createCustom.copy(apiKey = "", badFields = setOf(CreateField.Key), note = FormNote("地址和 key 都要填", 1))
         val status = GitStatusResponse(
             "dev", "origin/dev", 2, 0,
             staged = listOf(FileStatus("internal/protocol/errors.go", change = FileChange.Added)),
@@ -818,6 +832,8 @@ class ScreensTest {
             shot("$name-02-sessions$tail", isDark, nav = 1, look = s) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
             shot("$name-03-chat$tail", isDark, look = s) { ChatScreen(chat, ChatActions()) }
             shot("$name-04-create$tail", isDark, look = s) { CreateSessionScreen(create, {}, {}, {}, {}, {}, {}, {}) }
+            shot("$name-04b-create-custom$tail", isDark, look = s) { CreateSessionScreen(createCustom, {}, {}, {}, {}, {}, {}, {}) }
+            shot("$name-04c-create-note$tail", isDark, look = s) { CreateSessionScreen(createNote, {}, {}, {}, {}, {}, {}, {}) }
             shot("$name-05-git$tail", isDark, nav = 2, look = s) { GitScreen(git, GitActions()) }
             shot("$name-06-status$tail", isDark, nav = 2, look = s) { GitScreen(git.copy(tab = GitTab.Status, busySession = "clauderc 协议"), GitActions()) }
             shot("$name-07-commit$tail", isDark, look = s) { CommitScreen("a1f3c92", Loadable(show), onBack = {}, onOpenFile = {}) }

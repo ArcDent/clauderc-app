@@ -10,8 +10,8 @@ OUTLINE = """account_tree add alt_route animation arrow_back arrow_upward check 
 chevron_right close cloud_off computer contrast delete description dns download edit error expand_more folder
 forum image more_vert palette photo_camera power_settings_new radio_button_checked radio_button_unchecked
 refresh settings style upload wallpaper warning terminal keyboard_arrow_left keyboard_arrow_up keyboard_arrow_down
-keyboard_arrow_right backspace keyboard_return call_split""".split()
-FILLED = ["computer", "forum", "account_tree", "settings"]
+keyboard_arrow_right backspace keyboard_return call_split visibility visibility_off""".split()
+FILLED = ["computer", "forum", "account_tree", "settings", "error"]
 
 
 def camel(name: str) -> str:

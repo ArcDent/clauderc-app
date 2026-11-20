@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -40,6 +41,7 @@ fun UnderlineField(
     enabled: Boolean = true,
     fontSize: TextUnit = if (mono) 15.sp else Clauderc.fontSizes.body,
     keyboardOptions: KeyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = !mono),
+    visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
     val c = Clauderc.colors
     val interaction = remember { MutableInteractionSource() }
@@ -62,6 +64,7 @@ fun UnderlineField(
         maxLines = maxLines,
         interactionSource = interaction,
         keyboardOptions = keyboardOptions,
+        visualTransformation = visualTransformation,
         cursorBrush = SolidColor(c.accent),
         textStyle = TextStyle(
             color = c.fg,

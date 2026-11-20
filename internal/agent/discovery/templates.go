@@ -6,17 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"clauderc/internal/keyfile"
 	"clauderc/internal/protocol"
 )
 
-// Template is what a new session in a profile starts with (design D5,
-// D8): the launch flags of the profile's most recent session without the
-// flags bound to that session, plus its providerEnv. It survives
+// Template is how the profile's most recent session was launched (design
+// D5, D8): its launch flags without the flags bound to that session, plus
+// its providerEnv. A new session on the profile as a preset reuses its
+// --settings and providerEnv, and phones see its models. It survives
 // `claude rm` removing every jobs/<id>/ of the profile.
 //
 // Flags may carry credentials inside --settings: never log a Template or
@@ -58,18 +59,16 @@ func (s Source) Template(profileID string) (t Template, ok bool, err error) {
 	return t, ok, nil
 }
 
-// LaunchTemplate returns what a new session in the profile with id
-// profileID starts with (design D8): the template of the profile's most
-// recent session, read from jobs/ and merged into ProfilesFile so it is
-// still there after `claude rm` removed every session of the profile. ok
-// is false for "other" and for profiles seen nowhere.
-func (s Source) LaunchTemplate(profileID string) (Template, bool) {
-	_, latest := s.scanJobs()
-	if cache := s.saveTemplates(latest); cache != nil {
-		latest = cache
+// SessionTemplate returns what a copy of the session with short id id
+// starts with (design D8): its own launch flags without the ones bound to
+// it, plus its providerEnv. ok is false when its record is missing or has
+// no launch flags.
+func (s Source) SessionTemplate(id string) (Template, bool) {
+	job := s.readJob(id)
+	if job.RespawnFlags == nil {
+		return Template{}, false
 	}
-	t, ok := latest[profileID]
-	return t, ok
+	return templateOf(profileOfJob(job), job)
 }
 
 // templateOf builds the template of profile p from one job record; ok is
@@ -87,6 +86,40 @@ func templateOf(p protocol.Profile, job jobState) (Template, bool) {
 		ProviderEnv: env,
 		UpdatedAt:   job.UpdatedAt,
 	}, true
+}
+
+// ModelEnv names the environment variable behind each model tier.
+var ModelEnv = map[protocol.ModelTier]string{
+	protocol.ModelMain:     "ANTHROPIC_MODEL",
+	protocol.ModelDefault:  "ANTHROPIC_DEFAULT_MODEL",
+	protocol.ModelOpus:     "ANTHROPIC_DEFAULT_OPUS_MODEL",
+	protocol.ModelSonnet:   "ANTHROPIC_DEFAULT_SONNET_MODEL",
+	protocol.ModelHaiku:    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+	protocol.ModelFable:    "ANTHROPIC_DEFAULT_FABLE_MODEL",
+	protocol.ModelSubagent: "CLAUDE_CODE_SUBAGENT_MODEL",
+}
+
+// modelsOf returns the models a template starts with: each tier's
+// variable in ProviderEnv, the main tier taken from a --model flag first
+// since claude prefers it over ANTHROPIC_MODEL. Nil when there is none.
+func modelsOf(t Template) map[protocol.ModelTier]string {
+	models := map[protocol.ModelTier]string{}
+	for tier, name := range ModelEnv {
+		if v := t.ProviderEnv[name]; v != "" {
+			models[tier] = v
+		}
+	}
+	for i, f := range t.Flags {
+		if f == "--model" && i+1 < len(t.Flags) && t.Flags[i+1] != "" {
+			models[protocol.ModelMain] = t.Flags[i+1]
+		} else if m, ok := strings.CutPrefix(f, "--model="); ok && m != "" {
+			models[protocol.ModelMain] = m
+		}
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	return models
 }
 
 // sessionFreeFlags drops the flags that tie a launch to one session:
@@ -141,7 +174,7 @@ func (s Source) saveTemplates(found map[string]Template) map[string]Template {
 			return cache
 		}
 	}
-	_ = writeFileAtomic(s.ProfilesFile, data)
+	_ = keyfile.Write(s.ProfilesFile, data)
 	return cache
 }
 
@@ -163,30 +196,4 @@ func readTemplates(path string) (map[string]Template, []byte, error) {
 		f.Profiles = map[string]Template{}
 	}
 	return f.Profiles, raw, nil
-}
-
-// writeFileAtomic writes data to path with mode 600 through a temp file in
-// the same directory, so readers never see half a file.
-func writeFileAtomic(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".profiles-*.json")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
 }

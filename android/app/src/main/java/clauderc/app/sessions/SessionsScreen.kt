@@ -168,7 +168,8 @@ fun SessionsScreen(
     state: SessionsUiState,
     onRefresh: () -> Unit,
     onOpenChat: (Session) -> Unit,
-    onCreate: (SessionGroup) -> Unit,
+    /** The bar's 「+」: a new session on this machine. */
+    onCreate: () -> Unit,
     onRename: (profileId: String, name: String?) -> Unit,
     onStop: (Session) -> Unit,
     onRemove: (Session) -> Unit,
@@ -211,7 +212,8 @@ fun SessionsScreen(
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            AppBar()
+            // The one way in to a new session (mockup round 7): the profile is picked on the form.
+            AppBar(actions = { if (machine != null) SymbolButton(Symbols.Add, "新建会话", onClick = onCreate, enabled = online) })
             if (machine != null && !online) {
                 Row(
                     Modifier.fillMaxWidth().background(c.surface).padding(horizontal = sp.page, vertical = sp.sp3),
@@ -262,7 +264,7 @@ fun SessionsScreen(
                     } else {
                         groups.forEach { group ->
                             item(key = "h:" + group.profile.id) {
-                                GroupHeader(group, enabled = online, onRename = { overlay = Overlay.Rename(group) }, onCreate = { onCreate(group) }, onToggle = { onToggle(group) })
+                                GroupHeader(group, onRename = { overlay = Overlay.Rename(group) }, onToggle = { onToggle(group) })
                             }
                             if (group.sessions.isEmpty()) {
                                 item(key = "e:" + group.profile.id) {
@@ -466,7 +468,7 @@ fun stopWarning(s: Session): String =
     else "对话记录会保留，之后发消息可以唤醒。"
 
 @Composable
-private fun GroupHeader(group: SessionGroup, enabled: Boolean, onRename: () -> Unit, onCreate: () -> Unit, onToggle: () -> Unit) {
+private fun GroupHeader(group: SessionGroup, onRename: () -> Unit, onToggle: () -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     Row(
@@ -536,11 +538,6 @@ private fun GroupHeader(group: SessionGroup, enabled: Boolean, onRename: () -> U
             small = true,
             modifier = Modifier.rotate(turn),
         )
-        if (group.canCreate) {
-            SymbolButton(Symbols.Add, "在${group.title}档位新建会话", onClick = onCreate, small = true, enabled = enabled)
-        } else {
-            Spacer(Modifier.size(40.dp))
-        }
     }
 }
 

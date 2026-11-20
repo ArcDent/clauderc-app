@@ -31,14 +31,13 @@ func TestMCPDialog(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, ".mcp.json"), []byte(mcp), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	var res protocol.SessionCreateResponse
-	x.must(t, protocol.MethodSessionCreate, protocol.SessionCreateRequest{
-		ProfileID: profileID, Cwd: ws, Name: "e2e-mcp_dialog-" + hex.EncodeToString(tag), Prompt: "只回复 OK",
-	}, &res)
+	id := x.create(t, plain, protocol.SessionCreateRequest{
+		Cwd: ws, Name: "e2e-mcp_dialog-" + hex.EncodeToString(tag), Prompt: "只回复 OK",
+	})
 	createdMu.Lock()
-	created = append(created, res.SessionID)
+	created = append(created, id)
 	createdMu.Unlock()
-	s := &session{x: x, t: t, id: res.SessionID, ws: ws}
+	s := &session{x: x, t: t, id: id, ws: ws}
 	t.Cleanup(s.cleanup)
 	waitFor(t, 60*time.Second, "会话在运行", func() bool {
 		tg, ok := x.target(s.id)

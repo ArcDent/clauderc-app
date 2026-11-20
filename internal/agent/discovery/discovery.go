@@ -323,7 +323,8 @@ func (s Source) ProfileOf(jobID string) protocol.Profile {
 // List returns the background sessions with their profiles, plus every
 // profile seen in the jobs history or the template cache, so groups
 // without sessions stay listed. The "other" profile is listed only while
-// a session falls into it. Templates found in jobs/ are saved to
+// a session falls into it. Each profile with a template carries the
+// models of that template. Templates found in jobs/ are saved to
 // ProfilesFile first; failing to save them does not fail List.
 func (s Source) List(ctx context.Context) (protocol.SessionList, error) {
 	list, _, err := s.ListTargets(ctx)
@@ -339,14 +340,21 @@ func (s Source) ListTargets(ctx context.Context) (protocol.SessionList, []Target
 	}
 	seen, latest := s.scanJobs()
 	for _, p := range sessionProfiles {
-		seen[p] = true
+		seen[p.ID] = p
 	}
-	for _, t := range s.saveTemplates(latest) {
-		seen[t.Profile] = true
+	templates := s.saveTemplates(latest)
+	if templates == nil {
+		templates = latest
+	}
+	for id, t := range templates {
+		seen[id] = t.Profile
 	}
 
 	profiles := []protocol.Profile{}
-	for p := range seen {
+	for id, p := range seen {
+		if t, ok := templates[id]; ok {
+			p.Models = modelsOf(t)
+		}
 		profiles = append(profiles, p)
 	}
 	rank := map[protocol.ProfileKind]int{protocol.ProfileDefault: 0, protocol.ProfileEndpoint: 1, protocol.ProfileOther: 2}
@@ -361,10 +369,10 @@ func (s Source) ListTargets(ctx context.Context) (protocol.SessionList, []Target
 }
 
 // scanJobs reads every jobs/*/state.json and returns the profiles seen
-// there, without "other", and the template of each profile's most recent
-// session.
-func (s Source) scanJobs() (map[protocol.Profile]bool, map[string]Template) {
-	seen := map[protocol.Profile]bool{}
+// there by id, without "other", and the template of each profile's most
+// recent session.
+func (s Source) scanJobs() (map[string]protocol.Profile, map[string]Template) {
+	seen := map[string]protocol.Profile{}
 	latest := map[string]Template{}
 	dirs, _ := os.ReadDir(filepath.Join(s.ClaudeDir, "jobs"))
 	for _, d := range dirs {
@@ -376,7 +384,7 @@ func (s Source) scanJobs() (map[protocol.Profile]bool, map[string]Template) {
 		if p.Kind == protocol.ProfileOther {
 			continue
 		}
-		seen[p] = true
+		seen[p.ID] = p
 		if t, ok := templateOf(p, job); ok {
 			if cur, ok := latest[p.ID]; !ok || t.UpdatedAt.After(cur.UpdatedAt) {
 				latest[p.ID] = t
@@ -386,9 +394,30 @@ func (s Source) scanJobs() (map[protocol.Profile]bool, map[string]Template) {
 	return seen, latest
 }
 
+// maxSettingsFile caps a --settings file read for its base URL.
+const maxSettingsFile = 1 << 20
+
+// settingsJSON returns the JSON of a --settings value, which claude takes
+// either inline or as the path of a file, relative to the session's cwd.
+func settingsJSON(value, cwd string) ([]byte, bool) {
+	if strings.HasPrefix(strings.TrimSpace(value), "{") {
+		return []byte(value), true
+	}
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(cwd, value)
+	}
+	info, err := os.Stat(value)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxSettingsFile {
+		return nil, false
+	}
+	raw, err := os.ReadFile(value)
+	return raw, err == nil
+}
+
 // profileOfJob applies design D5: no --settings is the default profile, a
-// --settings JSON with env.ANTHROPIC_BASE_URL is that host's profile, and
-// a missing or unreadable record (no respawnFlags) is "other".
+// --settings JSON or file with env.ANTHROPIC_BASE_URL is that host's
+// profile, and a missing or unreadable record (no respawnFlags) or
+// settings file is "other".
 func profileOfJob(job jobState) protocol.Profile {
 	if job.RespawnFlags == nil {
 		return profileOther
@@ -400,13 +429,17 @@ func profileOfJob(job jobState) protocol.Profile {
 		if i+1 >= len(job.RespawnFlags) {
 			return profileOther
 		}
+		raw, ok := settingsJSON(job.RespawnFlags[i+1], job.Cwd)
+		if !ok {
+			return profileOther
+		}
 		// Only the base URL is decoded; tokens beside it in env are skipped.
 		var settings struct {
 			Env struct {
 				BaseURL string `json:"ANTHROPIC_BASE_URL"`
 			} `json:"env"`
 		}
-		if json.Unmarshal([]byte(job.RespawnFlags[i+1]), &settings) != nil {
+		if json.Unmarshal(raw, &settings) != nil {
 			return profileOther
 		}
 		if settings.Env.BaseURL == "" {

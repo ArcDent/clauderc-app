@@ -58,7 +58,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	// list is set below, before any request can arrive.
 	var list *sessions.Handler
-	life := lifecycle.New(lifecycle.Options{Source: src, Logger: log, Changed: func() { list.Refresh() }})
+	life := lifecycle.New(lifecycle.Options{Source: src, Dir: cfg.LaunchDir, Logger: log, Changed: func() { list.Refresh() }})
 	plan := usage.New(usage.Options{ClaudeDir: cfg.ClaudeDir, UserAgent: "clauderc/" + o.Version, Logger: log})
 	chats := chat.New(chat.Options{Source: src, Push: c, Waker: life, Attach: o.Attach, ResumeFile: cfg.ResumeFile, Usage: plan.Get, Logger: log})
 	defer chats.Close()

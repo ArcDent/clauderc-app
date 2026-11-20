@@ -128,13 +128,13 @@ class LimitForkTest {
         assertEquals("/fork", relay.sent(Method.CHAT_SEND).last().decode(ChatSendRequest.serializer()).text)
     }
 
-    @Test fun worktreeStartsWithThisProfileInTheSessionsDirectory() = runTest(dispatcher) {
+    @Test fun worktreeCopiesThisSessionInTheSessionsDirectory() = runTest(dispatcher) {
         relay.respond(Method.SESSION_CREATE, SessionCreateResponse.serializer(), SessionCreateResponse("s-wt"))
         val vm = viewModel()
         vm.state.first { it.session != null }
         vm.createWorktree("wt-1119-1530", " 先跑测试 ")
         val req = relay.sent(Method.SESSION_CREATE).single().decode(SessionCreateRequest.serializer())
-        assertEquals(SessionCreateRequest("default", "/Users/me/github/clauderc-app", prompt = "先跑测试", worktree = "wt-1119-1530"), req)
+        assertEquals(SessionCreateRequest("/Users/me/github/clauderc-app", prompt = "先跑测试", worktree = "wt-1119-1530", fromSession = "s-need"), req)
         assertEquals("s-wt", withTimeout(1_000) { vm.created.first() })
         assertEquals(false, vm.state.value.creatingWorktree)
     }

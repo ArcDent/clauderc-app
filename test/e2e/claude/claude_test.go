@@ -44,13 +44,20 @@ import (
 	"clauderc/internal/protocol"
 )
 
-// profileID is a launch profile that exists only in the test's template
-// cache.
-const profileID = "e2e.clauderc.invalid"
+// launchMode picks what a test session starts with on top of the account
+// login that session.create gives a request without endpoint.
+type launchMode int
 
-// safeProfileID is profileID plus --safe-mode, which leaves out every
-// skill, plugin and custom command: its slash popup holds built-ins only.
-const safeProfileID = "e2e-safe.clauderc.invalid"
+const (
+	// plain asks before every tool and thinks little.
+	plain launchMode = iota
+	// safe adds --safe-mode, which leaves out every skill, plugin and
+	// custom command: its slash popup holds built-ins only.
+	safe
+)
+
+// plainFlags are the extra launch flags of plain.
+var plainFlags = []string{"--permission-mode", "manual", "--effort", "low"}
 
 const client = "c-e2e"
 
@@ -58,11 +65,13 @@ const client = "c-e2e"
 const longTask = "请写一篇约 2000 字的中文文章，主题是%s，直接输出正文，不要使用任何工具"
 
 type harness struct {
-	t     *testing.T
-	src   discovery.Source
-	life  *lifecycle.Handler
-	chats *chat.Handler
-	root  string // repository root
+	t    *testing.T
+	src  discovery.Source
+	life *lifecycle.Handler
+	// safeLife launches safe sessions; life serves every other request.
+	safeLife *lifecycle.Handler
+	chats    *chat.Handler
+	root     string // repository root
 
 	mu     sync.Mutex
 	events []protocol.Envelope
@@ -122,24 +131,6 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	profiles := filepath.Join(cache, "profiles.json")
-	tmpl := map[string]any{"profiles": map[string]any{
-		profileID: map[string]any{
-			"profile":     protocol.Profile{ID: profileID, Kind: protocol.ProfileEndpoint},
-			"flags":       []string{"--permission-mode", "manual", "--effort", "low"},
-			"providerEnv": map[string]string{},
-			"updatedAt":   "2000-01-01T00:00:00Z",
-		},
-		safeProfileID: map[string]any{
-			"profile":     protocol.Profile{ID: safeProfileID, Kind: protocol.ProfileEndpoint},
-			"flags":       []string{"--permission-mode", "manual", "--effort", "low", "--safe-mode"},
-			"providerEnv": map[string]string{},
-			"updatedAt":   "2000-01-01T00:00:00Z",
-		},
-	}}
-	data, _ := json.Marshal(tmpl)
-	if err := os.WriteFile(profiles, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	x := &harness{
 		t:    t,
 		src:  discovery.Source{ClaudePath: claude, ClaudeDir: filepath.Join(home, ".claude"), ProfilesFile: profiles},
@@ -157,7 +148,9 @@ func newHarness(t *testing.T) *harness {
 	for _, tg := range targets {
 		baseline[tg.ID] = true
 	}
-	x.life = lifecycle.New(lifecycle.Options{Source: x.src})
+	dir := filepath.Join(cache, "launch")
+	x.life = lifecycle.New(lifecycle.Options{Source: x.src, Dir: dir, ExtraFlags: plainFlags})
+	x.safeLife = lifecycle.New(lifecycle.Options{Source: x.src, Dir: dir, ExtraFlags: append(slices.Clone(plainFlags), "--safe-mode")})
 	x.chats = chat.New(chat.Options{
 		Source: x.src,
 		Push:   agent.PusherFunc(x.push),
@@ -192,6 +185,21 @@ func (x *harness) call(t *testing.T, method protocol.Method, body any) (protocol
 }
 
 // must is call failing the test on an error response.
+// create runs session.create through the handler l picks and returns the
+// new session's short id.
+func (x *harness) create(t *testing.T, l launchMode, req protocol.SessionCreateRequest) string {
+	t.Helper()
+	life := x.life
+	if l == safe {
+		life = x.safeLife
+	}
+	id, err := life.Create(context.Background(), req)
+	if err != nil {
+		t.Fatalf("session.create: %v", err)
+	}
+	return id
+}
+
 func (x *harness) must(t *testing.T, method protocol.Method, body, out any) {
 	t.Helper()
 	res, e := x.call(t, method, body)
@@ -265,11 +273,18 @@ func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool)
 // first message and opens its chat; cleanup stops and removes it.
 func launch(t *testing.T, name string) *session {
 	t.Helper()
-	return launchIn(t, name, profileID)
+	return launchIn(t, name, plain)
 }
 
-// launchIn is launch in the given test profile.
-func launchIn(t *testing.T, name, profile string) *session {
+// launchIn is launch with what l picks.
+func launchIn(t *testing.T, name string, l launchMode) *session {
+	t.Helper()
+	return launchAt(t, name, l, workspace(t, name), false)
+}
+
+// workspace makes a new directory for test name under .local/e2e-ws; the
+// session's cleanup deletes it.
+func workspace(t *testing.T, name string) string {
 	t.Helper()
 	tag := make([]byte, 3)
 	_, _ = rand.Read(tag)
@@ -277,7 +292,7 @@ func launchIn(t *testing.T, name, profile string) *session {
 	if err := os.MkdirAll(ws, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return launchAt(t, name, profile, ws, false)
+	return ws
 }
 
 // probeRepo is the trusted git repository under .local/e2e-ws whose
@@ -294,22 +309,27 @@ func probeRepo(t *testing.T) string {
 
 // launchAt is launchIn in the existing workspace ws; cleanup deletes ws
 // unless keep.
-func launchAt(t *testing.T, name, profile, ws string, keep bool) *session {
+func launchAt(t *testing.T, name string, l launchMode, ws string, keep bool) *session {
+	t.Helper()
+	return start(t, name, l, ws, keep, nil)
+}
+
+// start is launchAt with the model tiers models set.
+func start(t *testing.T, name string, l launchMode, ws string, keep bool, models map[protocol.ModelTier]string) *session {
 	t.Helper()
 	x := h(t)
 	tag := make([]byte, 3)
 	_, _ = rand.Read(tag)
-	var res protocol.SessionCreateResponse
-	x.must(t, protocol.MethodSessionCreate, protocol.SessionCreateRequest{
-		ProfileID: profile, Cwd: ws, Name: "e2e-" + name + "-" + hex.EncodeToString(tag), Prompt: "只回复 OK",
-	}, &res)
-	if baseline[res.SessionID] {
-		t.Fatalf("新建返回的 %s 是测试前已有的会话", res.SessionID)
+	id := x.create(t, l, protocol.SessionCreateRequest{
+		Cwd: ws, Name: "e2e-" + name + "-" + hex.EncodeToString(tag), Prompt: "只回复 OK", Models: models,
+	})
+	if baseline[id] {
+		t.Fatalf("新建返回的 %s 是测试前已有的会话", id)
 	}
 	createdMu.Lock()
-	created = append(created, res.SessionID)
+	created = append(created, id)
 	createdMu.Unlock()
-	s := &session{x: x, t: t, id: res.SessionID, ws: ws, keep: keep}
+	s := &session{x: x, t: t, id: id, ws: ws, keep: keep}
 	t.Cleanup(s.cleanup)
 
 	waitFor(t, 60*time.Second, "会话出现在列表里", func() bool {
@@ -591,6 +611,50 @@ func TestSend(t *testing.T) {
 	if r := s.reply(s.waitUser(msg, m, 15*time.Second), 120*time.Second); !strings.Contains(r, "2") {
 		t.Errorf("回复 %q 不含 2", r)
 	}
+}
+
+// TestCreateAuth starts a session without endpoint, so on the account
+// login, with its main model written as in ANTHROPIC_MODEL. On a machine
+// whose user settings point every launch at a gateway, Claude Code used to
+// stop such a session at once with "No LLM gateway", nothing sent.
+func TestCreateAuth(t *testing.T) {
+	const model, haiku = "claude-opus-5-5[1M]", "hy-4-flash[1M]"
+	s := start(t, "create_auth", plain, workspace(t, "create_auth"), false, map[protocol.ModelTier]string{protocol.ModelMain: model, protocol.ModelHaiku: haiku})
+	if r := s.reply(s.waitUser("只回复 OK", 0, 15*time.Second), 120*time.Second); !strings.Contains(r, "OK") {
+		t.Errorf("回复 %q 不含 OK", r)
+	}
+	raw, err := os.ReadFile(filepath.Join(s.x.src.ClaudeDir, "jobs", s.id, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var job struct {
+		RespawnFlags []string `json:"respawnFlags"`
+		Detail       string   `json:"detail"`
+	}
+	if err := json.Unmarshal(raw, &job); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(job.Detail, "No LLM gateway") {
+		t.Fatalf("会话被拒：%s", job.Detail)
+	}
+	if i := slices.Index(job.RespawnFlags, "--model"); i < 0 || i+1 >= len(job.RespawnFlags) || job.RespawnFlags[i+1] != model {
+		t.Errorf("respawnFlags = %q，want --model %s", job.RespawnFlags, model)
+	}
+	// 新会话是官方档位最近的一条，档位列出的模型就是这次填的，手机下次选它看到的也是这些
+	list, err := s.x.src.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range list.Profiles {
+		if p.ID != "api.anthropic.com" {
+			continue
+		}
+		if p.Models[protocol.ModelMain] != model || p.Models[protocol.ModelHaiku] != haiku {
+			t.Errorf("api.anthropic.com 档位的模型 = %v，want main=%s haiku=%s", p.Models, model, haiku)
+		}
+		return
+	}
+	t.Errorf("档位列表里没有 api.anthropic.com：%+v", list.Profiles)
 }
 
 func TestMultiline(t *testing.T) {

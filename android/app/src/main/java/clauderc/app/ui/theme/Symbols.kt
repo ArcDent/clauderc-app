@@ -33,6 +33,7 @@ object Symbols {
     val Download by lazy { symbol("download", SymbolPaths.download) }
     val Edit by lazy { symbol("edit", SymbolPaths.edit) }
     val Error by lazy { symbol("error", SymbolPaths.error) }
+    val ErrorFilled by lazy { symbol("error_filled", SymbolPaths.errorFilled) }
     val ExpandMore by lazy { symbol("expand_more", SymbolPaths.expandMore) }
     val Folder by lazy { symbol("folder", SymbolPaths.folder) }
     val Forum by lazy { symbol("forum", SymbolPaths.forum) }
@@ -55,6 +56,8 @@ object Symbols {
     val Style by lazy { symbol("style", SymbolPaths.style) }
     val Terminal by lazy { symbol("terminal", SymbolPaths.terminal) }
     val Upload by lazy { symbol("upload", SymbolPaths.upload) }
+    val Visibility by lazy { symbol("visibility", SymbolPaths.visibility) }
+    val VisibilityOff by lazy { symbol("visibility_off", SymbolPaths.visibilityOff) }
     val Wallpaper by lazy { symbol("wallpaper", SymbolPaths.wallpaper) }
     val Warning by lazy { symbol("warning", SymbolPaths.warning) }
 }

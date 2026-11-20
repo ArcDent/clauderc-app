@@ -23,6 +23,8 @@ import clauderc.app.pair.PairScreen
 import clauderc.app.pair.PairUiState
 import clauderc.app.sessions.CreateSessionScreen
 import clauderc.app.sessions.CreateUiState
+import clauderc.app.sessions.presetOptions
+import clauderc.app.testing.sampleSessions
 import clauderc.app.ui.theme.ClaudercTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -58,7 +60,7 @@ class PageOpaqueTest {
 
     @Test fun createSession() = assertOpaque {
         CreateSessionScreen(
-            CreateUiState(profileTitle = "官方", profileHost = "api.anthropic.com", dir = "~/github/infra", recent = listOf("~/github/infra", "~/notes")),
+            CreateUiState(dir = "~/github/infra", recent = listOf("~/github/infra", "~/notes"), presets = presetOptions(sampleSessions, emptyMap())),
             onClose = {}, onSubmit = {}, onDir = {}, onPickDir = {}, onShowAllDirs = {}, onName = {}, onPrompt = {},
         )
     }
@@ -74,7 +76,7 @@ class PageOpaqueTest {
     // 贴纸 paints the same pages on its paper colour.
     @Test fun createSessionInSticker() = assertOpaque(UiStyle.Sticker) {
         CreateSessionScreen(
-            CreateUiState(profileTitle = "官方", profileHost = "api.anthropic.com", dir = "~/github/infra", recent = listOf("~/github/infra", "~/notes")),
+            CreateUiState(dir = "~/github/infra", recent = listOf("~/github/infra", "~/notes"), presets = presetOptions(sampleSessions, emptyMap())),
             onClose = {}, onSubmit = {}, onDir = {}, onPickDir = {}, onShowAllDirs = {}, onName = {}, onPrompt = {},
         )
     }

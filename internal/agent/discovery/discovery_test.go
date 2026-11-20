@@ -102,7 +102,7 @@ func TestProfileOf(t *testing.T) {
 		"miss0001": {ID: "other", Kind: protocol.ProfileOther},
 	}
 	for id, want := range cases {
-		if got := src.ProfileOf(id); got != want {
+		if got := src.ProfileOf(id); !reflect.DeepEqual(got, want) {
 			t.Errorf("ProfileOf(%s) = %+v, want %+v", id, got, want)
 		}
 	}
@@ -130,11 +130,12 @@ func TestList(t *testing.T) {
 		}
 	}
 	// relay.example.net only appears in the jobs/hist0001 history record;
-	// order is default, endpoints by id, other.
+	// order is default, endpoints by id, other. Models come from each
+	// profile's most recent session.
 	wantProfiles := []protocol.Profile{
-		{ID: "default", Kind: protocol.ProfileDefault},
+		{ID: "default", Kind: protocol.ProfileDefault, Models: map[protocol.ModelTier]string{protocol.ModelMain: "claude-opus-5-5"}},
 		{ID: "anyrouter.top", Kind: protocol.ProfileEndpoint},
-		{ID: "api.anthropic.com", Kind: protocol.ProfileEndpoint},
+		{ID: "api.anthropic.com", Kind: protocol.ProfileEndpoint, Models: map[protocol.ModelTier]string{protocol.ModelMain: "claude-opus-5-5"}},
 		{ID: "relay.example.net", Kind: protocol.ProfileEndpoint},
 		{ID: "other", Kind: protocol.ProfileOther},
 	}
@@ -142,7 +143,7 @@ func TestList(t *testing.T) {
 		t.Fatalf("profiles = %+v, want %+v", got.Profiles, wantProfiles)
 	}
 	for i := range wantProfiles {
-		if got.Profiles[i] != wantProfiles[i] {
+		if !reflect.DeepEqual(got.Profiles[i], wantProfiles[i]) {
 			t.Errorf("profiles = %+v, want %+v", got.Profiles, wantProfiles)
 			break
 		}
@@ -259,7 +260,7 @@ func TestProfileOfRejectsBadIDs(t *testing.T) {
 	src := sourceAt(t, dir)
 	other := protocol.Profile{ID: "other", Kind: protocol.ProfileOther}
 	for _, id := range []string{"../x", "", "a/b", "toolongid1"} {
-		if got := src.ProfileOf(id); got != other {
+		if got := src.ProfileOf(id); !reflect.DeepEqual(got, other) {
 			t.Errorf("ProfileOf(%q) = %+v, want other", id, got)
 		}
 	}
@@ -283,6 +284,74 @@ func TestProfileOfNonStringBaseURL(t *testing.T) {
 		`{"respawnFlags": ["--settings", "{\"env\":{\"ANTHROPIC_BASE_URL\":123,\"ANTHROPIC_AUTH_TOKEN\":\"t\"}}"]}`)
 	if got := (discovery.Source{ClaudeDir: dir}).ProfileOf("num00001"); got.Kind != protocol.ProfileOther {
 		t.Fatalf("ProfileOf = %+v, want other", got)
+	}
+}
+
+// A --settings value may be a file, as for the account login's settings
+// copy: its base URL names the profile, and a file that cannot be read is
+// "other".
+// A profile lists the models of its most recent session: --model wins
+// over ANTHROPIC_MODEL for the main tier, the other tiers come from
+// providerEnv, and "other" has none.
+func TestListProfileModels(t *testing.T) {
+	dir := copySample(t, "profiles")
+	raw, _ := json.Marshal(map[string]any{
+		"state":        "done",
+		"respawnFlags": []string{"--settings", `{"env":{"ANTHROPIC_BASE_URL":"https://anyrouter.top"}}`, "--permission-mode", "auto", "--model", "claude-opus-5-5[1M]"},
+		"providerEnv":  map[string]string{"ANTHROPIC_MODEL": "x", "ANTHROPIC_DEFAULT_HAIKU_MODEL": "hy-4-flash[1M]", "CLAUDE_BG_SESSION_CREDENTIAL": "none"},
+		"cwd":          "/w/c",
+		"updatedAt":    "2026-11-14T08:00:00.000Z",
+	})
+	writeFile(t, filepath.Join(dir, "jobs", "anyr0003", "state.json"), string(raw))
+	got, err := sourceAt(t, dir).List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	want := map[protocol.ModelTier]string{protocol.ModelMain: "claude-opus-5-5[1M]", protocol.ModelHaiku: "hy-4-flash[1M]"}
+	seen := map[string]bool{}
+	for _, p := range got.Profiles {
+		seen[p.ID] = true
+		switch p.ID {
+		case "anyrouter.top":
+			if !reflect.DeepEqual(p.Models, want) {
+				t.Errorf("anyrouter.top models = %v, want %v", p.Models, want)
+			}
+		case "other":
+			if p.Models != nil {
+				t.Errorf("other models = %v, want none", p.Models)
+			}
+		}
+	}
+	if !seen["anyrouter.top"] || !seen["other"] {
+		t.Fatalf("profiles = %+v, want anyrouter.top and other", got.Profiles)
+	}
+}
+
+func TestProfileOfSettingsFile(t *testing.T) {
+	dir := t.TempDir()
+	copyPath := filepath.Join(t.TempDir(), "account-settings.json")
+	writeFile(t, copyPath, `{"hooks":{},"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}`)
+	work := filepath.Join(t.TempDir(), "work")
+	writeFile(t, filepath.Join(work, "rel.json"), `{"env":{"ANTHROPIC_BASE_URL":"https://relay.example.net/v1"}}`)
+	job := func(id, settings, cwd string) {
+		raw, _ := json.Marshal(map[string]any{"respawnFlags": []string{"--setting-sources", "project,local", "--settings", settings}, "cwd": cwd})
+		writeFile(t, filepath.Join(dir, "jobs", id, "state.json"), string(raw))
+	}
+	job("file0001", copyPath, "/w")
+	job("file0002", "rel.json", work)
+	job("file0003", filepath.Join(t.TempDir(), "gone.json"), "/w")
+	job("file0004", t.TempDir(), "/w")
+	src := discovery.Source{ClaudeDir: dir}
+	cases := map[string]protocol.Profile{
+		"file0001": {ID: "api.anthropic.com", Kind: protocol.ProfileEndpoint},
+		"file0002": {ID: "relay.example.net", Kind: protocol.ProfileEndpoint},
+		"file0003": {ID: "other", Kind: protocol.ProfileOther},
+		"file0004": {ID: "other", Kind: protocol.ProfileOther},
+	}
+	for id, want := range cases {
+		if got := src.ProfileOf(id); !reflect.DeepEqual(got, want) {
+			t.Errorf("ProfileOf(%s) = %+v, want %+v", id, got, want)
+		}
 	}
 }
 
@@ -356,7 +425,7 @@ func TestTemplates(t *testing.T) {
 			if err != nil || !ok {
 				t.Fatalf("Template(%s): ok %v err %v", want.Profile.ID, ok, err)
 			}
-			if got.Profile != want.Profile || !reflect.DeepEqual(got.Flags, want.Flags) || !reflect.DeepEqual(got.ProviderEnv, want.ProviderEnv) {
+			if !reflect.DeepEqual(got.Profile, want.Profile) || !reflect.DeepEqual(got.Flags, want.Flags) || !reflect.DeepEqual(got.ProviderEnv, want.ProviderEnv) {
 				t.Errorf("Template(%s) = %+v, want %+v", want.Profile.ID, got, want)
 			}
 		}
@@ -402,7 +471,7 @@ func TestTemplates(t *testing.T) {
 	}
 	found := false
 	for _, p := range got.Profiles {
-		found = found || p == protocol.Profile{ID: "anyrouter.top", Kind: protocol.ProfileEndpoint}
+		found = found || (p.ID == "anyrouter.top" && p.Kind == protocol.ProfileEndpoint)
 	}
 	if !found {
 		t.Fatalf("anyrouter.top missing from %+v after its jobs were removed", got.Profiles)

@@ -11,10 +11,14 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -99,14 +103,15 @@ class ListScreensTest {
         }
     }
 
-    @Test fun groupsShowWithEmptyProfileAndNoCreateInOther() {
+    @Test fun groupsShowWithEmptyProfileAndOneCreateButtonInTheBar() {
         sessions()
         compose.onNodeWithText("默认").assertIsDisplayed()
-        compose.onNodeWithContentDescription("在默认档位新建会话").assertIsDisplayed()
+        // Round 7: one 「+」 in the bar; the profile is picked on the form, so no group header has one.
+        compose.onNodeWithContentDescription("新建会话").assertIsDisplayed()
+        assertEquals(0, compose.onAllNodesWithContentDescription("档位新建会话", substring = true).fetchSemanticsNodes().size)
         compose.onNodeWithTag("sessionList").performScrollToNode(hasText("读不到启动参数"))
         compose.onNodeWithText("没有会话").assertIsDisplayed()
         compose.onNodeWithText("读不到启动参数").assertIsDisplayed()
-        assertEquals(0, compose.onAllNodesWithContentDescription("在其他档位新建会话").fetchSemanticsNodes().size)
     }
 
     @Test fun pullingDownRefreshes() {
@@ -171,35 +176,57 @@ class ListScreensTest {
         assertEquals(0, compose.onAllNodes(hasText("停止")).fetchSemanticsNodes().size)
     }
 
-    @Test fun createFormShowsMissingDirectoryAndRecentDirs() {
+    @Test fun createFormMarksAMissingDirectoryWithTheFloatingCard() {
         val picked = mutableListOf<String>()
         compose.setContent {
             ClaudercTheme(darkTheme = false) {
                 CreateSessionScreen(
                     state = CreateUiState(
-                        profileTitle = "官方",
-                        profileHost = "api.anthropic.com",
-                        templateName = "迁移脚本审查",
                         dir = "/Users/me/github/clauderc-ap",
                         recent = listOf("/Users/me/github/infra", "/Users/me/notes"),
-                        dirError = "目标机上没有这个目录",
+                        presets = presetOptions(sampleSessions, emptyMap()),
+                        badFields = setOf(CreateField.Dir),
+                        note = FormNote("目标机上没有这个目录", 1),
                     ),
                     onClose = {}, onSubmit = {}, onDir = {}, onPickDir = { picked += it },
                     onShowAllDirs = {}, onName = {}, onPrompt = {},
                 )
             }
         }
+        compose.onNodeWithTag("formNote").assertIsDisplayed()
         compose.onNodeWithText("目标机上没有这个目录").assertIsDisplayed()
-        compose.onNode(hasText("沿用「迁移脚本审查」的启动参数", substring = true)).assertIsDisplayed()
+        // The profile is picked on the form now; nothing says which profile's flags it copies.
+        assertEquals(0, compose.onAllNodes(hasText("启动参数", substring = true)).fetchSemanticsNodes().size)
         compose.onNodeWithText("~/notes").performClick()
         assertEquals(listOf("/Users/me/notes"), picked)
+    }
+
+    @Test fun createFormListsTheProfilesAndShowsAddressAndKeyOnlyForCustom() {
+        var state by mutableStateOf(CreateUiState(dir = "/Users/me/notes", presets = presetOptions(sampleSessions, emptyMap())))
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                CreateSessionScreen(
+                    state, onClose = {}, onSubmit = {}, onDir = {}, onPickDir = {}, onShowAllDirs = {}, onName = {}, onPrompt = {},
+                    onPreset = { state = state.copy(preset = it) }, onToggleKey = { state = state.copy(keyShown = !state.keyShown) },
+                )
+            }
+        }
+        for (t in listOf("默认", "api.anthropic.com", "anyrouter.top", "自己填", "账户登录")) compose.onNodeWithText(t).performScrollTo().assertIsDisplayed()
+        assertEquals("「其他」 cannot start sessions", 0, compose.onAllNodes(hasText("其他")).fetchSemanticsNodes().size)
+        assertEquals(0, compose.onAllNodes(hasText("接口地址")).fetchSemanticsNodes().size)
+        compose.onNodeWithText("自己填").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("接口地址").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("显示 key").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("隐藏 key").assertIsDisplayed()
     }
 
     @Test fun createButtonIsDisabledWithoutADirectory() {
         compose.setContent {
             ClaudercTheme(darkTheme = false) {
                 CreateSessionScreen(
-                    state = CreateUiState(profileTitle = "默认"),
+                    state = CreateUiState(),
                     onClose = {}, onSubmit = {}, onDir = {}, onPickDir = {}, onShowAllDirs = {}, onName = {}, onPrompt = {},
                 )
             }

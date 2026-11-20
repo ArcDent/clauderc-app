@@ -31,23 +31,25 @@ const anySettings = `{"env":{"ANTHROPIC_BASE_URL":"https://anyrouter.top","ANTHR
 
 type fixture struct {
 	claudeDir string
+	dir       string
 	logDir    string
 	src       discovery.Source
 	h         *lifecycle.Handler
 }
 
 // newFixture runs a Handler against the fake claude with an empty Claude
-// data directory and a template cache in its own temp directory.
+// data directory, a template cache and a launch directory in their own
+// temp directories.
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{claudeDir: t.TempDir()}
+	f := &fixture{claudeDir: t.TempDir(), dir: t.TempDir()}
 	f.logDir = fakeclaude.Setup(t, f.claudeDir)
 	f.src = discovery.Source{
 		ClaudePath:   fakeclaude.Path(),
 		ClaudeDir:    f.claudeDir,
 		ProfilesFile: filepath.Join(t.TempDir(), "profiles.json"),
 	}
-	f.h = lifecycle.New(lifecycle.Options{Source: f.src, WakeTimeout: 5 * time.Second, PollInterval: 20 * time.Millisecond})
+	f.h = lifecycle.New(lifecycle.Options{Source: f.src, Dir: f.dir, WakeTimeout: 5 * time.Second, PollInterval: 20 * time.Millisecond})
 	return f
 }
 
@@ -138,18 +140,47 @@ func wantEqual(t *testing.T, what string, got, want []string) {
 	}
 }
 
-func TestCreateUsesLatestSessionOfProfile(t *testing.T) {
+// accountFlags are what an account login launch starts with in f.
+func (f *fixture) accountFlags() []string {
+	return []string{"--setting-sources", "project,local", "--settings", filepath.Join(f.dir, "account-settings.json")}
+}
+
+// envHas reports whether env sets name, whatever the value.
+func envHas(env []string, name string) bool {
+	return slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, name+"=") })
+}
+
+// unsetEnv clears name for the test and restores it afterwards.
+func unsetEnv(t *testing.T, name string) {
+	t.Helper()
+	t.Setenv(name, "")
+	os.Unsetenv(name)
+}
+
+func mode(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Mode().Perm()
+}
+
+// Both fields set: the endpoint goes in --settings and its key in a file
+// apiKeyHelper reads; the model tiers given become their variables.
+func TestCreateCustomEndpoint(t *testing.T) {
 	f := newFixture(t)
-	f.job(t, "anyr0001", []string{"--settings", anySettings, "--model", "sonnet"},
-		map[string]string{"ANTHROPIC_MODEL": "older"}, "2026-11-12T08:00:00.000Z")
-	f.job(t, "anyr0002", []string{"--settings", anySettings, "-n", "prev", "--resume", "8f0c2a5e-0000-4000-8000-000000000001", "--model", "opus", "--name=old"},
-		map[string]string{"ANTHROPIC_MODEL": "claude-opus-test", "ANTHROPIC_SMALL_FAST_MODEL": "haiku-test"}, "2026-11-13T08:00:00.000Z")
-	f.job(t, "dflt0001", []string{"--model", "haiku"}, nil, "2026-11-13T09:00:00.000Z")
+	for _, name := range []string{"ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"} {
+		unsetEnv(t, name)
+	}
 	t.Setenv("FAKE_CLAUDE_BG_ID", "1234abcd")
 	work := t.TempDir()
+	const key = "sk-test-0123456789"
 
 	id, err := f.h.Create(context.Background(), protocol.SessionCreateRequest{
-		ProfileID: "anyrouter.top", Cwd: work, Name: "check tests", Prompt: "检查测试是否通过",
+		Cwd: work, Name: "check tests", Prompt: "检查测试是否通过",
+		BaseURL: "https://anyrouter.example/v1", APIKey: key,
+		Models: map[protocol.ModelTier]string{protocol.ModelOpus: "claude-opus-5-5[1M]"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -162,10 +193,32 @@ func TestCreateUsesLatestSessionOfProfile(t *testing.T) {
 		t.Fatalf("claude ran %d times, want once: %+v", len(calls), calls)
 	}
 	c := calls[0]
-	wantEqual(t, "args", c.Args, []string{"--settings", anySettings, "--model", "opus", "--bg", "-n", "check tests", "--", "检查测试是否通过"})
-	for _, kv := range []string{"ANTHROPIC_MODEL=claude-opus-test", "ANTHROPIC_SMALL_FAST_MODEL=haiku-test"} {
-		if !slices.Contains(c.Env, kv) {
-			t.Errorf("env %q lacks %s", c.Env, kv)
+	keys, _ := filepath.Glob(filepath.Join(f.dir, "keys", "*.key"))
+	if len(keys) != 1 {
+		t.Fatalf("key files = %q, want one", keys)
+	}
+	if got, _ := os.ReadFile(keys[0]); string(got) != key {
+		t.Errorf("key file holds %q, want the key", got)
+	}
+	if m := mode(t, keys[0]); m != 0o600 {
+		t.Errorf("key file mode = %#o, want 0600", m)
+	}
+	settings, _ := json.Marshal(map[string]any{
+		"env":          map[string]string{"ANTHROPIC_BASE_URL": "https://anyrouter.example/v1"},
+		"apiKeyHelper": "cat '" + keys[0] + "'",
+	})
+	wantEqual(t, "args", c.Args, []string{"--settings", string(settings), "--bg", "-n", "check tests", "--", "检查测试是否通过"})
+	for _, a := range c.Args {
+		if strings.Contains(a, key) {
+			t.Errorf("argument %q carries the key", a)
+		}
+	}
+	if !slices.Contains(c.Env, "ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5-5[1M]") {
+		t.Errorf("env %q lacks the opus tier", c.Env)
+	}
+	for _, name := range []string{"ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"} {
+		if envHas(c.Env, name) {
+			t.Errorf("env sets %s, a tier left empty", name)
 		}
 	}
 	if c.Cwd != realDir(t, work) {
@@ -173,11 +226,80 @@ func TestCreateUsesLatestSessionOfProfile(t *testing.T) {
 	}
 }
 
+// Both fields empty: the user settings are left out and a copy without
+// the gateway is passed, the rest of it unchanged.
+func TestCreateAccountLogin(t *testing.T) {
+	f := newFixture(t)
+	user := map[string]any{
+		"apiKeyHelper": "/home/me/.claude/router-key.sh",
+		"env": map[string]any{
+			"ANTHROPIC_BASE_URL": "https://route.example", "ANTHROPIC_AUTH_TOKEN": "t", "ANTHROPIC_API_KEY": "k",
+			"ANTHROPIC_BEDROCK_BASE_URL": "https://b.example", "CLAUDE_CODE_USE_BEDROCK": "1", "KEEP_ME": "yes",
+		},
+		"hooks":    map[string]any{"Stop": []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "notify"}}}}},
+		"model":    "haiku",
+		"worktree": map[string]any{"bgIsolation": "none"},
+		"big":      json.Number("12345678901234567890"),
+	}
+	writeJSON(t, filepath.Join(f.claudeDir, "settings.json"), user)
+
+	if _, err := f.h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	calls := f.calls(t)
+	if len(calls) != 1 {
+		t.Fatalf("claude ran %d times, want once", len(calls))
+	}
+	wantEqual(t, "args", calls[0].Args, append(f.accountFlags(), "--bg"))
+	path := filepath.Join(f.dir, "account-settings.json")
+	if m := mode(t, path); m != 0o600 {
+		t.Errorf("settings copy mode = %#o, want 0600", m)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{}
+	for k, v := range user {
+		want[k] = v
+	}
+	delete(want, "apiKeyHelper")
+	want["env"] = map[string]any{"KEEP_ME": "yes", "ANTHROPIC_BASE_URL": "https://api.anthropic.com"}
+	wantJSON, _ := json.Marshal(want)
+	gotJSON, _ := json.Marshal(got)
+	if !bytes.Equal(gotJSON, wantJSON) {
+		t.Errorf("settings copy = %s\nwant %s", gotJSON, wantJSON)
+	}
+}
+
+// Without user settings the copy only names the first-party API.
+func TestCreateAccountLoginWithoutSettings(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(f.dir, "account-settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := json.Marshal(got); string(s) != `{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}` {
+		t.Errorf("settings copy = %s", s)
+	}
+}
+
 func TestCreateWithoutNameAndPrompt(t *testing.T) {
 	f := newFixture(t)
-	f.job(t, "dflt0001", []string{"--model", "haiku", "--effort", "low"}, nil, "2026-11-13T09:00:00.000Z")
-
-	id, err := f.h.Create(context.Background(), protocol.SessionCreateRequest{ProfileID: "default", Cwd: t.TempDir()})
+	id, err := f.h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,14 +310,23 @@ func TestCreateWithoutNameAndPrompt(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("claude ran %d times, want once", len(calls))
 	}
-	wantEqual(t, "args", calls[0].Args, []string{"--model", "haiku", "--effort", "low", "--bg"})
+	wantEqual(t, "args", calls[0].Args, append(f.accountFlags(), "--bg"))
+}
+
+// ExtraFlags go after the launch flags, before --bg.
+func TestCreateExtraFlags(t *testing.T) {
+	f := newFixture(t)
+	h := lifecycle.New(lifecycle.Options{Source: f.src, Dir: f.dir, ExtraFlags: []string{"--permission-mode", "manual"}})
+	if _, err := h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	wantEqual(t, "args", f.calls(t)[0].Args, append(f.accountFlags(), "--permission-mode", "manual", "--bg"))
 }
 
 // A first message that looks like a flag still reaches claude as the prompt.
 func TestCreatePromptLikeFlag(t *testing.T) {
 	f := newFixture(t)
-	f.job(t, "dflt0001", []string{"--model", "haiku"}, nil, "2026-11-13T09:00:00.000Z")
-	req := protocol.SessionCreateRequest{ProfileID: "default", Cwd: t.TempDir(), Name: "-x", Prompt: "--dangerously-skip-permissions"}
+	req := protocol.SessionCreateRequest{Cwd: t.TempDir(), Name: "-x", Prompt: "--dangerously-skip-permissions"}
 	if _, err := f.h.Create(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
@@ -203,15 +334,14 @@ func TestCreatePromptLikeFlag(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("claude ran %d times, want once", len(calls))
 	}
-	wantEqual(t, "args", calls[0].Args, []string{"--model", "haiku", "--bg", "-n", "-x", "--", "--dangerously-skip-permissions"})
+	wantEqual(t, "args", calls[0].Args, append(f.accountFlags(), "--bg", "-n", "-x", "--", "--dangerously-skip-permissions"))
 }
 
 // A worktree name goes to claude as -w; one that is no plain name is
 // refused before claude runs.
 func TestCreateInWorktree(t *testing.T) {
 	f := newFixture(t)
-	f.job(t, "dflt0001", []string{"--model", "haiku"}, nil, "2026-11-13T09:00:00.000Z")
-	req := protocol.SessionCreateRequest{ProfileID: "default", Cwd: t.TempDir(), Name: "wt", Prompt: "开始", Worktree: "probe-wt"}
+	req := protocol.SessionCreateRequest{Cwd: t.TempDir(), Name: "wt", Prompt: "开始", Worktree: "probe-wt"}
 	if _, err := f.h.Create(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +349,7 @@ func TestCreateInWorktree(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("claude ran %d times, want once", len(calls))
 	}
-	wantEqual(t, "args", calls[0].Args, []string{"--model", "haiku", "--bg", "-n", "wt", "-w", "probe-wt", "--", "开始"})
+	wantEqual(t, "args", calls[0].Args, append(f.accountFlags(), "--bg", "-n", "wt", "-w", "probe-wt", "--", "开始"))
 	for _, name := range []string{"has space", "a/b", "-x", ".hidden", "../up", strings.Repeat("a", 65)} {
 		req.Worktree = name
 		if _, err := f.h.Create(context.Background(), req); codeOf(err) != protocol.CodeInvalidParams {
@@ -231,52 +361,113 @@ func TestCreateInWorktree(t *testing.T) {
 	}
 }
 
-// A profile whose sessions were all removed is created from profiles.json.
-func TestCreateFromTemplateCache(t *testing.T) {
+// FromSession copies that session's own flags and environment, without
+// the ones bound to it.
+func TestCreateFromSession(t *testing.T) {
 	f := newFixture(t)
-	f.job(t, "dflt0001", []string{"--model", "haiku"}, nil, "2026-11-13T09:00:00.000Z")
-	settings := `{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}`
-	writeJSON(t, f.src.ProfilesFile, map[string]any{"profiles": map[string]any{
-		"api.anthropic.com": map[string]any{
-			"profile":     protocol.Profile{ID: "api.anthropic.com", Kind: protocol.ProfileEndpoint},
-			"flags":       []string{"--settings", settings, "--model", "opus"},
-			"providerEnv": map[string]string{"ANTHROPIC_MODEL": "cached-model"},
-			"updatedAt":   "2026-11-10T00:00:00Z",
-		},
-	}})
-
-	if _, err := f.h.Create(context.Background(), protocol.SessionCreateRequest{ProfileID: "api.anthropic.com", Cwd: t.TempDir(), Name: "n"}); err != nil {
+	f.job(t, "src00001", []string{"--settings", anySettings, "-n", "prev", "--resume", "8f0c2a5e-0000-4000-8000-000000000001", "--model", "opus", "--name=old"},
+		map[string]string{"ANTHROPIC_MODEL": "claude-opus-test", "CLAUDE_CONFIG_DIR": "/x"}, "2026-11-13T08:00:00.000Z")
+	req := protocol.SessionCreateRequest{Cwd: t.TempDir(), FromSession: "src00001", Worktree: "wt-1", Prompt: "先跑测试"}
+	if _, err := f.h.Create(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
 	calls := f.calls(t)
 	if len(calls) != 1 {
 		t.Fatalf("claude ran %d times, want once", len(calls))
 	}
-	wantEqual(t, "args", calls[0].Args, []string{"--settings", settings, "--model", "opus", "--bg", "-n", "n"})
-	if !slices.Contains(calls[0].Env, "ANTHROPIC_MODEL=cached-model") {
-		t.Errorf("env %q lacks the cached providerEnv", calls[0].Env)
+	wantEqual(t, "args", calls[0].Args, []string{"--settings", anySettings, "--model", "opus", "--bg", "-w", "wt-1", "--", "先跑测试"})
+	for _, kv := range []string{"ANTHROPIC_MODEL=claude-opus-test", "CLAUDE_CONFIG_DIR=/x"} {
+		if !slices.Contains(calls[0].Env, kv) {
+			t.Errorf("env %q lacks %s", calls[0].Env, kv)
+		}
+	}
+}
+
+// A preset reuses an existing profile's endpoint: of its template only
+// --settings and providerEnv without the model variables are kept, and the
+// models are the request's; "api.anthropic.com" is the account login.
+func TestCreatePreset(t *testing.T) {
+	for _, name := range discovery.ModelEnv {
+		unsetEnv(t, name)
+	}
+	f := newFixture(t)
+	f.job(t, "anyr0001", []string{"--settings", anySettings, "--agent", "claude", "--permission-mode", "bypassPermissions", "--model", "claude-opus-5-5[1M]"},
+		map[string]string{"ANTHROPIC_MODEL": "claude-opus-5-5[1M]", "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-5-5", "CLAUDE_BG_SESSION_CREDENTIAL": "none"}, "2026-11-13T08:00:00.000Z")
+	f.job(t, "dflt0001", []string{"--permission-mode", "auto", "--model", "hy-4-flash[1M]"},
+		map[string]string{"ANTHROPIC_MODEL": "hy-4-flash[1M]", "CLAUDE_BG_SESSION_CREDENTIAL": "none"}, "2026-11-13T08:00:00.000Z")
+	f.setAgents(t)
+	// Listing saves the templates, and runs `claude agents` itself.
+	if _, err := f.src.List(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	listed := len(f.calls(t))
+	haiku := map[protocol.ModelTier]string{protocol.ModelHaiku: "hy-4-flash[1M]"}
+	for _, preset := range []string{"anyrouter.top", "default", "api.anthropic.com"} {
+		if _, err := f.h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir(), Preset: preset, Models: haiku}); err != nil {
+			t.Fatalf("preset %s: %v", preset, err)
+		}
+	}
+	calls := f.calls(t)[listed:]
+	if len(calls) != 3 {
+		t.Fatalf("claude ran %d times, want 3", len(calls))
+	}
+	wantEqual(t, "anyrouter.top args", calls[0].Args, []string{"--settings", anySettings, "--bg"})
+	wantEqual(t, "default args", calls[1].Args, []string{"--bg"})
+	wantEqual(t, "api.anthropic.com args", calls[2].Args, append(f.accountFlags(), "--bg"))
+	for i, c := range calls {
+		if !slices.Contains(c.Env, "ANTHROPIC_DEFAULT_HAIKU_MODEL=hy-4-flash[1M]") {
+			t.Errorf("call %d env %q lacks the requested haiku model", i, c.Env)
+		}
+		if envHas(c.Env, "ANTHROPIC_MODEL") {
+			t.Errorf("call %d env %q keeps the template's main model", i, c.Env)
+		}
+	}
+	for _, c := range calls[:2] {
+		if !slices.Contains(c.Env, "CLAUDE_BG_SESSION_CREDENTIAL=none") {
+			t.Errorf("env %q lacks the template's providerEnv", c.Env)
+		}
 	}
 }
 
 func TestCreateRefusedBeforeClaude(t *testing.T) {
 	f := newFixture(t)
-	f.job(t, "dflt0001", []string{"--model", "haiku"}, nil, "2026-11-13T09:00:00.000Z")
-	f.job(t, "bad00001", nil, nil, "2026-11-13T09:00:00.000Z") // no respawnFlags: "other"
+	f.job(t, "src00001", []string{"--model", "haiku"}, nil, "2026-11-13T09:00:00.000Z")
+	f.job(t, "bad00001", nil, nil, "2026-11-13T09:00:00.000Z") // no respawnFlags
 	work := t.TempDir()
 	file := filepath.Join(work, "file")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
+	}
+	const url, key = "https://anyrouter.example", "sk-1"
+	opus := func(m string) map[protocol.ModelTier]string {
+		return map[protocol.ModelTier]string{protocol.ModelOpus: m}
 	}
 	cases := []struct {
 		name string
 		req  protocol.SessionCreateRequest
 		want protocol.ErrorCode
 	}{
-		{"missing dir", protocol.SessionCreateRequest{ProfileID: "default", Cwd: filepath.Join(work, "nope")}, protocol.CodeDirNotFound},
-		{"file", protocol.SessionCreateRequest{ProfileID: "default", Cwd: file}, protocol.CodeDirNotFound},
-		{"relative dir", protocol.SessionCreateRequest{ProfileID: "default", Cwd: "code"}, protocol.CodeInvalidParams},
-		{"other profile", protocol.SessionCreateRequest{ProfileID: "other", Cwd: work}, protocol.CodeInvalidParams},
-		{"unknown profile", protocol.SessionCreateRequest{ProfileID: "example.com", Cwd: work}, protocol.CodeInvalidParams},
+		{"missing dir", protocol.SessionCreateRequest{Cwd: filepath.Join(work, "nope")}, protocol.CodeDirNotFound},
+		{"file", protocol.SessionCreateRequest{Cwd: file}, protocol.CodeDirNotFound},
+		{"relative dir", protocol.SessionCreateRequest{Cwd: "code"}, protocol.CodeInvalidParams},
+		{"url only", protocol.SessionCreateRequest{Cwd: work, BaseURL: url}, protocol.CodeInvalidParams},
+		{"key only", protocol.SessionCreateRequest{Cwd: work, APIKey: key}, protocol.CodeInvalidParams},
+		{"other scheme", protocol.SessionCreateRequest{Cwd: work, BaseURL: "ftp://anyrouter.example", APIKey: key}, protocol.CodeInvalidParams},
+		{"no host", protocol.SessionCreateRequest{Cwd: work, BaseURL: "https://", APIKey: key}, protocol.CodeInvalidParams},
+		{"url with space", protocol.SessionCreateRequest{Cwd: work, BaseURL: "https://a b.example", APIKey: key}, protocol.CodeInvalidParams},
+		{"key with newline", protocol.SessionCreateRequest{Cwd: work, BaseURL: url, APIKey: "sk-1\nx"}, protocol.CodeInvalidParams},
+		{"unknown tier", protocol.SessionCreateRequest{Cwd: work, Models: map[protocol.ModelTier]string{"turbo": "m"}}, protocol.CodeInvalidParams},
+		{"model with space", protocol.SessionCreateRequest{Cwd: work, Models: opus("claude opus")}, protocol.CodeInvalidParams},
+		{"empty model", protocol.SessionCreateRequest{Cwd: work, Models: opus("")}, protocol.CodeInvalidParams},
+		{"long model", protocol.SessionCreateRequest{Cwd: work, Models: opus(strings.Repeat("m", 129))}, protocol.CodeInvalidParams},
+		{"copy with url", protocol.SessionCreateRequest{Cwd: work, FromSession: "src00001", BaseURL: url, APIKey: key}, protocol.CodeInvalidParams},
+		{"copy with models", protocol.SessionCreateRequest{Cwd: work, FromSession: "src00001", Models: opus("m")}, protocol.CodeInvalidParams},
+		{"copy without record", protocol.SessionCreateRequest{Cwd: work, FromSession: "bad00001"}, protocol.CodeInvalidParams},
+		{"copy of unknown", protocol.SessionCreateRequest{Cwd: work, FromSession: "nope0001"}, protocol.CodeInvalidParams},
+		{"copy with preset", protocol.SessionCreateRequest{Cwd: work, FromSession: "src00001", Preset: "default"}, protocol.CodeInvalidParams},
+		{"preset with url", protocol.SessionCreateRequest{Cwd: work, Preset: "default", BaseURL: url, APIKey: key}, protocol.CodeInvalidParams},
+		{"preset other", protocol.SessionCreateRequest{Cwd: work, Preset: "other"}, protocol.CodeInvalidParams},
+		{"preset without template", protocol.SessionCreateRequest{Cwd: work, Preset: "relay.example.net"}, protocol.CodeInvalidParams},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -288,6 +479,21 @@ func TestCreateRefusedBeforeClaude(t *testing.T) {
 	}
 	if calls := f.calls(t); len(calls) != 0 {
 		t.Errorf("claude ran %d times, want never: %+v", len(calls), calls)
+	}
+	if keys, _ := filepath.Glob(filepath.Join(f.dir, "keys", "*")); len(keys) != 0 {
+		t.Errorf("refused requests left key files %q", keys)
+	}
+}
+
+// Without Options.Dir nothing can be launched.
+func TestCreateWithoutDir(t *testing.T) {
+	f := newFixture(t)
+	h := lifecycle.New(lifecycle.Options{Source: f.src})
+	if _, err := h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir()}); codeOf(err) != protocol.CodeInternal {
+		t.Errorf("error = %v, want %s", err, protocol.CodeInternal)
+	}
+	if calls := f.calls(t); len(calls) != 0 {
+		t.Errorf("claude ran %d times, want never", len(calls))
 	}
 }
 
@@ -313,8 +519,8 @@ func TestCreateClaudeFailures(t *testing.T) {
 			src := f.src
 			src.ClaudePath = writeScript(t, script)
 			var logged bytes.Buffer
-			h := lifecycle.New(lifecycle.Options{Source: src, Logger: slog.New(slog.NewTextHandler(&logged, nil))})
-			_, err := h.Create(context.Background(), protocol.SessionCreateRequest{ProfileID: "default", Cwd: t.TempDir()})
+			h := lifecycle.New(lifecycle.Options{Source: src, Dir: f.dir, Logger: slog.New(slog.NewTextHandler(&logged, nil))})
+			_, err := h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir()})
 			var pe *protocol.Error
 			if !errors.As(err, &pe) || pe.Code != protocol.CodeInternal || pe.Message != "启动 claude 失败，请在目标机上查看日志" {
 				t.Fatalf("error = %v, want the fixed internal message", err)
@@ -397,7 +603,7 @@ func TestCreateUntrustedDir(t *testing.T) {
 	var log string
 	src.ClaudePath, _, log = trustScript(t, "show")
 	work := t.TempDir()
-	_, err := lifecycle.New(lifecycle.Options{Source: src}).Create(context.Background(), protocol.SessionCreateRequest{ProfileID: "default", Cwd: work})
+	_, err := lifecycle.New(lifecycle.Options{Source: src, Dir: f.dir}).Create(context.Background(), protocol.SessionCreateRequest{Cwd: work})
 	var pe *protocol.Error
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotTrusted || pe.Message != "这个目录还没被 Claude Code 信任："+work+"。请先在目标机上进入这个目录运行一次 claude，接受信任提示后再试" {
 		t.Fatalf("error = %v, want notTrusted naming %s", err, work)
@@ -424,7 +630,7 @@ func createTrustsFirst(t *testing.T, prompt string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	work := t.TempDir()
-	id, err := lifecycle.New(lifecycle.Options{Source: src}).Create(ctx, protocol.SessionCreateRequest{ProfileID: "default", Cwd: work, Trust: true})
+	id, err := lifecycle.New(lifecycle.Options{Source: src, Dir: f.dir}).Create(ctx, protocol.SessionCreateRequest{Cwd: work, Trust: true})
 	if err != nil || id != "7a7a7a7a" {
 		t.Fatalf("Create = %q, %v", id, err)
 	}
@@ -452,7 +658,7 @@ func TestCreateTrustFails(t *testing.T) {
 			src.ClaudePath, _, log = trustScript(t, prompt)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			_, err := lifecycle.New(lifecycle.Options{Source: src}).Create(ctx, protocol.SessionCreateRequest{ProfileID: "default", Cwd: t.TempDir(), Trust: true})
+			_, err := lifecycle.New(lifecycle.Options{Source: src, Dir: f.dir}).Create(ctx, protocol.SessionCreateRequest{Cwd: t.TempDir(), Trust: true})
 			var pe *protocol.Error
 			if !errors.As(err, &pe) || pe.Code != protocol.CodeInternal || !strings.Contains(pe.Message, "Yes, I trust this folder") {
 				t.Fatalf("error = %v, want the trust failure", err)
@@ -472,7 +678,7 @@ func TestClaudeGetsNoEnrollKey(t *testing.T) {
 	envFile := filepath.Join(t.TempDir(), "env")
 	src := f.src
 	src.ClaudePath = writeScript(t, "env >"+envFile+"\necho 'backgrounded · 1234abcd · x'\n")
-	if _, err := lifecycle.New(lifecycle.Options{Source: src}).Create(context.Background(), protocol.SessionCreateRequest{ProfileID: "default", Cwd: t.TempDir()}); err != nil {
+	if _, err := lifecycle.New(lifecycle.Options{Source: src, Dir: f.dir}).Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
 	env, err := os.ReadFile(envFile)
@@ -489,8 +695,8 @@ func TestCreateParsesColouredOutput(t *testing.T) {
 	f.job(t, "dflt0001", []string{"--model", "haiku"}, nil, "2026-11-13T09:00:00.000Z")
 	src := f.src
 	src.ClaudePath = writeScript(t, `printf '\033[2m✓\033[0m backgrounded \033[2m·\033[0m \033[1m9a8b7c6d\033[0m · task\n'`+"\n")
-	h := lifecycle.New(lifecycle.Options{Source: src})
-	id, err := h.Create(context.Background(), protocol.SessionCreateRequest{ProfileID: "default", Cwd: t.TempDir()})
+	h := lifecycle.New(lifecycle.Options{Source: src, Dir: f.dir})
+	id, err := h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -549,7 +755,7 @@ func TestRemove(t *testing.T) {
 func TestChangedAfterActions(t *testing.T) {
 	f := newFixture(t)
 	changed := 0
-	f.h = lifecycle.New(lifecycle.Options{Source: f.src, Changed: func() { changed++ }})
+	f.h = lifecycle.New(lifecycle.Options{Source: f.src, Dir: f.dir, Changed: func() { changed++ }})
 	f.setAgents(t, session{"run00001", "uuid-run", "/w/a", true}, session{"stp00001", "uuid-stp", "/w/b", false})
 	f.job(t, "run00001", []string{"--model", "opus"}, nil, "2026-11-13T10:00:00Z")
 	ctx := context.Background()
@@ -561,7 +767,7 @@ func TestChangedAfterActions(t *testing.T) {
 		{"stop", func() error { return f.h.Stop(ctx, "run00001") }, 1},
 		{"remove", func() error { return f.h.Remove(ctx, "stp00001") }, 2},
 		{"create", func() error {
-			_, err := f.h.Create(ctx, protocol.SessionCreateRequest{ProfileID: "default", Cwd: t.TempDir()})
+			_, err := f.h.Create(ctx, protocol.SessionCreateRequest{Cwd: t.TempDir()})
 			return err
 		}, 3},
 		{"refused remove", func() error {
@@ -591,7 +797,7 @@ func TestRemoveKept(t *testing.T) {
 		t.Run("exit "+code, func(t *testing.T) {
 			f := newFixture(t)
 			changed := 0
-			f.h = lifecycle.New(lifecycle.Options{Source: f.src, Changed: func() { changed++ }})
+			f.h = lifecycle.New(lifecycle.Options{Source: f.src, Dir: f.dir, Changed: func() { changed++ }})
 			f.setAgents(t, session{"stp00001", "uuid-stp", "/w/b", false})
 			if err := os.WriteFile(filepath.Join(f.claudeDir, "rm.out"), []byte(out), 0o600); err != nil {
 				t.Fatal(err)
@@ -714,7 +920,7 @@ func TestWakeRemovesCopy(t *testing.T) {
 	src.ClaudePath = writeScript(t, `if [ "$1" = stop ]; then cp "$FAKE_CLAUDE_DIR/agents.stopped.json" "$FAKE_CLAUDE_DIR/agents.json"; fi
 exec "`+fakeclaude.Path()+`" "$@"
 `)
-	h := lifecycle.New(lifecycle.Options{Source: src, WakeTimeout: 5 * time.Second, PollInterval: 20 * time.Millisecond})
+	h := lifecycle.New(lifecycle.Options{Source: src, Dir: f.dir, WakeTimeout: 5 * time.Second, PollInterval: 20 * time.Millisecond})
 
 	err := h.Wake(context.Background(), wakeUUID, hd.hold)
 	var pe *protocol.Error
@@ -795,7 +1001,7 @@ func TestHandle(t *testing.T) {
 	work := t.TempDir()
 	ctx := context.Background()
 
-	createBody, _ := json.Marshal(protocol.SessionCreateRequest{ProfileID: "default", Cwd: work, Prompt: "hi"})
+	createBody, _ := json.Marshal(protocol.SessionCreateRequest{Cwd: work, Prompt: "hi"})
 	cases := []struct {
 		name     string
 		req      protocol.Envelope

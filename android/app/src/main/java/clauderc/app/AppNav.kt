@@ -103,7 +103,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable data object PairRoute
 @Serializable data object HomeRoute
-@Serializable data class CreateRoute(val machineId: String, val profileId: String)
+@Serializable data class CreateRoute(val machineId: String)
 @Serializable data class ChatRoute(val machineId: String, val sessionId: String)
 /** A subagent's page; [startedAt] is epoch milliseconds, 0 when unknown. */
 @Serializable data class AgentRoute(val machineId: String, val sessionId: String, val agentId: String, val description: String, val type: String, val startedAt: Long)
@@ -169,7 +169,7 @@ private fun ClaudercPages(container: AppContainer, nav: NavHostController, haze:
         }
         composable<CreateRoute> { entry ->
             val r = entry.toRoute<CreateRoute>()
-            val vm = viewModel { CreateSessionViewModel(r.machineId, r.profileId, container.fleet, container.connection, container.profileNames) }
+            val vm = viewModel { CreateSessionViewModel(r.machineId, container.fleet, container.connection, container.profileNames) }
             val state by vm.state.collectAsStateWithLifecycle()
             LaunchedEffect(vm) {
                 vm.created.collect { id -> nav.navigate(ChatRoute(r.machineId, id)) { popUpTo<CreateRoute> { inclusive = true } } }
@@ -177,6 +177,8 @@ private fun ClaudercPages(container: AppContainer, nav: NavHostController, haze:
             CreateSessionScreen(
                 state, { nav.popFrom(entry) }, vm::submit, vm::setDir, vm::pickDir, vm::showAllDirs, vm::setName, vm::setPrompt,
                 onTrust = vm::trustAndCreate, onDismissTrust = vm::dismissTrust,
+                onPreset = vm::pickPreset, onUrl = vm::setUrl, onKey = vm::setKey, onToggleKey = vm::toggleKey,
+                onToggleModels = vm::toggleModels, onModel = vm::setModel, onDismissNote = vm::dismissNote,
             )
         }
         composable<ChatRoute> { entry ->
@@ -363,7 +365,7 @@ private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHost
         state = state,
         onRefresh = vm::refresh,
         onOpenChat = { nav.navigateFrom(home, ChatRoute(machineId, it.id)) },
-        onCreate = { nav.navigateFrom(home, CreateRoute(machineId, it.profile.id)) },
+        onCreate = { nav.navigateFrom(home, CreateRoute(machineId)) },
         onRename = vm::rename,
         onStop = vm::stop,
         onRemove = vm::remove,

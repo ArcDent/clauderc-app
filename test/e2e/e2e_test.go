@@ -150,6 +150,7 @@ func TestPhoneDrivesAgentThroughRelay(t *testing.T) {
 		EnrollKey:    enrollKey,
 		MachineID:    machineID,
 		ProfilesFile: filepath.Join(t.TempDir(), "profiles.json"),
+		LaunchDir:    filepath.Join(t.TempDir(), "launch"),
 	}
 	agentDone := make(chan error, 1)
 	go func() {
@@ -234,7 +235,7 @@ func TestPhoneDrivesAgentThroughRelay(t *testing.T) {
 	}
 
 	var created protocol.SessionCreateResponse
-	decode(t, p.call(protocol.MethodSessionCreate, protocol.SessionCreateRequest{ProfileID: "default", Cwd: work, Prompt: "hi"}), &created)
+	decode(t, p.call(protocol.MethodSessionCreate, protocol.SessionCreateRequest{Cwd: work, Prompt: "hi"}), &created)
 	if created.SessionID != "f00dcafe" {
 		t.Errorf("session.create = %+v", created)
 	}
@@ -242,7 +243,7 @@ func TestPhoneDrivesAgentThroughRelay(t *testing.T) {
 	p.call(protocol.MethodSessionStop, protocol.SessionStopRequest{SessionID: shortID})
 	var launched, stopped bool
 	for _, c := range fakeclaude.Calls(t, claudeLog) {
-		launched = launched || strings.Join(c.Args, " ") == "--model haiku --bg -- hi"
+		launched = launched || strings.Join(c.Args, " ") == "--setting-sources project,local --settings "+filepath.Join(cfg.LaunchDir, "account-settings.json")+" --bg -- hi"
 		stopped = stopped || strings.Join(c.Args, " ") == "stop "+shortID
 	}
 	if !launched || !stopped {

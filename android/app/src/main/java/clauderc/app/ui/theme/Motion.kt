@@ -69,6 +69,30 @@ object Motion {
     fun liftOut(px: Int, edge: Alignment.Vertical = Alignment.Bottom): ExitTransition =
         fadeOut(exit()) + slideOutVertically(exit()) { px } + shrinkVertically(exit(), shrinkTowards = edge, clip = edge != Alignment.Bottom)
 
+    /**
+     * A block that grows out of the row above it, clipped and without fading, and shrinks back the same way:
+     * the mockup's grid-template-rows transition (demo.html .mbody and .cbody).
+     */
+    val growIn: EnterTransition get() = expandVertically(tween(t.durM, easing = t.easeEmph), expandFrom = Alignment.Top)
+    val growOut: ExitTransition get() = shrinkVertically(tween(t.durM, easing = t.easeEmph), shrinkTowards = Alignment.Top)
+
+    /**
+     * The form's floating card slides down from under the bar, clipped by its lower edge, and back up
+     * quicker; [px] is how far above its place it starts, at least its own height.
+     */
+    fun noteIn(px: (Int) -> Int): EnterTransition = slideInVertically(enter()) { -px(it) }
+    fun noteOut(px: (Int) -> Int): ExitTransition = slideOutVertically(exit()) { -px(it) }
+
+    /** The floating card raised again while it shows shakes sideways once: its progress runs 0 to 1 in durS. */
+    fun <T> nudge(): FiniteAnimationSpec<T> = tween(t.durS)
+
+    /** The shake's offset in dp at progress [p]: left 5, right 5, back, in equal thirds (demo.html noteShow). */
+    fun nudgeDp(p: Float): Float = when {
+        p < 1 / 3f -> -15f * p
+        p < 2 / 3f -> -5f + 30f * (p - 1 / 3f)
+        else -> 5f - 15f * (p - 2 / 3f)
+    }
+
     /** Panels and sheets come up from the bottom edge. */
     val panelIn: EnterTransition = slideInVertically(enter()) { it }
     val panelOut: ExitTransition = slideOutVertically(exit()) { it }

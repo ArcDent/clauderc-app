@@ -33,14 +33,13 @@ func TestCreateWorktree(t *testing.T) {
 	}
 	tag := make([]byte, 3)
 	_, _ = rand.Read(tag)
-	var res protocol.SessionCreateResponse
-	x.must(t, protocol.MethodSessionCreate, protocol.SessionCreateRequest{
-		ProfileID: profileID, Cwd: probe, Name: "e2e-worktree-" + hex.EncodeToString(tag), Prompt: "只回复 OK", Worktree: name,
-	}, &res)
+	id := x.create(t, plain, protocol.SessionCreateRequest{
+		Cwd: probe, Name: "e2e-worktree-" + hex.EncodeToString(tag), Prompt: "只回复 OK", Worktree: name,
+	})
 	createdMu.Lock()
-	created = append(created, res.SessionID)
+	created = append(created, id)
 	createdMu.Unlock()
-	s := &session{x: x, t: t, id: res.SessionID, ws: probe, keep: true}
+	s := &session{x: x, t: t, id: id, ws: probe, keep: true}
 	t.Cleanup(func() {
 		s.cleanup()
 		if strings.Contains(git("worktree", "list"), wt) {
@@ -58,7 +57,7 @@ func TestCreateWorktree(t *testing.T) {
 			return false
 		}
 		for _, ss := range list.Sessions {
-			if ss.ID == res.SessionID && ss.Worktree != nil {
+			if ss.ID == id && ss.Worktree != nil {
 				got = ss
 				return true
 			}

@@ -14,6 +14,7 @@ import clauderc.app.net.RemoteException
 import clauderc.app.protocol.DirsRecentResponse
 import clauderc.app.protocol.ErrorCode
 import clauderc.app.protocol.MachinesListResponse
+import clauderc.app.protocol.ModelTier
 import clauderc.app.protocol.Method
 import clauderc.app.protocol.ProtocolJson
 import clauderc.app.protocol.SessionCreateRequest
@@ -73,11 +74,13 @@ class TrustSheetTest {
         storeScope.cancel()
     }
 
+    private val officialModels = mapOf(ModelTier.Main to "claude-opus-5-5")
+
     private fun has(text: String) = compose.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty()
     private fun creates() = relay.sent(Method.SESSION_CREATE).map { it.decode(SessionCreateRequest.serializer()) }
 
     @Test fun untrustedDirectoryAsksThenTrustsAndCreatesInOneStep() {
-        val vm = CreateSessionViewModel("m-1", "default", Fleet(relay, scope), relay, profileNames(tmp.root, storeScope))
+        val vm = CreateSessionViewModel("m-1", Fleet(relay, scope), relay, profileNames(tmp.root, storeScope))
         val opened = CopyOnWriteArrayList<String>()
         scope.launch { vm.created.collect { opened += it } }
         compose.setContent {
@@ -99,7 +102,8 @@ class TrustSheetTest {
         compose.onNodeWithText("Claude Code 信任目录后才能在里面启动会话，之后它能读写和运行这里的文件。").assertIsDisplayed()
         assertEquals("the sheet names it beside the list's own row", 2, compose.onAllNodes(hasText("~/github/new-repo")).fetchSemanticsNodes().size)
         compose.onNodeWithText("信任并新建").assertIsDisplayed()
-        assertEquals(listOf(SessionCreateRequest("default", dir)), creates())
+        // The form starts on the account login with its profile's models.
+        assertEquals(listOf(SessionCreateRequest(dir, models = officialModels)), creates())
 
         // 「取消」 closes it and sends nothing more.
         compose.onNodeWithText("取消").performClick()
@@ -114,7 +118,7 @@ class TrustSheetTest {
         compose.waitUntil(5_000) { has("信任并新建") }
         compose.onNodeWithText("信任并新建").performClick()
         compose.waitUntil(5_000) { has("正在信任") }
-        assertEquals(SessionCreateRequest("default", dir, trust = true), creates().last())
+        assertEquals(SessionCreateRequest(dir, models = officialModels, trust = true), creates().last())
         assertTrue("not opened before it answers", opened.isEmpty())
 
         trusted.complete(Unit)

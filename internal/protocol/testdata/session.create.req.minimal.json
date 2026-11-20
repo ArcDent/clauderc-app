@@ -5,5 +5,5 @@
   "method": "session.create",
   "machine": "m-7f3a",
   "client": "c-12",
-  "body": {"profileId": "default", "cwd": "/Users/me/notes"}
+  "body": {"cwd": "/Users/me/notes"}
 }

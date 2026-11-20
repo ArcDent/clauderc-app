@@ -31,6 +31,11 @@ type Profile struct {
 	// the ANTHROPIC_BASE_URL host itself.
 	ID   string      `json:"id"`
 	Kind ProfileKind `json:"kind"`
+	// Models is what a new session in this profile starts with, taken from
+	// the profile's most recent session; tiers without a value are left
+	// out, and so is the whole field when there is none. Model names are
+	// not credentials.
+	Models map[ModelTier]string `json:"models,omitempty"`
 }
 
 // Session is one background session.
@@ -94,11 +99,30 @@ type SessionList struct {
 	Profiles []Profile `json:"profiles"`
 }
 
-// SessionCreateRequest starts a background session in a profile (design D8).
+// SessionCreateRequest starts a background session (design D8) on one of
+// three endpoints: an existing profile's (Preset), a custom one (BaseURL
+// and APIKey both set), or the account login (neither). Every setting
+// other than the endpoint and Models is the target machine's own.
 type SessionCreateRequest struct {
-	ProfileID string `json:"profileId"`
-	Cwd       string `json:"cwd"`
-	Name      string `json:"name,omitempty"`
+	Cwd  string `json:"cwd"`
+	Name string `json:"name,omitempty"`
+	// Preset is the Profile.ID whose endpoint the new session reuses;
+	// "api.anthropic.com" means the account login. BaseURL, APIKey and
+	// FromSession must then be empty.
+	Preset string `json:"preset,omitempty"`
+	// BaseURL is the http or https address of a custom endpoint.
+	BaseURL string `json:"baseUrl,omitempty"`
+	// APIKey is the custom endpoint's key; the agent keeps it in a file
+	// and never puts it on a command line.
+	APIKey string `json:"apiKey,omitempty"`
+	// Models names the model of each tier, written as in the tier's
+	// environment variable, e.g. "claude-opus-5-5[1M]"; a tier left out
+	// keeps the target machine's default, also with a Preset.
+	Models map[ModelTier]string `json:"models,omitempty"`
+	// FromSession, the short id of an existing session, launches with that
+	// session's own flags and environment instead; BaseURL, APIKey and
+	// Models must then be empty.
+	FromSession string `json:"fromSession,omitempty"`
 	// Prompt is the optional first message.
 	Prompt string `json:"prompt,omitempty"`
 	// Trust answers yes to Claude Code's trust prompt for Cwd when the
@@ -109,6 +133,20 @@ type SessionCreateRequest struct {
 	// by that name (claude -w); letters, digits, ".", "_" and "-" only.
 	Worktree string `json:"worktree,omitempty"`
 }
+
+// ModelTier is one model setting of a new session, each backed by one
+// environment variable of Claude Code.
+type ModelTier string
+
+const (
+	ModelMain     ModelTier = "main"     // ANTHROPIC_MODEL
+	ModelDefault  ModelTier = "default"  // ANTHROPIC_DEFAULT_MODEL
+	ModelOpus     ModelTier = "opus"     // ANTHROPIC_DEFAULT_OPUS_MODEL
+	ModelSonnet   ModelTier = "sonnet"   // ANTHROPIC_DEFAULT_SONNET_MODEL
+	ModelHaiku    ModelTier = "haiku"    // ANTHROPIC_DEFAULT_HAIKU_MODEL
+	ModelFable    ModelTier = "fable"    // ANTHROPIC_DEFAULT_FABLE_MODEL
+	ModelSubagent ModelTier = "subagent" // CLAUDE_CODE_SUBAGENT_MODEL
+)
 
 // SessionCreateResponse answers session.create.
 type SessionCreateResponse struct {

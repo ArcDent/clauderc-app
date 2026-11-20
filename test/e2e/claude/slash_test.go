@@ -98,7 +98,7 @@ func slashPopup(t *testing.T, s *session) []slashEntry {
 // upgrade that adds a command fails here. /reload-skills then runs from
 // the phone and the input comes back.
 func TestSlashList(t *testing.T) {
-	s := launchIn(t, "slash_list", safeProfileID)
+	s := launchIn(t, "slash_list", safe)
 	known := map[string]bool{}
 	for _, name := range transcript.UnofferedCommands {
 		known[name] = true

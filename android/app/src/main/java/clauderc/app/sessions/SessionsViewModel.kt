@@ -68,8 +68,6 @@ data class SessionGroup(
     val canCreate get() = profile.kind != ProfileKind.Other
     val canRename get() = profile.kind != ProfileKind.Other
     val pending get() = sessions.count { it.state == SessionState.Pending }
-    /** The most recent session, whose launch flags a new session reuses (design D8). */
-    val template get() = sessions.maxByOrNull { it.lastActiveAt }
 }
 
 /** One working directory inside a profile group. */

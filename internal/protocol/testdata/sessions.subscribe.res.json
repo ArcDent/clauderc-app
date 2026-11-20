@@ -13,9 +13,9 @@
       {"id": "j0k1l2", "name": "old run", "cwd": "/tmp/scratch", "state": "stopped", "profileId": "other", "lastActiveAt": "2026-11-10T17:45:30Z"}
     ],
     "profiles": [
-      {"id": "default", "kind": "default"},
-      {"id": "api.anthropic.com", "kind": "endpoint"},
-      {"id": "anyrouter.top", "kind": "endpoint"},
+      {"id": "default", "kind": "default", "models": {"main": "hy-4-flash[1M]", "haiku": "hy-4-flash[1M]"}},
+      {"id": "api.anthropic.com", "kind": "endpoint", "models": {"main": "claude-opus-5-5"}},
+      {"id": "anyrouter.top", "kind": "endpoint", "models": {"main": "claude-opus-5-5[1M]", "opus": "claude-opus-5-5[1M]", "sonnet": "claude-sonnet-5-5", "subagent": "claude-sonnet-5-5"}},
       {"id": "other", "kind": "other"}
     ]
   }

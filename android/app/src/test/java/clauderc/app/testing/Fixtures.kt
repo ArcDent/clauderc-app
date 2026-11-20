@@ -3,6 +3,7 @@ package clauderc.app.testing
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import clauderc.app.data.ProfileNameStore
 import clauderc.app.protocol.Machine
+import clauderc.app.protocol.ModelTier
 import clauderc.app.protocol.Profile
 import clauderc.app.protocol.ProfileKind
 import clauderc.app.protocol.Session
@@ -23,9 +24,17 @@ fun session(id: String, name: String, state: SessionState, profile: String, minu
     Session(id, name, cwd, state, profile, T0.minusSeconds(minutesAgo * 60), context)
 
 val sampleProfiles = listOf(
-    Profile("default", ProfileKind.Default),
-    Profile("api.anthropic.com", ProfileKind.Endpoint),
-    Profile("anyrouter.top", ProfileKind.Endpoint),
+    Profile("default", ProfileKind.Default, mapOf(ModelTier.Main to "claude-opus-5-5[1M]", ModelTier.Haiku to "hy-4-flash[1M]")),
+    Profile("api.anthropic.com", ProfileKind.Endpoint, mapOf(ModelTier.Main to "claude-opus-5-5")),
+    // The demo's anyrouter.top: five tiers set, 默认 and Fable left to the machine.
+    Profile(
+        "anyrouter.top",
+        ProfileKind.Endpoint,
+        mapOf(
+            ModelTier.Main to "claude-opus-5-5[1M]", ModelTier.Opus to "claude-opus-5-5[1M]", ModelTier.Sonnet to "claude-sonnet-5-5",
+            ModelTier.Haiku to "claude-haiku-5-5", ModelTier.Subagent to "claude-sonnet-5-5",
+        ),
+    ),
     Profile("other", ProfileKind.Other),
 )
 

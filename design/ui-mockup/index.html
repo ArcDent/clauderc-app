@@ -5,7 +5,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;700&display=swap">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300..500,0..1,0&icon_names=account_tree,add,alt_route,arrow_back,arrow_upward,battery_full,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,delete,description,dns,download,edit,error,expand_more,folder,forum,image,lock,more_vert,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,signal_cellular_alt,stop,terminal,upload,warning,wifi&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300..500,0..1,0&icon_names=account_tree,add,alt_route,arrow_back,arrow_upward,battery_full,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,delete,description,dns,download,edit,error,expand_more,folder,forum,image,lock,more_vert,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,signal_cellular_alt,stop,terminal,upload,visibility,visibility_off,warning,wifi&display=block">
 <style>
 :root {
   /* 布局：大留白、大号细体标题、不套卡片的平铺列表。全稿只有一种颜色：钴蓝，只留给「等你拍板」的地方。 */
@@ -489,8 +489,6 @@ button { cursor: pointer; }
 
 /* ---------- 新建会话 ---------- */
 .form { padding: 0 var(--sp-page) var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-6); }
-.tier-line { font-size: var(--fs-label); color: var(--c-fg-2); line-height: 1.6; }
-.tier-line .mono { font-size: var(--fs-mono-sm); color: var(--c-fg-3); }
 .field { display: flex; flex-direction: column; gap: var(--sp-2); }
 .field label { font-size: var(--fs-caption); color: var(--c-fg-2); }
 .input { width: 100%; border: 0; border-bottom: 1px solid var(--c-surface-2); border-radius: 0; background: none; padding: 10px 0; font-size: var(--fs-body); color: var(--c-fg); }
@@ -509,6 +507,33 @@ textarea.input { resize: none; line-height: 1.5; }
 .r-path span { font-family: var(--font-mono); font-size: 11px; color: var(--c-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .recent time { font-size: var(--fs-caption); color: var(--c-fg-3); white-space: nowrap; }
 .more-link { display: block; padding: var(--sp-2) 0 0 40px; font-size: var(--fs-label); color: var(--c-fg-2); }
+/* 档位单选沿用目录列表的样子，第二行是说明文字；选「自己填」时下面长出接口地址和 API key，key 和眼睛按钮同一行 */
+.r-path span.plain { font-family: inherit; font-size: var(--fs-caption); }
+.r-path b.mono { font-family: var(--font-mono); font-size: 14px; }
+.cbody { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-m) var(--ease-emph); }
+.cbody > div { overflow: hidden; min-height: 0; padding-left: 40px; }
+.pfield.custom .cbody { grid-template-rows: 1fr; }
+.csub { display: flex; flex-direction: column; gap: 2px; padding-top: var(--sp-3); }
+.csub > span { font-size: var(--fs-caption); color: var(--c-fg-2); }
+/* 表单错误不写在输入框下面：输入框标红，顶栏下沿滑出一张浮动卡片 */
+.fnote-clip { position: absolute; top: 56px; left: 0; right: 0; z-index: 5; overflow: hidden; padding: var(--sp-2) var(--sp-3) 14px; pointer-events: none; }
+.fnote { pointer-events: auto; display: flex; align-items: center; gap: var(--sp-3); min-height: 52px; padding: var(--sp-3) var(--sp-4); border-radius: 16px; background: color-mix(in srgb, var(--c-danger) 12%, var(--c-sheet)); color: var(--c-fg); font-size: var(--fs-label); line-height: 1.45; box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-danger) 30%, transparent), 0 8px 18px -8px rgba(0, 0, 0, 0.35); }
+.fnote .ms { color: var(--c-danger); font-size: 22px; font-variation-settings: "FILL" 1; }
+.key-row { display: flex; align-items: center; gap: var(--sp-1); }
+.key-row .input { flex: 1; min-width: 0; }
+.key-row .icon-btn { color: var(--c-fg-3); }
+/* 模型：一行收着，点开七个档位，写法和环境变量一样，占位符就是变量名；选了档位框里是它现在用的值 */
+.mfold { width: 100%; border: 0; background: none; display: flex; align-items: center; gap: var(--sp-2); padding: 2px 0; text-align: left; color: inherit; }
+.mfold .mlbl { flex: 1; font-size: var(--fs-caption); color: var(--c-fg-2); }
+.mfold .msum { font-size: var(--fs-caption); color: var(--c-fg-3); }
+.mfold .ms { color: var(--c-fg-3); transition: transform var(--dur-m) var(--ease-emph); }
+.mfold[aria-expanded="true"] .ms { transform: rotate(180deg); }
+.mbody { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-m) var(--ease-emph); }
+.mbody > div { overflow: hidden; min-height: 0; }
+.mfield.open .mbody { grid-template-rows: 1fr; }
+.mrow { display: flex; align-items: center; gap: var(--sp-4); }
+.mrow > span { flex: none; width: 52px; font-size: var(--fs-label); color: var(--c-fg-2); }
+.mrow .input { flex: 1; min-width: 0; font-size: 13px; }
 
 /* ---------- 聊天 ---------- */
 .msgs { padding: var(--sp-4) var(--sp-4) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -882,6 +907,7 @@ textarea.input { resize: none; line-height: 1.5; }
 <section class="screen has-nav" data-screen="sessions" hidden>
   <header class="appbar">
     <span class="grow"></span>
+    <button type="button" class="icon-btn" data-go="create" aria-label="新建会话"><span class="ms">add</span></button>
     <button type="button" class="icon-btn" aria-label="更多"><span class="ms">more_vert</span></button>
   </header>
   <div class="pull" data-only="refreshing" hidden><span><span class="spin"></span></span></div>
@@ -896,7 +922,6 @@ textarea.input { resize: none; line-height: 1.5; }
       <span class="gh-dom"></span>
       <span class="gh-sum">3 个会话 · <span class="need">1 个等你</span></span>
       <button type="button" class="icon-btn sm gh-fold" aria-label="折叠默认档位" aria-expanded="true"><span class="ms">expand_more</span></button>
-      <button type="button" class="icon-btn sm" data-go="create" aria-label="在默认档位新建会话"><span class="ms">add</span></button>
     </div>
     <div class="list">
       <div class="srow">
@@ -937,7 +962,6 @@ textarea.input { resize: none; line-height: 1.5; }
       <span class="gh-dom">api.anthropic.com</span>
       <span class="gh-sum">2 个会话 · <span class="need">1 个等你</span></span>
       <button type="button" class="icon-btn sm gh-fold" aria-label="折叠官方档位" aria-expanded="true"><span class="ms">expand_more</span></button>
-      <button type="button" class="icon-btn sm" data-go="create" aria-label="在官方档位新建会话"><span class="ms">add</span></button>
     </div>
     <div class="list">
       <div class="srow">
@@ -968,7 +992,6 @@ textarea.input { resize: none; line-height: 1.5; }
       <span class="gh-dom"></span>
       <span class="gh-sum">0 个会话</span>
       <button type="button" class="icon-btn sm gh-fold" aria-label="折叠 anyrouter.top 档位" aria-expanded="true"><span class="ms">expand_more</span></button>
-      <button type="button" class="icon-btn sm" data-go="create" aria-label="在 anyrouter.top 档位新建会话"><span class="ms">add</span></button>
     </div>
     <p class="g-empty">没有会话</p>
 
@@ -1001,13 +1024,12 @@ textarea.input { resize: none; line-height: 1.5; }
     <div class="bar-title"><h1>新建会话</h1></div>
     <button type="button" class="tbtn" data-go="sessions">启动</button>
   </header>
+  <div class="fnote-clip" data-only="direrr" hidden><div class="fnote" role="alert"><span class="ms">error</span><span>目标机上没有这个目录</span></div></div>
   <div class="content">
     <form class="form" id="createForm">
-      <div class="tier-line">官方档位 <span class="mono">api.anthropic.com</span><br>沿用「迁移脚本审查」的启动参数</div>
       <div class="field">
         <label for="dirInput">工作目录</label>
         <input class="input mono" id="dirInput" value="~/github/infra" autocomplete="off" spellcheck="false">
-        <span class="ferr" data-only="direrr" hidden>目标机上没有这个目录</span>
         <ul class="recent" id="recentDirs">
           <li><button type="button" role="radio" aria-checked="false" data-dir="~/github/SmallProjects/android/clauderc-app"><span class="ms">radio_button_unchecked</span><span class="r-path"><b>clauderc-app</b><span>~/github/SmallProjects/android/clauderc-app</span></span><time>2 分钟前</time></button></li>
           <li><button type="button" role="radio" aria-checked="true" data-dir="~/github/infra"><span class="ms">radio_button_checked</span><span class="r-path"><b>infra</b><span>~/github/infra</span></span><time>5 分钟前</time></button></li>
@@ -1016,6 +1038,31 @@ textarea.input { resize: none; line-height: 1.5; }
           <li><button type="button" role="radio" aria-checked="false" data-dir="~/github/site"><span class="ms">radio_button_unchecked</span><span class="r-path"><b>site</b><span>~/github/site</span></span><time>昨天</time></button></li>
         </ul>
         <span class="more-link">全部 14 个</span>
+      </div>
+      <div class="field pfield">
+        <label>档位</label>
+        <ul class="recent presets" role="radiogroup">
+          <li><button type="button" role="radio" aria-checked="false"><span class="ms">radio_button_unchecked</span><span class="r-path"><b>默认</b><span class="plain">跟目标机的全局设置</span></span></button></li>
+          <li><button type="button" role="radio" aria-checked="false"><span class="ms">radio_button_unchecked</span><span class="r-path"><b>官方</b><span class="plain">账户登录</span></span></button></li>
+          <li><button type="button" role="radio" aria-checked="true"><span class="ms">radio_button_checked</span><span class="r-path"><b class="mono">anyrouter.top</b><span class="plain">沿用这个档位的地址和 key</span></span></button></li>
+          <li><button type="button" role="radio" aria-checked="false"><span class="ms">radio_button_unchecked</span><span class="r-path"><b>自己填</b><span class="plain">新的接口地址和 API key</span></span></button></li>
+        </ul>
+        <div class="cbody"><div>
+          <label class="csub"><span>接口地址</span><input class="input mono" inputmode="url" placeholder="https://" autocomplete="off" spellcheck="false"></label>
+          <div class="csub"><span>API key</span><div class="key-row"><input class="input mono" type="password" autocomplete="off" spellcheck="false"><button type="button" class="icon-btn sm" aria-label="显示 key" aria-pressed="false"><span class="ms">visibility</span></button></div></div>
+        </div></div>
+      </div>
+      <div class="field mfield open">
+        <button type="button" class="mfold" aria-expanded="true"><span class="mlbl">模型</span><span class="msum">改了 1 项</span><span class="ms">expand_more</span></button>
+        <div class="mbody"><div>
+          <label class="mrow"><span>主模型</span><input class="input mono" placeholder="ANTHROPIC_MODEL" value="claude-opus-5-5[1M]" autocomplete="off" spellcheck="false"></label>
+          <label class="mrow"><span>默认</span><input class="input mono" placeholder="ANTHROPIC_DEFAULT_MODEL" autocomplete="off" spellcheck="false"></label>
+          <label class="mrow"><span>Opus</span><input class="input mono" placeholder="ANTHROPIC_DEFAULT_OPUS_MODEL" value="claude-opus-5-5[1M]" autocomplete="off" spellcheck="false"></label>
+          <label class="mrow"><span>Sonnet</span><input class="input mono" placeholder="ANTHROPIC_DEFAULT_SONNET_MODEL" value="claude-sonnet-5-5" autocomplete="off" spellcheck="false"></label>
+          <label class="mrow"><span>Haiku</span><input class="input mono" placeholder="ANTHROPIC_DEFAULT_HAIKU_MODEL" value="hy-4-flash[1M]" autocomplete="off" spellcheck="false"></label>
+          <label class="mrow"><span>Fable</span><input class="input mono" placeholder="ANTHROPIC_DEFAULT_FABLE_MODEL" autocomplete="off" spellcheck="false"></label>
+          <label class="mrow"><span>子代理</span><input class="input mono" placeholder="CLAUDE_CODE_SUBAGENT_MODEL" value="claude-sonnet-5-5" autocomplete="off" spellcheck="false"></label>
+        </div></div>
       </div>
       <div class="field">
         <label for="nameInput">会话名，可不填</label>

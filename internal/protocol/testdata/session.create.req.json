@@ -5,5 +5,5 @@
   "method": "session.create",
   "machine": "m-7f3a",
   "client": "c-12",
-  "body": {"profileId": "anyrouter.top", "cwd": "/Users/me/code/clauderc", "name": "check tests", "prompt": "检查测试是否通过"}
+  "body": {"cwd": "/Users/me/code/clauderc", "name": "check tests", "baseUrl": "https://anyrouter.example", "apiKey": "sk-example", "models": {"main": "claude-opus-5-5[1M]", "haiku": "hy-4-flash[1M]", "subagent": "claude-opus-5-5[1M]"}, "prompt": "检查测试是否通过"}
 }

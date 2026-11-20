@@ -112,7 +112,7 @@ var bodyCases = []bodyCase{
 
 	// Session management.
 	{protocol.MethodSessionCreate, "session.create", protocol.KindRequest, func() any { return &protocol.SessionCreateRequest{} },
-		`{"profileId":"anyrouter.top","cwd":"/p/x","name":"check","prompt":"检查测试是否通过"}`},
+		`{"cwd":"/p/x","name":"check","baseUrl":"https://anyrouter.example","apiKey":"sk-example","models":{"main":"claude-opus-5-5[1M]","haiku":"hy-4-flash[1M]"},"prompt":"检查测试是否通过"}`},
 	{protocol.MethodSessionCreate, "session.create", protocol.KindResponse, func() any { return &protocol.SessionCreateResponse{} }, `{"sessionId":"b2"}`},
 	{protocol.MethodSessionStop, "session.stop", protocol.KindRequest, func() any { return &protocol.SessionStopRequest{} }, `{"sessionId":"a1"}`},
 	{protocol.MethodSessionStop, "session.stop", protocol.KindResponse, func() any { return &protocol.Empty{} }, `{}`},

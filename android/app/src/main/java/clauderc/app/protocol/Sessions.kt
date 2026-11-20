@@ -22,7 +22,12 @@ enum class ProfileKind {
 
 /** For endpoint profiles the id is the API host itself. */
 @Serializable
-data class Profile(val id: String, val kind: ProfileKind = ProfileKind.Other)
+data class Profile(
+    val id: String,
+    val kind: ProfileKind = ProfileKind.Other,
+    /** What a new session in this profile starts with, from its most recent session; null when none. */
+    val models: Map<ModelTier, String>? = null,
+)
 
 @Serializable
 data class Session(
@@ -63,11 +68,31 @@ data class SessionList(
     val profiles: List<Profile> = emptyList(),
 )
 
+/** One model setting of a new session, each backed by one environment variable of Claude Code. */
+@Serializable
+enum class ModelTier {
+    @SerialName("main") Main,
+    @SerialName("default") Default,
+    @SerialName("opus") Opus,
+    @SerialName("sonnet") Sonnet,
+    @SerialName("haiku") Haiku,
+    @SerialName("fable") Fable,
+    @SerialName("subagent") Subagent,
+}
+
+/** Starts on an existing profile's endpoint ([preset]), a custom one ([baseUrl] and [apiKey] both set) or the account login (none of them). */
 @Serializable
 data class SessionCreateRequest(
-    val profileId: String,
     val cwd: String,
     val name: String? = null,
+    /** [Profile.id] whose endpoint the new session reuses; 「api.anthropic.com」 is the account login. [baseUrl], [apiKey] and [fromSession] stay null then. */
+    val preset: String? = null,
+    val baseUrl: String? = null,
+    val apiKey: String? = null,
+    /** Model of each tier, written as in its environment variable, e.g. 「claude-opus-5-5[1M]」; tiers left out keep the machine's default. */
+    val models: Map<ModelTier, String>? = null,
+    /** Short id of an existing session whose own flags and environment the new one copies; the three above stay null then. */
+    val fromSession: String? = null,
     val prompt: String? = null,
     /** Say yes to Claude Code's trust prompt for [cwd] first when it is untrusted; null leaves it out. */
     val trust: Boolean? = null,

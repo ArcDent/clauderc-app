@@ -807,7 +807,7 @@ class ChatViewModel(
 
     /**
      * Starts a session in a new git worktree [name] of the directory this session is listed under, with this
-     * session's profile and [prompt] as its first message; [created] then brings its id.
+     * session's own launch flags and environment and [prompt] as its first message; [created] then brings its id.
      */
     fun createWorktree(name: String, prompt: String) {
         val s = _state.value
@@ -820,7 +820,7 @@ class ChatViewModel(
         _state.update { it.copy(creatingWorktree = true, worktreeError = null) }
         viewModelScope.launch {
             val request = SessionCreateRequest(
-                profileId = session.profileId,
+                fromSession = session.id,
                 cwd = session.dir ?: session.cwd,
                 prompt = prompt.trim().ifEmpty { null },
                 worktree = name,

@@ -223,7 +223,7 @@ class MotionTest {
 
     @Test fun allDirsGrowIn() {
         val dirs = (1..14).map { "/Users/me/github/p$it" }
-        var state by mutableStateOf(CreateUiState(profileTitle = "官方", dir = dirs[0], recent = dirs))
+        var state by mutableStateOf(CreateUiState(dir = dirs[0], recent = dirs))
         compose.setContent {
             ClaudercTheme(darkTheme = false) {
                 CreateSessionScreen(

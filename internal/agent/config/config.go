@@ -42,6 +42,9 @@ const profilesFile = "profiles.json"
 // resumeFile sits beside agent.toml too.
 const resumeFile = "resume.json"
 
+// launchDir sits beside agent.toml too.
+const launchDir = "launch"
+
 // Config is the agent configuration read from agent.toml.
 type Config struct {
 	// RelayURL is the relay address; only https:// and wss:// are allowed.
@@ -68,6 +71,9 @@ type Config struct {
 	// ResumeFile beside agent.toml keeps the messages waiting for a usage
 	// limit to be lifted (chat.Options.ResumeFile).
 	ResumeFile string `toml:"-"`
+	// LaunchDir beside agent.toml holds the files new sessions launch
+	// with, some of them credentials (lifecycle.Options.Dir).
+	LaunchDir string `toml:"-"`
 }
 
 // Load reads agent.toml at path, resolves the enroll key and returns the
@@ -117,6 +123,7 @@ func Load(path string) (Config, error) {
 	cfg.MachineID = id
 	cfg.ProfilesFile = filepath.Join(filepath.Dir(path), profilesFile)
 	cfg.ResumeFile = filepath.Join(filepath.Dir(path), resumeFile)
+	cfg.LaunchDir = filepath.Join(filepath.Dir(path), launchDir)
 	return cfg, nil
 }
 
