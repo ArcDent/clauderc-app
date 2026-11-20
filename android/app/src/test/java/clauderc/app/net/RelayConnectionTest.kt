@@ -136,6 +136,22 @@ class RelayConnectionTest {
         assertEquals("needsConfirmation", error.code)
     }
 
+    // A message with pictures passes its own, longer wait; the others keep the connection's.
+    @Test fun aRequestCanWaitLongerThanUsual() = runBlocking {
+        val peer = Peer()
+        server.enqueue(upgrade(peer))
+        val conn = RelayConnection(client, scope, reconnectDelaysMillis = listOf(50, 100), requestTimeoutMillis = 200)
+        connected(conn)
+        peer.awaitOpen()
+        val usual = async(Dispatchers.Default) { runCatching { conn.request("chat.send", "m-1", JsonPrimitive("usual")) } }
+        val longer = async(Dispatchers.Default) { runCatching { conn.request("chat.send", "m-1", JsonPrimitive("longer"), timeoutMillis = 2_000) } }
+        val sent = listOf(peer.nextMessage(), peer.nextMessage())
+        delay(600)
+        for (env in sent) peer.socket.send(Envelope(kind = Kind.RESPONSE, id = env.id, method = env.method, body = env.body).encode())
+        assertTrue(usual.await().exceptionOrNull() is kotlinx.coroutines.TimeoutCancellationException)
+        assertEquals(JsonPrimitive("longer"), longer.await().getOrThrow())
+    }
+
     @Test fun eventsReachTheEventFlow() = runBlocking {
         val peer = Peer()
         server.enqueue(upgrade(peer))

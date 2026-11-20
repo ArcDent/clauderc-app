@@ -478,7 +478,7 @@ button { cursor: pointer; }
 .gh-sum { display: none; flex: 1; min-width: 0; font-size: var(--fs-caption); color: var(--c-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gh.collapsed .gh-sum { display: block; }
 .gh.collapsed .gh-dom { display: none; }
-.gh.collapsed + .list { display: none; }
+.gh.collapsed + .list, .gh.collapsed + .g-empty { display: none; }
 .gh-fold .ms { transform: rotate(180deg); transition: transform var(--dur-s) var(--ease-emph); }
 .gh.collapsed .gh-fold .ms { transform: none; }
 .g-empty { margin: 0; padding: var(--sp-2) var(--sp-page) var(--sp-3); font-size: var(--fs-label); color: var(--c-fg-3); }
@@ -966,6 +966,8 @@ textarea.input { resize: none; line-height: 1.5; }
     <div class="gh">
       <button type="button" class="gh-name mono" data-go="sessions-rename">anyrouter.top<span class="ms">edit</span></button>
       <span class="gh-dom"></span>
+      <span class="gh-sum">0 个会话</span>
+      <button type="button" class="icon-btn sm gh-fold" aria-label="折叠 anyrouter.top 档位" aria-expanded="true"><span class="ms">expand_more</span></button>
       <button type="button" class="icon-btn sm" data-go="create" aria-label="在 anyrouter.top 档位新建会话"><span class="ms">add</span></button>
     </div>
     <p class="g-empty">没有会话</p>
@@ -1141,7 +1143,7 @@ ok  	clauderc/internal/protocol	0.412s</span></div></div>
       <div class="thumb"><div class="shot"><span class="r">panic: runtime error</span><br>goroutine 1 [running]:<br>main.main()<br>/cmd/relay/main.go:42<br>exit status 2</div><button type="button" class="x" aria-label="移除"><span class="ms">close</span></button></div>
       <div class="thumb"><div class="shot light">relay.toml<br>listen = "127.0.0.1:8787"<br>public = "wss://…"<br>key_file = …</div><button type="button" class="x" aria-label="移除"><span class="ms">close</span></button></div>
       <button type="button" class="thumb-add" data-go="chat-attach" aria-label="再添加图片"><span class="ms">add</span></button>
-      <span class="attach-count">2 / 5</span>
+      <span class="attach-count">0.8 / 11 MB</span>
     </div>
     <div class="inline-err" data-only="imgerr" hidden>IMG_2041.jpg 有 15.2 MB，超过 10 MB，没有添加</div>
     <div class="composer">
@@ -1355,7 +1357,7 @@ ok  	clauderc/internal/protocol	0.412s</span></div></div>
 </div>
 
 <div class="sheet" data-only="attach" role="dialog" aria-label="添加图片" hidden>
-  <div class="sheet-head"><h2>添加图片</h2><p>最多 5 张，每张不超过 10 MB</p></div>
+  <div class="sheet-head"><h2>添加图片</h2><p>单张不超过 10 MB，压缩后合计不超过 11 MB</p></div>
   <button type="button" class="mi" data-go="chat-images"><span class="ms">photo_camera</span><span class="mi-body">拍照</span></button>
   <button type="button" class="mi" data-go="chat-images"><span class="ms">image</span><span class="mi-body">从相册选择</span></button>
 </div>

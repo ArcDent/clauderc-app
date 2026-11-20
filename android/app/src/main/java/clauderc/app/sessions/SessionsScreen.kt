@@ -266,15 +266,17 @@ fun SessionsScreen(
                             }
                             if (group.sessions.isEmpty()) {
                                 item(key = "e:" + group.profile.id) {
-                                    if (Clauderc.look.cards) {
-                                        GroupBlock(padding = sp.sp4) { Text("没有会话", fontSize = Clauderc.fontSizes.label, color = c.fg3) }
-                                    } else {
-                                        Text(
-                                            "没有会话",
-                                            modifier = Modifier.padding(start = sp.page, end = sp.page, top = sp.sp2, bottom = sp.sp3),
-                                            fontSize = Clauderc.fontSizes.label,
-                                            color = c.fg3,
-                                        )
+                                    Fold(visible = !group.collapsed) {
+                                        if (Clauderc.look.cards) {
+                                            GroupBlock(padding = sp.sp4) { Text("没有会话", fontSize = Clauderc.fontSizes.label, color = c.fg3) }
+                                        } else {
+                                            Text(
+                                                "没有会话",
+                                                modifier = Modifier.padding(start = sp.page, end = sp.page, top = sp.sp2, bottom = sp.sp3),
+                                                fontSize = Clauderc.fontSizes.label,
+                                                color = c.fg3,
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -526,16 +528,14 @@ private fun GroupHeader(group: SessionGroup, enabled: Boolean, onRename: () -> U
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (group.sessions.isNotEmpty()) {
-            val turn by animateFloatAsState(if (group.collapsed) 0f else 180f, Motion.turn(), label = "fold")
-            SymbolButton(
-                Symbols.ExpandMore,
-                if (group.collapsed) "展开${group.title}档位" else "折叠${group.title}档位",
-                onClick = onToggle,
-                small = true,
-                modifier = Modifier.rotate(turn),
-            )
-        }
+        val turn by animateFloatAsState(if (group.collapsed) 0f else 180f, Motion.turn(), label = "fold")
+        SymbolButton(
+            Symbols.ExpandMore,
+            if (group.collapsed) "展开${group.title}档位" else "折叠${group.title}档位",
+            onClick = onToggle,
+            small = true,
+            modifier = Modifier.rotate(turn),
+        )
         if (group.canCreate) {
             SymbolButton(Symbols.Add, "在${group.title}档位新建会话", onClick = onCreate, small = true, enabled = enabled)
         } else {

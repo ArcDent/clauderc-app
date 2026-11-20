@@ -708,4 +708,15 @@ class ChatScreenTest {
         compose.onNodeWithText("readme-hero.png").assertIsDisplayed()
         compose.onNodeWithText("clauderc show readme-hero.png").assertDoesNotExist()
     }
+
+    // No count limit: the bar shows the size used against the total and always offers another picture.
+    @Test fun attachBarShowsTheSizeUsedAndAlwaysOffersMore() {
+        var state by mutableStateOf(baseState().copy(hasMore = false, attachments = List(2) { Attachment("p$it.jpg", ByteArray(1_258_291)) }))
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, ChatActions()) } }
+        compose.onNodeWithText("2.4 / 11 MB").assertIsDisplayed()
+
+        state = state.copy(attachments = List(6) { Attachment("p$it.jpg", ByteArray(1_000)) })
+        compose.onNodeWithText("0.0 / 11 MB").assertIsDisplayed()
+        compose.onNodeWithContentDescription("再添加图片").performScrollTo().assertIsDisplayed()
+    }
 }

@@ -449,7 +449,7 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
         val (name, size) = nameAndSize(context, uri)
         vm.addImage(name, size) { context.contentResolver.openInputStream(uri)!!.use { it.readBytes() } }
     }
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(5)) { uris -> uris.forEach(::add) }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris -> uris.forEach(::add) }
     var photo by remember { mutableStateOf<Uri?>(null) }
     val take = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> if (ok) photo?.let(::add) }
     fun shoot() {

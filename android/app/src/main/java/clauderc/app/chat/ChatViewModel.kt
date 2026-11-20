@@ -68,10 +68,21 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /** A picture waiting in the composer, already resized and re-encoded as JPEG. */
 class Attachment(val name: String, val jpeg: ByteArray)
+
+/** The pictures' size together, which [ChatLimits.MAX_IMAGES_TOTAL_BYTES] bounds. */
+val List<Attachment>.bytes: Long get() = sumOf { it.jpeg.size.toLong() }
+
+/** The leading pictures that fit under [ChatLimits.MAX_IMAGES_TOTAL_BYTES] together. */
+private fun List<Attachment>.fitting(): List<Attachment> {
+    var total = 0L
+    return takeWhile { total += it.jpeg.size; total <= ChatLimits.MAX_IMAGES_TOTAL_BYTES }
+}
 
 /**
  * A message this phone sent that the transcript has not shown yet; drawn faded under the
@@ -311,6 +322,7 @@ class ChatViewModel(
 ) : ViewModel() {
     private val cacheKey = "$machineId/$sessionId" + agentId?.let { "/$it" }.orEmpty()
     private val outbox = cache.outbox(cacheKey)
+    private val compressing = Mutex()
 
     private val _state = MutableStateFlow(
         (
@@ -554,7 +566,10 @@ class ChatViewModel(
         val kept = if (draft) drafts?.let { d -> appScope.launch { d.set(machineId, sessionId, text) } } else null
         try {
             val images = withContext(background) { out.attachments.map { Image("image/jpeg", Base64.getEncoder().encodeToString(it.jpeg)) } }
-            val res = relay.call(Method.CHAT_SEND, machineId, ChatSendRequest(sessionId, text, images.ifEmpty { null }), ChatSendRequest.serializer(), ChatSendResponse.serializer())
+            val res = relay.call(
+                Method.CHAT_SEND, machineId, ChatSendRequest(sessionId, text, images.ifEmpty { null }), ChatSendRequest.serializer(), ChatSendResponse.serializer(),
+                timeoutMillis = SEND_IMAGES_TIMEOUT_MILLIS.takeIf { images.isNotEmpty() },
+            )
             val queued = res.queued == true
             outbox.outgoing.update { o -> o.map { if (it.id == out.id) it.copy(queued = queued, delivered = !queued) else it } }
             kept?.join()
@@ -577,7 +592,7 @@ class ChatViewModel(
         _state.update { s ->
             s.copy(
                 waking = false,
-                attachments = if (out != null) (out.attachments + s.attachments).take(ChatLimits.MAX_IMAGES) else s.attachments,
+                attachments = if (out != null) (out.attachments + s.attachments).fitting() else s.attachments,
                 restore = if (out != null && out.text.isNotEmpty()) Restore(out.id, out.text) else s.restore,
             )
         }
@@ -724,24 +739,22 @@ class ChatViewModel(
         }
     }
 
-    /** Checks the limits before compressing; [read] loads the original bytes. */
+    /**
+     * Checks the original's size before compressing and the total after; [read] loads the original bytes.
+     * Pictures are compressed one at a time, as a big photo decodes to tens of MB, and so keep the order they were picked in.
+     */
     fun addImage(name: String, sizeBytes: Long, read: suspend () -> ByteArray) {
-        val s = _state.value
-        val error = when {
-            s.attachments.size >= ChatLimits.MAX_IMAGES -> "最多 ${ChatLimits.MAX_IMAGES} 张，$name 没有添加"
-            sizeBytes > ChatLimits.MAX_IMAGE_BYTES -> "$name 有 ${"%.1f".format(sizeBytes / 1048576.0)} MB，超过 10 MB，没有添加"
-            else -> null
-        }
-        if (error != null) {
-            _state.update { it.copy(attachError = error) }
+        if (sizeBytes > ChatLimits.MAX_IMAGE_BYTES) {
+            _state.update { it.copy(attachError = "$name 有 ${"%.1f".format(sizeBytes / 1048576.0)} MB，超过 10 MB，没有添加") }
             return
         }
         viewModelScope.launch {
-            val jpeg = runCatching { withContext(background) { compress(read()) } }.getOrNull()
+            val jpeg = runCatching { compressing.withLock { withContext(background) { compress(read()) } } }.getOrNull()
             _state.update {
                 when {
                     jpeg == null -> it.copy(attachError = "$name 读不出来，没有添加")
-                    it.attachments.size >= ChatLimits.MAX_IMAGES -> it.copy(attachError = "最多 ${ChatLimits.MAX_IMAGES} 张，$name 没有添加")
+                    it.attachments.bytes + jpeg.size > ChatLimits.MAX_IMAGES_TOTAL_BYTES ->
+                        it.copy(attachError = "图片加起来超过 ${ChatLimits.MAX_IMAGES_TOTAL_BYTES shr 20} MB，$name 没有添加")
                     else -> it.copy(attachments = it.attachments + Attachment(name, jpeg), attachError = null)
                 }
             }
@@ -864,6 +877,9 @@ const val RESUME_TEXT = "继续"
 
 /** The agent sends a minute after the reset, so the message does not land on its edge and get refused. */
 private const val RESUME_DELAY_SECONDS = 60L
+
+/** A message with pictures waits longer: up to 11 MB to upload, and the agent pastes each picture with a pause. */
+const val SEND_IMAGES_TIMEOUT_MILLIS = 120_000L
 
 /** A worktree name session.create takes, as the agent checks it. */
 val WORKTREE_NAME = Regex("^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$")

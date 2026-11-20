@@ -457,6 +457,19 @@ func TestSendImages(t *testing.T) {
 	}
 }
 
+// There is no count limit; only the total size is checked.
+func TestSendManyImages(t *testing.T) {
+	f := newFixture(t, setup{})
+	six := make([]protocol.Image, 6)
+	for i := range six {
+		six[i] = protocol.Image{MediaType: "image/png", Data: []byte("\x89PNG fake")}
+	}
+	f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "这些是什么", Images: six})
+	if entries, err := os.ReadDir(f.uploads); err != nil || len(entries) != 6 {
+		t.Fatalf("uploads = %v, %v", entries, err)
+	}
+}
+
 // Uploads are named by 32 random hex digits plus .png or .jpg; only such
 // files older than 24 hours are removed, anything else in the directory
 // is left alone.
@@ -503,17 +516,14 @@ func TestSendRemovesOldUploads(t *testing.T) {
 func TestSendRejects(t *testing.T) {
 	f := newFixture(t, setup{})
 	big := make([]byte, protocol.MaxImageBytes+1)
-	six := make([]protocol.Image, 6)
-	for i := range six {
-		six[i] = protocol.Image{MediaType: "image/png", Data: []byte("x")}
-	}
+	half := make([]byte, 6<<20)
 	cases := []struct {
 		name string
 		body protocol.ChatSendRequest
 		code protocol.ErrorCode
 	}{
 		{"empty", protocol.ChatSendRequest{SessionID: shortID}, protocol.CodeInvalidParams},
-		{"too many images", protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: six}, protocol.CodeInvalidParams},
+		{"images too big together", protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: []protocol.Image{{MediaType: "image/png", Data: half}, {MediaType: "image/png", Data: half}}}, protocol.CodeInvalidParams},
 		{"image too big", protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: []protocol.Image{{MediaType: "image/png", Data: big}}}, protocol.CodeInvalidParams},
 		{"not an image", protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: []protocol.Image{{MediaType: "text/html", Data: []byte("x")}}}, protocol.CodeInvalidParams},
 		{"unknown session", protocol.ChatSendRequest{SessionID: "zzz99999", Text: "x"}, protocol.CodeSessionNotFound},
@@ -805,11 +815,8 @@ func TestBlockedButBusyIsWorking(t *testing.T) {
 // The phone shows error messages as they are, so they are Chinese.
 func TestErrorMessagesAreChinese(t *testing.T) {
 	f := newFixture(t, setup{attachEnv: []string{fakeattach.ModesEnv("default")}})
-	six := make([]protocol.Image, 6)
-	for i := range six {
-		six[i] = protocol.Image{MediaType: "image/png", Data: []byte("x")}
-	}
 	big := make([]byte, protocol.MaxImageBytes+1)
+	half := make([]byte, 6<<20)
 	cases := []struct {
 		name   string
 		method protocol.Method
@@ -820,7 +827,7 @@ func TestErrorMessagesAreChinese(t *testing.T) {
 		{"unknown session", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: "zzz99999"}, "找不到这个后台会话，可能已经被移除"},
 		{"empty message", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID}, "消息是空的"},
 		{"control bytes only", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "\x1b\x15\r"}, "消息是空的"},
-		{"too many images", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: six}, "一条消息最多附 5 张图片"},
+		{"images too big together", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: []protocol.Image{{MediaType: "image/png", Data: half}, {MediaType: "image/png", Data: half}}}, "图片加起来不能超过 11 MB"},
 		{"image too big", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: []protocol.Image{{MediaType: "image/png", Data: big}}}, "图片不能为空，也不能超过 10 MB"},
 		{"not an image", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "x", Images: []protocol.Image{{MediaType: "text/html", Data: []byte("x")}}}, "只支持 PNG 和 JPEG 图片"},
 		{"nothing pending", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_x", Decision: protocol.DecisionAllow}, "待确认的内容已变化，请看最新的请求再回答"},

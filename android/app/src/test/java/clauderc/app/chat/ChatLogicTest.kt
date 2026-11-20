@@ -459,11 +459,43 @@ class ChatLogicTest {
         vm.addImage("IMG_2041.jpg", 15_200_000) { error("must not be read") }
         assertTrue(vm.state.value.attachError!!.contains("超过 10 MB"))
         assertTrue(vm.state.value.attachments.isEmpty())
-        repeat(5) { i -> vm.addImage("p$i.png", 100) { tinyPng() } }
-        eventually { vm.state.first { it.attachments.size == 5 } }
-        vm.addImage("p6.png", 100) { tinyPng() }
-        assertTrue(vm.state.value.attachError!!.contains("最多 5 张"))
-        assertEquals(5, vm.state.value.attachments.size)
+        // No count limit.
+        repeat(6) { i -> vm.addImage("p$i.png", 100) { tinyPng() } }
+        eventually { vm.state.first { it.attachments.size == 6 } }
+        assertNull(vm.state.value.attachError)
+    }
+
+    @Test fun sendingPicturesWaitsLonger() = runTest(dispatcher) {
+        val vm = viewModel()
+        assertTrue(vm.send("只有文字"))
+        vm.addImage("p.png", 100) { tinyPng() }
+        assertEquals(1, vm.state.value.attachments.size)
+        assertTrue(vm.send("看这张图"))
+        assertEquals(listOf(null, SEND_IMAGES_TIMEOUT_MILLIS), relay.sent(Method.CHAT_SEND).map { it.timeoutMillis })
+    }
+
+    @Test fun imagesTogetherStayUnderTheTotal() = runTest(dispatcher) {
+        val vm = ChatViewModel("m-1", "s-need", relay, Fleet(relay, scope), scope, compress = { ByteArray(4 shl 20) }, background = dispatcher)
+        repeat(3) { i -> vm.addImage("p$i.jpg", 100) { tinyPng() } }
+        val s = eventually { vm.state.first { it.attachError != null } }
+        assertTrue(s.attachError!!.contains("加起来超过 11 MB"))
+        assertEquals(listOf("p0.jpg", "p1.jpg"), s.attachments.map { it.name })
+    }
+
+    @Test fun imagesAreCompressedOneAtATimeInOrder() = runTest(dispatcher) {
+        val running = java.util.concurrent.atomic.AtomicInteger()
+        val most = java.util.concurrent.atomic.AtomicInteger()
+        val compress = { b: ByteArray ->
+            most.accumulateAndGet(running.incrementAndGet(), ::maxOf)
+            Thread.sleep(50)
+            running.decrementAndGet()
+            b
+        }
+        val vm = ChatViewModel("m-1", "s-need", relay, Fleet(relay, scope), scope, compress = compress, background = Dispatchers.Default)
+        repeat(4) { i -> vm.addImage("p$i.png", 100) { tinyPng() } }
+        eventually { vm.state.first { it.attachments.size == 4 } }
+        assertEquals(1, most.get())
+        assertEquals(listOf("p0.png", "p1.png", "p2.png", "p3.png"), vm.state.value.attachments.map { it.name })
     }
 
     @Test fun modelAndPermissionModeSwitch() = runTest(dispatcher) {

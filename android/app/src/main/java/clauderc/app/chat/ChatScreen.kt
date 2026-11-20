@@ -336,7 +336,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
 
     when (sheet) {
         ChatSheet.Attach -> ClaudercSheet(onDismiss = { sheet = null }) {
-            SheetHead("添加图片", "最多 ${ChatLimits.MAX_IMAGES} 张，每张不超过 10 MB")
+            SheetHead("添加图片", "单张不超过 10 MB，压缩后合计不超过 ${ChatLimits.MAX_IMAGES_TOTAL_BYTES shr 20} MB")
             MenuItem("拍照", onClick = { sheet = null; actions.onTakePhoto() }, icon = Symbols.PhotoCamera)
             MenuItem("从相册选择", onClick = { sheet = null; actions.onPickImages() }, icon = Symbols.Image)
         }
@@ -1141,33 +1141,34 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
             limit?.let { l -> Box(block) { LimitRow(l, state.resumeText, enabled, actions.onResumeText, actions.onAutoResume) } }
         }
         Lift(visible = state.attachments.isNotEmpty()) {
-            Row(
-                block.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = sp.sp1),
-                horizontalArrangement = Arrangement.spacedBy(sp.sp2),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                state.attachments.forEachIndexed { i, a ->
-                    val bitmap = rememberChatImage(a) { a.jpeg }
-                    val press = remember { MutableInteractionSource() }
-                    Box(Modifier.size(60.dp).clip(RoundedCornerShape(12.dp)).background(c.surface)) {
-                        if (bitmap != null) Image(bitmap, contentDescription = a.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                        Box(
-                            Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(3.dp)
-                                .pressShrink(press)
-                                .size(20.dp)
-                                .clip(CircleShape)
-                                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
-                                .clickable(press, PressIndication(androidx.compose.ui.graphics.Color.White), role = Role.Button, onClickLabel = "移除") { actions.onRemoveImage(i) }
-                                .semantics { contentDescription = "移除 ${a.name}" },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Symbols.Close, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(14.dp))
+            // The pictures scroll; the size used stays at the end, however many there are.
+            Row(block.fillMaxWidth().padding(horizontal = sp.sp1), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(sp.sp2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    state.attachments.forEachIndexed { i, a ->
+                        val bitmap = rememberChatImage(a) { a.jpeg }
+                        val press = remember { MutableInteractionSource() }
+                        Box(Modifier.size(60.dp).clip(RoundedCornerShape(12.dp)).background(c.surface)) {
+                            if (bitmap != null) Image(bitmap, contentDescription = a.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            Box(
+                                Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(3.dp)
+                                    .pressShrink(press)
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
+                                    .clickable(press, PressIndication(androidx.compose.ui.graphics.Color.White), role = Role.Button, onClickLabel = "移除") { actions.onRemoveImage(i) }
+                                    .semantics { contentDescription = "移除 ${a.name}" },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Symbols.Close, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(14.dp))
+                            }
                         }
                     }
-                }
-                if (state.attachments.size < ChatLimits.MAX_IMAGES) {
                     val press = remember { MutableInteractionSource() }
                     Box(
                         Modifier
@@ -1179,8 +1180,12 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                         contentAlignment = Alignment.Center,
                     ) { Icon(Symbols.Add, contentDescription = "再添加图片", tint = c.fg2) }
                 }
-                Spacer(Modifier.weight(1f))
-                Text("${state.attachments.size} / ${ChatLimits.MAX_IMAGES}", fontSize = Clauderc.fontSizes.caption, color = c.fg3, modifier = Modifier.padding(start = sp.sp2))
+                Text(
+                    "%.1f / %d MB".format(state.attachments.bytes / 1048576.0, ChatLimits.MAX_IMAGES_TOTAL_BYTES shr 20),
+                    fontSize = Clauderc.fontSizes.caption,
+                    color = c.fg3,
+                    modifier = Modifier.padding(start = sp.sp2),
+                )
             }
         }
         var shownError by remember { mutableStateOf("") }

@@ -7,8 +7,11 @@ import (
 
 // Image limits for chat.send (session-chat spec, design D2).
 const (
-	MaxImagesPerMessage = 5
-	MaxImageBytes       = 10 << 20
+	MaxImageBytes = 10 << 20
+	// MaxImagesTotalBytes bounds a message's pictures together: base64 makes
+	// them a third bigger, and with the text they must stay under
+	// MaxMessageBytes, past which either side drops the connection.
+	MaxImagesTotalBytes = 11 << 20
 	// MaxImageEdge is the longest side, in pixels, after the phone resizes.
 	MaxImageEdge = 2048
 )

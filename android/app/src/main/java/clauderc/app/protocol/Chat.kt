@@ -7,8 +7,8 @@ import kotlinx.serialization.json.JsonNull
 
 /** Mirrors internal/protocol/chat.go. */
 object ChatLimits {
-    const val MAX_IMAGES = 5
     const val MAX_IMAGE_BYTES = 10L shl 20
+    const val MAX_IMAGES_TOTAL_BYTES = 11L shl 20
     const val MAX_IMAGE_EDGE = 2048
     const val PAGE_SIZE = 50
 }

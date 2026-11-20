@@ -57,8 +57,8 @@ interface Relay {
     val state: StateFlow<ConnectionState>
     val events: SharedFlow<Envelope>
 
-    /** Sends a request and returns the response body, or throws [RemoteException]. */
-    suspend fun request(method: String, machine: String?, body: JsonElement? = null): JsonElement
+    /** Sends a request and returns the response body, or throws [RemoteException]; [timeoutMillis] replaces the usual wait. */
+    suspend fun request(method: String, machine: String?, body: JsonElement? = null, timeoutMillis: Long? = null): JsonElement
 
     /** The state of the relay that reaches [machine]; with a single relay that is [state]. */
     fun stateOf(machine: String): Flow<ConnectionState> = state
@@ -84,8 +84,9 @@ suspend fun <Req, Res> Relay.call(
     request: Req,
     requestSerializer: SerializationStrategy<Req>,
     responseSerializer: DeserializationStrategy<Res>,
+    timeoutMillis: Long? = null,
 ): Res {
-    val body = request(method, machine, ProtocolJson.encodeToJsonElement(requestSerializer, request))
+    val body = request(method, machine, ProtocolJson.encodeToJsonElement(requestSerializer, request), timeoutMillis)
     return ProtocolJson.decodeFromJsonElement(responseSerializer, body)
 }
 
@@ -223,7 +224,7 @@ class RelayConnection(
             onDropped(webSocket, revoked = response?.code == 401)
     }
 
-    override suspend fun request(method: String, machine: String?, body: JsonElement?): JsonElement {
+    override suspend fun request(method: String, machine: String?, body: JsonElement?, timeoutMillis: Long?): JsonElement {
         val id = "a-${ids.incrementAndGet()}"
         val deferred = CompletableDeferred<Envelope>()
         val ws = synchronized(lock) {
@@ -237,7 +238,7 @@ class RelayConnection(
             throw NotConnectedException()
         }
         val response = try {
-            withTimeout(requestTimeoutMillis) { deferred.await() }
+            withTimeout(timeoutMillis ?: requestTimeoutMillis) { deferred.await() }
         } finally {
             pending.remove(id)
         }

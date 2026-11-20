@@ -15,7 +15,7 @@ import kotlinx.serialization.json.JsonObject
 
 /** A scripted relay: answers by method name and records every request. */
 class FakeRelay(initial: ConnectionState = ConnectionState.Connected) : RelayLine {
-    data class Sent(val method: String, val machine: String?, val body: JsonElement?)
+    data class Sent(val method: String, val machine: String?, val body: JsonElement?, val timeoutMillis: Long? = null)
 
     override val state = MutableStateFlow(initial)
     override val events = MutableSharedFlow<Envelope>(extraBufferCapacity = 64)
@@ -51,8 +51,8 @@ class FakeRelay(initial: ConnectionState = ConnectionState.Connected) : RelayLin
         check(events.tryEmit(Envelope(kind = Kind.EVENT, method = method, machine = machine, body = ProtocolJson.encodeToJsonElement(serializer, value))))
     }
 
-    override suspend fun request(method: String, machine: String?, body: JsonElement?): JsonElement {
-        val sent = Sent(method, machine, body)
+    override suspend fun request(method: String, machine: String?, body: JsonElement?, timeoutMillis: Long?): JsonElement {
+        val sent = Sent(method, machine, body, timeoutMillis)
         requests += sent
         return handlers[method]?.invoke(sent) ?: JsonObject(emptyMap())
     }

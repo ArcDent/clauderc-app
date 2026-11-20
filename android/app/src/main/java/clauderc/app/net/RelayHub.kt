@@ -144,11 +144,11 @@ class RelayHub(
         .map { list -> owners[machine]?.let { r -> list.firstOrNull { it.relay == r }?.state } ?: overall(list) }
         .distinctUntilChanged()
 
-    override suspend fun request(method: String, machine: String?, body: JsonElement?): JsonElement {
+    override suspend fun request(method: String, machine: String?, body: JsonElement?, timeoutMillis: Long?): JsonElement {
         if (machine == null && method == Method.MACHINES_LIST) return listAll()
         val map = entries.value
         val entry = machine?.let { owners[it] }?.let { map[it] } ?: map.values.singleOrNull() ?: throw NotConnectedException()
-        return entry.line.request(method, machine, body)
+        return entry.line.request(method, machine, body, timeoutMillis)
     }
 
     /** Asks every relay for its machines; a relay that cannot answer keeps its last list. */

@@ -52,17 +52,23 @@ class GroupFoldTest {
 
     private fun has(text: String) = compose.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty()
 
-    @Test fun foldShowsCountsAndSurvivesRebuild() {
-        val fleet = Fleet(relay, fleetScope)
-        val store = profileNames(tmp.root, storeScope)
-        var vm by mutableStateOf(SessionsViewModel("m-1", fleet, relay, store))
+    private val fleet by lazy { Fleet(relay, fleetScope) }
+    private val store by lazy { profileNames(tmp.root, storeScope) }
+    private var vm by mutableStateOf<SessionsViewModel?>(null)
+
+    private fun show() {
+        vm = SessionsViewModel("m-1", fleet, relay, store)
         compose.setContent {
             ClaudercTheme(darkTheme = false) {
-                val current = vm
+                val current = vm!!
                 val state by current.state.collectAsState()
                 SessionsScreen(state, {}, {}, {}, { _, _ -> }, {}, {}, onToggle = current::toggle)
             }
         }
+    }
+
+    @Test fun foldShowsCountsAndSurvivesRebuild() {
+        show()
         compose.waitUntil(5_000) { has("迁移脚本审查") }
 
         compose.onNodeWithContentDescription("折叠api.anthropic.com档位").performClick()
@@ -77,5 +83,22 @@ class GroupFoldTest {
         compose.onNodeWithContentDescription("展开api.anthropic.com档位").performClick()
         compose.waitUntil(5_000) { has("迁移脚本审查") }
         compose.onNodeWithText("迁移脚本审查").assertIsDisplayed()
+    }
+
+    // anyrouter.top has no sessions; a fold saved while it had some must still be undone from here.
+    @Test fun emptyGroupFoldsToo() {
+        show()
+        compose.waitUntil(5_000) { has("没有会话") }
+
+        compose.onNodeWithContentDescription("折叠anyrouter.top档位").performClick()
+        compose.waitUntil(5_000) { !has("没有会话") }
+        compose.onNodeWithText("0 个会话").assertIsDisplayed()
+
+        compose.runOnUiThread { vm = SessionsViewModel("m-1", fleet, relay, store) }
+        compose.waitUntil(5_000) { has("0 个会话") && !has("没有会话") }
+
+        compose.onNodeWithContentDescription("展开anyrouter.top档位").performClick()
+        compose.waitUntil(5_000) { has("没有会话") }
+        compose.onNodeWithText("没有会话").assertIsDisplayed()
     }
 }

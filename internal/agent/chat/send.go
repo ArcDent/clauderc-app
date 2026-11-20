@@ -174,11 +174,10 @@ func checkMessage(b protocol.ChatSendRequest) string {
 		return errNoSessionID.msg
 	case strings.TrimSpace(b.Text) == "" && len(b.Images) == 0:
 		return "消息是空的"
-	case len(b.Images) > protocol.MaxImagesPerMessage:
-		return fmt.Sprintf("一条消息最多附 %d 张图片", protocol.MaxImagesPerMessage)
 	case isModelCommand(b.Text):
 		return msgModelCommand
 	}
+	total := 0
 	for _, im := range b.Images {
 		if _, ok := imageExt[im.MediaType]; !ok {
 			return "只支持 PNG 和 JPEG 图片"
@@ -186,6 +185,10 @@ func checkMessage(b protocol.ChatSendRequest) string {
 		if len(im.Data) == 0 || len(im.Data) > protocol.MaxImageBytes {
 			return fmt.Sprintf("图片不能为空，也不能超过 %d MB", protocol.MaxImageBytes>>20)
 		}
+		total += len(im.Data)
+	}
+	if total > protocol.MaxImagesTotalBytes {
+		return fmt.Sprintf("图片加起来不能超过 %d MB", protocol.MaxImagesTotalBytes>>20)
 	}
 	return ""
 }
