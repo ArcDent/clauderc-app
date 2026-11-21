@@ -13,6 +13,7 @@ import (
 	"io"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -55,6 +56,9 @@ type Transcript struct {
 	// queuedCommands counts enqueue records without text, which is how
 	// Claude Code queues a slash command.
 	queuedCommands int
+	// unknownCommands lists, oldest first, the slash commands Claude Code
+	// turned down as unknown, such as a skill the session does not load.
+	unknownCommands []string
 	// unpaired lists the notices made from one side of a delivery that
 	// may still see the same text from the other side, oldest first.
 	unpaired []unpairedNotice
@@ -68,6 +72,12 @@ type Transcript struct {
 // QueuedCommands returns how many slash commands were queued so far.
 func (t *Transcript) QueuedCommands() int {
 	return t.queuedCommands
+}
+
+// UnknownCommands returns the names, with their slash, of the commands
+// Claude Code turned down as unknown so far, oldest first.
+func (t *Transcript) UnknownCommands() []string {
+	return slices.Clone(t.unknownCommands)
 }
 
 // Parse reads a whole transcript.
@@ -220,6 +230,12 @@ func (t *Transcript) record(r *record) []int {
 		}
 		return t.assistant(r.Message.Content)
 	case "system":
+		if r.Subtype == "informational" {
+			if name, ok := strings.CutPrefix(textOf(r.Content), "Unknown command: "); ok {
+				t.unknownCommands = append(t.unknownCommands, strings.TrimSpace(name))
+			}
+			return nil
+		}
 		if r.Subtype != "local_command" {
 			return nil
 		}

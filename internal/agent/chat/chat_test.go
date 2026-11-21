@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -414,6 +415,99 @@ func TestSendNotDelivered(t *testing.T) {
 	}
 	if d := time.Since(start); d < 2*time.Second {
 		t.Fatalf("gave up after %v, before the delivery timeout", d)
+	}
+}
+
+// forker records the forks chat.send asks for.
+type forker struct {
+	mu    sync.Mutex
+	calls [][2]string
+}
+
+func (k *forker) Fork(_ context.Context, id, instruction string) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.calls = append(k.calls, [2]string{id, instruction})
+	return nil
+}
+
+// Claude Code refuses /fork in a session launched with --setting-sources,
+// so the agent forks it itself instead of typing it; other sessions get
+// /fork typed as before.
+func TestSendForkWhereClaudeRefusesIt(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		flags  []string
+		forked bool
+	}{
+		{"account login", []string{"--setting-sources", "project,local", "--settings", "/x.json"}, true},
+		{"plain", []string{"--model", "opus"}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			k := &forker{}
+			f := newFixture(t, setup{opts: func(o *chat.Options) { o.Forker = k }})
+			job, _ := json.Marshal(map[string]any{"respawnFlags": c.flags})
+			if err := os.MkdirAll(filepath.Join(f.sample, "jobs", shortID), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(f.sample, "jobs", shortID, "state.json"), job, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "/fork 只回复 FORKED"})
+			keys, _ := os.ReadFile(f.keys)
+			typed := strings.Contains(string(keys), "/fork")
+			want := [][2]string(nil)
+			if c.forked {
+				want = [][2]string{{shortID, "只回复 FORKED"}}
+			}
+			if !slices.Equal(k.calls, want) || typed == c.forked {
+				t.Errorf("forks %v, typed %v; want forks %v, typed %v", k.calls, typed, want, !c.forked)
+			}
+		})
+	}
+}
+
+// /compact is recorded only once the compaction is done, so a slash
+// command missing from the transcript counts as delivered when the screen
+// shows it taken: gone from the input box with a status line up. Without
+// the status line, or for plain text, it stays not delivered.
+func TestSendCommandScreen(t *testing.T) {
+	for _, c := range []struct {
+		name, deliver, text string
+		ok                  bool
+	}{
+		{"working", "working", "/compact", true},
+		{"no status line", "none", "/compact", false},
+		{"plain text", "working", "你好", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t, setup{attachEnv: []string{fakeattach.DeliverEnv(c.deliver)}})
+			res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: c.text})
+			switch {
+			case c.ok && res.Error != nil:
+				t.Fatalf("response error = %+v, want delivered", res.Error)
+			case !c.ok && (res.Error == nil || res.Error.Code != protocol.CodeNotDelivered):
+				t.Fatalf("response error = %+v, want not delivered", res.Error)
+			}
+		})
+	}
+}
+
+// A slash command Claude Code has no command or skill for, such as a
+// personal skill in a session that does not load them, is reported as
+// unknown at once instead of as not delivered.
+func TestSendUnknownCommand(t *testing.T) {
+	f := newFixture(t, setup{attachEnv: []string{fakeattach.DeliverEnv("unknown")}})
+	start := time.Now()
+	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "/todolist-workflow 先用这个"})
+	if res.Error == nil || res.Error.Code != protocol.CodeInvalidParams {
+		t.Fatalf("response error = %+v", res.Error)
+	}
+	if want := "会话不认识 /todolist-workflow 这个命令"; res.Error.Message != want {
+		t.Errorf("message %q, want %q", res.Error.Message, want)
+	}
+	if d := time.Since(start); d >= 2*time.Second {
+		t.Errorf("answered after %v, not before the delivery timeout", d)
 	}
 }
 

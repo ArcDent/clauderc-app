@@ -3,11 +3,19 @@
 // Package claude runs the agent against the real Claude Code (task 10.6)
 // through the protocol methods the phone uses, replacing the scenarios of
 // scripts/e2e-claude/run.py. It starts real background sessions, so it is
-// left out of go test ./... and run by hand after upgrading Claude Code:
+// left out of go test ./... and run by hand after upgrading Claude Code,
+// with the claude the agent runs:
 //
-//	CLAUDERC_E2E_CLAUDE=~/.local/bin/claude-launch go test -tags e2e -v -timeout 40m ./test/e2e/claude/...
+//	CLAUDERC_E2E_CLAUDE=$(npm prefix -g)/bin/claude go test -tags e2e -v -timeout 40m ./test/e2e/claude/...
 //
-// CLAUDERC_E2E_CLAUDE is the claude command to use, "claude" by default.
+// CLAUDERC_E2E_CLAUDE is the claude command to use, "claude" by default;
+// it must not point claude at a gateway, and neither must the environment:
+// a session launched with ANTHROPIC_BASE_URL set, as in a Claude Code
+// session's shell or through a wrapper that exports it, is a gateway
+// session the account login is refused for (No LLM gateway).
+// CLAUDERC_E2E_BASE_URL and CLAUDERC_E2E_API_KEY start every session on
+// that custom endpoint instead, for a machine without the account login;
+// TestCreateAuth is then skipped.
 // Every scenario creates its own session through session.create, in a
 // fresh directory under .local/e2e-ws/, launched with
 // --permission-mode manual --effort low, and stops and removes it at the
@@ -25,6 +33,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -56,6 +65,10 @@ const (
 	safe
 )
 
+// endpoint is the custom endpoint of CLAUDERC_E2E_BASE_URL and
+// CLAUDERC_E2E_API_KEY; with url empty sessions start on the account login.
+var endpoint = struct{ url, key string }{os.Getenv("CLAUDERC_E2E_BASE_URL"), os.Getenv("CLAUDERC_E2E_API_KEY")}
+
 // plainFlags are the extra launch flags of plain.
 var plainFlags = []string{"--permission-mode", "manual", "--effort", "low"}
 
@@ -72,6 +85,8 @@ type harness struct {
 	safeLife *lifecycle.Handler
 	chats    *chat.Handler
 	root     string // repository root
+	// launch is the handlers' Options.Dir, under the repository.
+	launch string
 
 	mu     sync.Mutex
 	events []protocol.Envelope
@@ -94,6 +109,9 @@ func TestMain(m *testing.M) {
 		shared.chats.Close()
 		// The cache picked up the machine's own launch templates.
 		_ = os.RemoveAll(filepath.Dir(shared.src.ProfilesFile))
+		// The launch directory sits in the repository and may hold the keys
+		// of a custom endpoint.
+		_ = os.RemoveAll(shared.launch)
 		if left := shared.leftovers(); len(left) > 0 {
 			fmt.Fprintln(os.Stderr, "未能清理的测试会话：", strings.Join(left, " "))
 			code = 1
@@ -117,6 +135,9 @@ func h(t *testing.T) *harness {
 }
 
 func newHarness(t *testing.T) *harness {
+	if os.Getenv("ANTHROPIC_BASE_URL") != "" && endpoint.url == "" {
+		t.Fatal("环境里有 ANTHROPIC_BASE_URL，账户登录的会话会以 No LLM gateway 被拒，请在不带它的环境里运行")
+	}
 	claude := os.Getenv("CLAUDERC_E2E_CLAUDE")
 	if claude == "" {
 		claude = "claude"
@@ -148,13 +169,21 @@ func newHarness(t *testing.T) *harness {
 	for _, tg := range targets {
 		baseline[tg.ID] = true
 	}
-	dir := filepath.Join(cache, "launch")
-	x.life = lifecycle.New(lifecycle.Options{Source: x.src, Dir: dir, ExtraFlags: plainFlags})
-	x.safeLife = lifecycle.New(lifecycle.Options{Source: x.src, Dir: dir, ExtraFlags: append(slices.Clone(plainFlags), "--safe-mode")})
+	// Under the repository, which the user trusts: claude --bg refuses an
+	// --add-dir it does not trust, so only there does the account login
+	// add the user's skills.
+	dir := filepath.Join(x.root, ".local", "e2e-ws", "launch")
+	x.launch = dir
+	// The errors behind an internal failure go to stderr, so a failed
+	// create says why.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	x.life = lifecycle.New(lifecycle.Options{Source: x.src, Dir: dir, ExtraFlags: plainFlags, Logger: logger})
+	x.safeLife = lifecycle.New(lifecycle.Options{Source: x.src, Dir: dir, ExtraFlags: append(slices.Clone(plainFlags), "--safe-mode"), Logger: logger})
 	x.chats = chat.New(chat.Options{
 		Source: x.src,
 		Push:   agent.PusherFunc(x.push),
 		Waker:  x.life,
+		Forker: x.life,
 		Attach: attach.Options{Linger: 2 * time.Second},
 	})
 	return x
@@ -192,6 +221,9 @@ func (x *harness) create(t *testing.T, l launchMode, req protocol.SessionCreateR
 	life := x.life
 	if l == safe {
 		life = x.safeLife
+	}
+	if endpoint.url != "" && req.Preset == "" && req.FromSession == "" {
+		req.BaseURL, req.APIKey = endpoint.url, endpoint.key
 	}
 	id, err := life.Create(context.Background(), req)
 	if err != nil {
@@ -618,6 +650,9 @@ func TestSend(t *testing.T) {
 // whose user settings point every launch at a gateway, Claude Code used to
 // stop such a session at once with "No LLM gateway", nothing sent.
 func TestCreateAuth(t *testing.T) {
+	if endpoint.url != "" {
+		t.Skip("设了 CLAUDERC_E2E_BASE_URL，这台机器不测账户登录")
+	}
 	const model, haiku = "claude-opus-5-5[1M]", "hy-4-flash[1M]"
 	s := start(t, "create_auth", plain, workspace(t, "create_auth"), false, map[protocol.ModelTier]string{protocol.ModelMain: model, protocol.ModelHaiku: haiku})
 	if r := s.reply(s.waitUser("只回复 OK", 0, 15*time.Second), 120*time.Second); !strings.Contains(r, "OK") {
@@ -640,6 +675,24 @@ func TestCreateAuth(t *testing.T) {
 	if i := slices.Index(job.RespawnFlags, "--model"); i < 0 || i+1 >= len(job.RespawnFlags) || job.RespawnFlags[i+1] != model {
 		t.Errorf("respawnFlags = %q，want --model %s", job.RespawnFlags, model)
 	}
+	// 账户登录不读用户设置，个人技能靠 --add-dir 接回来，目录被信任过才加；加了就要在技能列表里看到 ~/.claude/skills 里模型可见的每个技能
+	if slices.Contains(job.RespawnFlags, "--add-dir") {
+		f, err := transcript.Open(s.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		listed := map[string]bool{}
+		for _, c := range f.Info().Skills {
+			listed[c.Name] = true
+		}
+		for _, name := range modelSkills(filepath.Join(s.x.src.ClaudeDir, "skills")) {
+			if !listed[name] {
+				t.Errorf("技能列表里没有个人技能 %s", name)
+			}
+		}
+	} else {
+		t.Log("启动参数没有 --add-dir：个人技能目录不存在或没被信任，跳过技能检查")
+	}
 	// 新会话是官方档位最近的一条，档位列出的模型就是这次填的，手机下次选它看到的也是这些
 	list, err := s.x.src.List(context.Background())
 	if err != nil {
@@ -655,6 +708,21 @@ func TestCreateAuth(t *testing.T) {
 		return
 	}
 	t.Errorf("档位列表里没有 api.anthropic.com：%+v", list.Profiles)
+}
+
+// modelSkills names the skills in dir that Claude Code lists to the model:
+// every folder whose SKILL.md does not set disable-model-invocation.
+func modelSkills(dir string) []string {
+	entries, _ := os.ReadDir(dir)
+	var out []string
+	for _, e := range entries {
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name(), "SKILL.md"))
+		if err != nil || strings.Contains(string(raw), "disable-model-invocation: true") {
+			continue
+		}
+		out = append(out, e.Name())
+	}
+	return out
 }
 
 func TestMultiline(t *testing.T) {

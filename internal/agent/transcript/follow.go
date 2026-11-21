@@ -179,6 +179,13 @@ func (f *Follower) QueuedCommands() int {
 	return f.t.QueuedCommands()
 }
 
+// UnknownCommands is Transcript.UnknownCommands on the current state.
+func (f *Follower) UnknownCommands() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.t.UnknownCommands()
+}
+
 // Reads counts the files Poll has read: the transcript each time it grew,
 // a meta file each time it changed. Files that stay the same are not read
 // again.

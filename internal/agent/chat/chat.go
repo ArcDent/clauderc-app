@@ -57,6 +57,9 @@ type Options struct {
 	// Waker resumes stopped sessions for chat.send; nil refuses to send to
 	// them.
 	Waker Waker
+	// Forker forks for chat.send the sessions that refuse /fork; nil
+	// types /fork into them all the same.
+	Forker Forker
 	// ResumeFile keeps the messages waiting for a usage limit to be lifted
 	// (chat.autoResume) across restarts; empty keeps them in memory.
 	ResumeFile string
@@ -79,6 +82,12 @@ type Options struct {
 // called; attaching is what runs a stopped session again.
 type Waker interface {
 	Wake(ctx context.Context, sessionID string, hold func(ctx context.Context, id string) (release func(), err error)) error
+}
+
+// Forker starts a copy of the session with short id id that carries on
+// its conversation, with instruction, when given, as its first message.
+type Forker interface {
+	Fork(ctx context.Context, id, instruction string) error
 }
 
 // hold is the hold given to Waker.Wake. It always starts a new attach: one

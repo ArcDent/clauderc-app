@@ -220,8 +220,10 @@ func (s Source) sessions(ctx context.Context) ([]protocol.Session, []protocol.Pr
 	sessions := []protocol.Session{}
 	profiles := []protocol.Profile{}
 	targets := []Target{}
-	// forkParents holds each fork's source session id, index for index.
+	// forkParents holds each fork's source session id, index for index:
+	// Claude Code's own for /fork, else the agent's record (RecordFork).
 	forkParents := []string{}
+	forks := s.forks()
 	for _, e := range entries {
 		if e.Kind != "background" {
 			continue
@@ -257,7 +259,11 @@ func (s Source) sessions(ctx context.Context) ([]protocol.Session, []protocol.Pr
 		})
 		profiles = append(profiles, p)
 		targets = append(targets, t)
-		forkParents = append(forkParents, job.ForkParentSessionID)
+		parent := job.ForkParentSessionID
+		if parent == "" {
+			parent = forks[e.ID]
+		}
+		forkParents = append(forkParents, parent)
 	}
 	short := make(map[string]string, len(targets))
 	for _, t := range targets {

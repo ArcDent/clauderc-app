@@ -83,6 +83,8 @@ go test ./...
 CLAUDERC_E2E_CLAUDE=<claude 命令> go test -tags e2e -v -timeout 40m ./test/e2e/claude/...
 ```
 
+`<claude 命令>` 用 agent 配置里的那个 claude，不要用会导出路由变量的包装脚本。环境里不能有 `ANTHROPIC_BASE_URL`，否则账户登录的会话会以 No LLM gateway 被拒；在 Claude Code 会话里跑时要用 `env -i` 换成干净的环境。
+
 Android 单元测试跑在 JVM 和 Robolectric 上，不需要模拟器。协议样例测试直接读 `internal/protocol/testdata/`，新增方法时要在 `ProtocolSamplesTest` 里登记对应的 Kotlin 类型；主题测试直接解析 `design/ui-mockup/index.html` 的 CSS 变量，改了设计稿的颜色、字号或间距，要同步改 `ui/theme/Tokens.kt`。
 
 ## 提交前必须通过的检查

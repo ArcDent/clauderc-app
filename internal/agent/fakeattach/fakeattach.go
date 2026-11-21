@@ -58,7 +58,9 @@ func TranscriptEnv(path string) []string {
 // a <bash-input> record for a "!" command as Claude Code writes it),
 // "enqueue" as for a busy session, which like Claude Code leaves out the
 // text of a slash command, "enqueue-bare", an enqueue without text
-// whatever was sent, or "none".
+// whatever was sent, "unknown", Claude Code's warning that it has no such
+// slash command, "working", nothing recorded but a status line on screen
+// as while /compact runs, or "none".
 func DeliverEnv(mode string) string {
 	return envDeliv + "=" + mode
 }
@@ -145,6 +147,8 @@ type input struct {
 	picker  bool
 	cursor  int
 	confirm bool
+	// status is the status line drawn above the input box, "" for none.
+	status string
 }
 
 // footers are the status lines of each mode (RESULTS.md, mode_cycle).
@@ -197,6 +201,9 @@ func (in *input) render() {
 	default:
 		// The input box between two rules, as Claude Code draws it.
 		rule := strings.Repeat("─", 40)
+		if in.status != "" {
+			b.WriteString(in.status + "\r\n")
+		}
 		b.WriteString(rule + "\r\n❯\u00a0\r\n" + rule + "\x1b[40;1H  " + footers[in.modes[in.mode]])
 	}
 	_, _ = in.out.WriteString(b.String())
@@ -310,6 +317,12 @@ func (in *input) enter() error {
 	switch os.Getenv(envDeliv) {
 	case "none":
 		return nil
+	case "working":
+		// Taken but not recorded yet, as /compact until it is done: the
+		// screen shows the session working.
+		in.status = "✻ Compacting conversation… (esc to interrupt)"
+		in.render()
+		return nil
 	case "enqueue":
 		rec = map[string]any{"type": "queue-operation", "operation": "enqueue", "content": text}
 		if strings.HasPrefix(text, "/") {
@@ -317,6 +330,11 @@ func (in *input) enter() error {
 		}
 	case "enqueue-bare":
 		rec = map[string]any{"type": "queue-operation", "operation": "enqueue"}
+	case "unknown":
+		// Claude Code's answer to a slash command it has no such command
+		// or skill for (2.1.329).
+		name, _, _ := strings.Cut(text, " ")
+		rec = map[string]any{"type": "system", "subtype": "informational", "level": "warning", "content": "Unknown command: " + name}
 	default:
 		content := text
 		if line, ok := strings.CutPrefix(text, "!"); ok {

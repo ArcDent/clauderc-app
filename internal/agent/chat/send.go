@@ -10,11 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"clauderc/internal/agent"
 	"clauderc/internal/agent/attach"
+	"clauderc/internal/agent/discovery"
 	"clauderc/internal/agent/transcript"
 	"clauderc/internal/protocol"
 )
@@ -42,6 +44,12 @@ func (h *Handler) send(ctx context.Context, req protocol.Envelope) protocol.Enve
 	target, err := h.lookup(ctx, body.SessionID)
 	if err != nil {
 		return failWith(req, err)
+	}
+	if instruction, ok := h.forkHere(target, body); ok {
+		if err := h.opts.Forker.Fork(ctx, target.ID, instruction); err != nil {
+			return agent.FailErr(req, err)
+		}
+		return agent.Reply(req, protocol.ChatSendResponse{})
 	}
 	if !target.Running {
 		if h.opts.Waker == nil {
@@ -85,11 +93,32 @@ func (h *Handler) send(ctx context.Context, req protocol.Envelope) protocol.Enve
 	if err != nil {
 		return failWith(req, err)
 	}
-	ok, queued := w.wait(ctx, body.Text, h.opts.DeliveryTimeout)
+	ok, queued, unknown := w.wait(ctx, body.Text, h.opts.DeliveryTimeout)
+	if unknown {
+		return agent.Fail(req, protocol.CodeInvalidParams, fmt.Sprintf("会话不认识 %s 这个命令", commandName(body.Text)))
+	}
+	if !ok && strings.HasPrefix(strings.TrimSpace(body.Text), "/") {
+		ok = tookCommand(ctx, conn, body.Text)
+	}
 	if !ok {
 		return agent.Fail(req, protocol.CodeNotDelivered, fmt.Sprintf("消息发出后 %g 秒内没有出现在会话里，可能没有送达", h.opts.DeliveryTimeout.Seconds()))
 	}
 	return agent.Reply(req, protocol.ChatSendResponse{Queued: queued})
+}
+
+// forkHere reports whether the agent forks the session itself for a
+// /fork in body, and with what instruction: Claude Code refuses /fork in
+// a session launched with --setting-sources (2.1.329), as the account
+// login is.
+func (h *Handler) forkHere(target discovery.Target, body protocol.ChatSendRequest) (string, bool) {
+	if h.opts.Forker == nil || len(body.Images) > 0 || commandName(body.Text) != "/fork" {
+		return "", false
+	}
+	t, ok := h.opts.Source.SessionTemplate(target.ID)
+	if !ok || !slices.Contains(t.Flags, "--setting-sources") {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(body.Text), "/fork")), true
 }
 
 // panelTyped is how long a panel command may take to show in the input
@@ -124,6 +153,22 @@ func (h *Handler) sendPanel(ctx context.Context, req protocol.Envelope, conn *at
 		return failWith(req, err)
 	}
 	return agent.Reply(req, protocol.ChatSendResponse{})
+}
+
+// tookCommand reports whether the screen shows that Claude Code took the
+// slash command cmd though its record has not shown up, as /compact is
+// written only once the compaction is done: by the rule of sendPanel, cmd
+// is gone from the input box, and the status line of a working session
+// is up.
+func tookCommand(ctx context.Context, conn *attach.Conn, cmd string) bool {
+	took := false
+	_ = conn.Do(ctx, func(t *attach.Term) error {
+		screen := t.Screen()
+		i, _ := statusLine(strings.Split(screen, "\n"))
+		took = i >= 0 && !inInput(screen, strings.TrimSpace(cmd))
+		return nil
+	})
+	return took
 }
 
 // inInput reports whether Claude Code's input box holds exactly cmd.
@@ -280,16 +325,27 @@ type watch struct {
 	f                    *transcript.Follower
 }
 
+// commandName is the first word of a slash command, slash included.
+func commandName(text string) string {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
 // wait reports whether text showed up within timeout, as a user item,
 // queued or not, or for a slash command as a command item or as an
 // enqueue record without text, which is how Claude Code queues one; and
-// whether it waits in the queue.
-func (w *watch) wait(ctx context.Context, text string, timeout time.Duration) (ok, queued bool) {
+// whether it waits in the queue. unknown is true, at once, when Claude
+// Code turns the slash command down as unknown.
+func (w *watch) wait(ctx context.Context, text string, timeout time.Duration) (ok, queued, unknown bool) {
 	deadline := time.Now().Add(timeout)
 	command := strings.HasPrefix(strings.TrimSpace(text), "/")
-	commands := 0
+	commands, unknowns := 0, 0
 	if w.f != nil {
 		commands = w.f.QueuedCommands()
+		unknowns = len(w.f.UnknownCommands())
 	}
 	for {
 		var items []transcript.Item
@@ -303,18 +359,23 @@ func (w *watch) wait(ctx context.Context, text string, timeout time.Duration) (o
 		}
 		for _, it := range items {
 			if delivered(it, text) {
-				return true, it.Queued
+				return true, it.Queued, false
 			}
 		}
-		if command && w.f != nil && w.f.QueuedCommands() > commands {
-			return true, true
+		if command && w.f != nil {
+			if w.f.QueuedCommands() > commands {
+				return true, true, false
+			}
+			if names := w.f.UnknownCommands(); len(names) > unknowns && slices.Contains(names[unknowns:], commandName(text)) {
+				return false, false, true
+			}
 		}
 		if time.Now().After(deadline) {
-			return false, false
+			return false, false, false
 		}
 		select {
 		case <-ctx.Done():
-			return false, false
+			return false, false, false
 		case <-time.After(100 * time.Millisecond):
 		}
 	}

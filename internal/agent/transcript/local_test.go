@@ -33,7 +33,7 @@ func TestLocalCommandsIncludeEnabledPlugins(t *testing.T) {
 		`{"version":2,"plugins":{"demo@mk":[{"scope":"user","installPath":"`+demo+`"}],"off@mk":[{"scope":"user","installPath":"`+off+`"}]}}`)
 
 	got := map[string]string{}
-	for _, c := range transcript.LocalCommands(claudeDir, "") {
+	for _, c := range transcript.LocalCommands(claudeDir, "", true, true) {
 		got[c.Name] = c.Description
 	}
 	want := map[string]string{"demo:run": "运行演示", "demo:check": "检查一下"}
@@ -51,7 +51,7 @@ func TestLocalCommandsIncludeEnabledPlugins(t *testing.T) {
 
 // Without settings or the install record no plugin is read.
 func TestLocalCommandsWithoutPluginFiles(t *testing.T) {
-	if got := transcript.LocalCommands(t.TempDir(), ""); len(got) != 0 {
+	if got := transcript.LocalCommands(t.TempDir(), "", true, true); len(got) != 0 {
 		t.Errorf("got %v", got)
 	}
 }

@@ -14,25 +14,26 @@ import (
 
 // LocalCommands lists the skills and custom commands on disk that a
 // session in cwd can run as slash commands: <cwd>/.claude first, then the
-// user's own under claudeDir (normally ~/.claude). The transcript's skill
+// user's own under claudeDir (normally ~/.claude), as far as userSkills
+// and userCommands say the session loads them. The transcript's skill
 // listing misses those Claude Code keeps from the model, i.e. skills with
 // disable-model-invocation, so the phone needs both. Skills marked
 // user-invocable: false are left out; symlinked skill folders are
 // followed.
-func LocalCommands(claudeDir, cwd string) []protocol.Command {
-	var bases []string
-	if cwd != "" {
-		bases = append(bases, filepath.Join(cwd, ".claude"))
-	}
-	if claudeDir != "" {
-		bases = append(bases, claudeDir)
-	}
+func LocalCommands(claudeDir, cwd string, userSkills, userCommands bool) []protocol.Command {
 	var out []protocol.Command
-	for _, base := range bases {
+	if cwd != "" {
+		base := filepath.Join(cwd, ".claude")
 		out = append(out, skillsIn(filepath.Join(base, "skills"))...)
 		out = append(out, commandsIn(filepath.Join(base, "commands"), "", 0)...)
 	}
 	if claudeDir != "" {
+		if userSkills {
+			out = append(out, skillsIn(filepath.Join(claudeDir, "skills"))...)
+		}
+		if userCommands {
+			out = append(out, commandsIn(filepath.Join(claudeDir, "commands"), "", 0)...)
+		}
 		out = append(out, pluginCommands(claudeDir)...)
 	}
 	return out
