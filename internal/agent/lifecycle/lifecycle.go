@@ -21,6 +21,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -42,6 +43,10 @@ const (
 	// claudeTimeout bounds one claude call; starting a background session
 	// takes a few seconds on a real machine.
 	claudeTimeout = 90 * time.Second
+	// skillsTrustWait bounds the wait for the trust prompt of
+	// userSkillsDir, which comes before the launch itself within the
+	// phone's 30 second wait for session.create.
+	skillsTrustWait = 15 * time.Second
 	// outputTail caps how much claude output goes into an error message.
 	outputTail = 300
 )
@@ -74,6 +79,9 @@ type Options struct {
 // It keeps no per-client state.
 type Handler struct {
 	opts Options
+	// skillsMu lets one create at a time answer the trust prompt of
+	// userSkillsDir.
+	skillsMu sync.Mutex
 }
 
 // New returns a Handler.
@@ -151,7 +159,7 @@ func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest)
 	if req.Worktree != "" && !worktreeName.MatchString(req.Worktree) {
 		return "", invalid("worktree 名只能用字母、数字、点、横线和下划线，不能以点或横线开头")
 	}
-	flags, env, err := h.launchConfig(req)
+	flags, env, err := h.launchConfig(ctx, req)
 	if err != nil {
 		return "", err
 	}
@@ -254,7 +262,7 @@ const maxModelLen = 128
 // session (design D8): with FromSession those of that session; otherwise
 // the custom endpoint's or the account login's flags plus one variable per
 // model tier given.
-func (h *Handler) launchConfig(req protocol.SessionCreateRequest) ([]string, map[string]string, error) {
+func (h *Handler) launchConfig(ctx context.Context, req protocol.SessionCreateRequest) ([]string, map[string]string, error) {
 	if req.FromSession != "" {
 		if req.Preset != "" || req.BaseURL != "" || req.APIKey != "" || len(req.Models) > 0 {
 			return nil, nil, invalid("照抄会话时不能再选档位，也不能填接口地址、API key 和模型")
@@ -293,7 +301,7 @@ func (h *Handler) launchConfig(req protocol.SessionCreateRequest) ([]string, map
 	if req.BaseURL != "" {
 		flags, err = h.endpointFlags(req.BaseURL, req.APIKey)
 	} else {
-		flags, err = h.accountFlags()
+		flags, err = h.accountFlags(ctx)
 	}
 	return flags, env, err
 }
@@ -361,7 +369,7 @@ func (h *Handler) endpointFlags(baseURL, key string) ([]string, error) {
 // (No LLM gateway), so they are left out and a copy without the gateway
 // is passed instead; project settings still apply. The user's skills,
 // left out with them, come back through userSkillsDir.
-func (h *Handler) accountFlags() ([]string, error) {
+func (h *Handler) accountFlags(ctx context.Context) ([]string, error) {
 	data, err := accountSettings(filepath.Join(h.opts.Source.ClaudeDir, "settings.json"))
 	if err != nil {
 		return nil, h.internal("读取目标机的 Claude Code 设置失败，请在目标机上查看日志", err)
@@ -371,9 +379,9 @@ func (h *Handler) accountFlags() ([]string, error) {
 		return nil, h.internal("启动 claude 失败，请在目标机上查看日志", err)
 	}
 	flags := []string{"--setting-sources", "project,local", "--settings", path}
-	dir, ok, err := h.userSkills()
+	dir, ok, err := h.userSkills(ctx)
 	if err != nil {
-		return nil, h.internal("启动 claude 失败，请在目标机上查看日志", err)
+		return nil, err
 	}
 	if ok {
 		flags = append(flags, "--add-dir", dir)
@@ -383,10 +391,12 @@ func (h *Handler) accountFlags() ([]string, error) {
 
 // userSkills makes userSkillsDir's .claude/skills link to
 // <ClaudeDir>/skills and returns userSkillsDir; ok is false when the user
-// has no skills directory, or when Claude Code does not trust the folder,
-// as claude --bg refuses an --add-dir it does not trust. The link is made
-// all the same, so the user can start claude there once to trust it.
-func (h *Handler) userSkills() (dir string, ok bool, err error) {
+// has no skills directory. claude --bg refuses an --add-dir it does not
+// trust, so the first time the folder is untrusted Claude Code's trust
+// prompt there is answered with yes, as the user would by starting claude
+// in it; the create fails when that does not get the trust recorded.
+func (h *Handler) userSkills(ctx context.Context) (dir string, ok bool, err error) {
+	const failed = "启动 claude 失败，请在目标机上查看日志"
 	target := filepath.Join(h.opts.Source.ClaudeDir, "skills")
 	if info, err := os.Stat(target); err != nil || !info.IsDir() {
 		return "", false, nil
@@ -395,19 +405,34 @@ func (h *Handler) userSkills() (dir string, ok bool, err error) {
 	link := filepath.Join(dir, ".claude", "skills")
 	if cur, err := os.Readlink(link); err != nil || cur != target {
 		if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
-			return "", false, err
+			return "", false, h.internal(failed, err)
 		}
 		_ = os.Remove(link)
 		if err := os.Symlink(target, link); err != nil {
 			// A create running at the same time may have made it first.
 			if cur, rerr := os.Readlink(link); rerr != nil || cur != target {
-				return "", false, err
+				return "", false, h.internal(failed, err)
 			}
 		}
 	}
-	if !trusted(globalConfig(h.opts.Source.ClaudeDir), dir) {
-		h.opts.Logger.Warn("账户登录的会话不带个人技能：claude --bg 只接受信任过的目录，在这个目录里运行一次 claude 并同意信任", "dir", dir)
-		return dir, false, nil
+	config := globalConfig(h.opts.Source.ClaudeDir)
+	if trusted(config, dir) {
+		return dir, true, nil
+	}
+	h.skillsMu.Lock()
+	defer h.skillsMu.Unlock()
+	// A create that held the lock may have trusted it meanwhile.
+	if trusted(config, dir) {
+		return dir, true, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, skillsTrustWait)
+	defer cancel()
+	err = attach.Trust(ctx, dir, []string{h.opts.Source.ClaudePath}, nil)
+	if err == nil && !trusted(config, dir) {
+		err = fmt.Errorf("trust of %s not recorded in %s", dir, config)
+	}
+	if err != nil {
+		return "", false, h.internal("没能在目标机上自动信任个人技能目录，请在目标机上进入 "+dir+" 运行一次 claude，选「Yes, I trust this folder」后再试", err)
 	}
 	return dir, true, nil
 }

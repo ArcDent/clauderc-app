@@ -332,27 +332,119 @@ func TestCreateAccountLoginAddsUserSkills(t *testing.T) {
 	}
 }
 
-// claude --bg refuses an --add-dir it does not trust, so an untrusted
-// skills directory is left out, its link made for the user to trust it.
-func TestCreateAccountLoginSkipsUntrustedSkills(t *testing.T) {
-	f := newFixture(t)
-	skills := filepath.Join(f.claudeDir, "skills")
-	if err := os.MkdirAll(skills, 0o700); err != nil {
+// accountSkills sets up the account login with a skills directory whose
+// link folder Claude Code does not trust, a sibling's trust not counting,
+// and a Handler on trustScript run with prompt; record makes its yes
+// record the trust in the global config, as Claude Code does.
+func accountSkills(t *testing.T, prompt string, record bool) (f *fixture, h *lifecycle.Handler, log string) {
+	t.Helper()
+	f = newFixture(t)
+	if err := os.MkdirAll(filepath.Join(f.claudeDir, "skills"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, filepath.Join(f.claudeDir, ".claude.json"), map[string]any{
+	config := filepath.Join(f.claudeDir, ".claude.json")
+	writeJSON(t, config, map[string]any{
 		"projects": map[string]any{
 			f.dir:                                 map[string]any{"hasTrustDialogAccepted": false},
 			filepath.Join(f.dir, "user-skills-2"): map[string]any{"hasTrustDialogAccepted": true},
 		},
 	})
-	if _, err := f.h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir()}); err != nil {
+	onYes := ""
+	if record {
+		onYes = `printf '{"projects":{"%s":{"hasTrustDialogAccepted":true}}}' "$PWD" >'` + config + `'`
+	}
+	src := f.src
+	src.ClaudePath, _, log = trustScriptThen(t, prompt, onYes)
+	return f, lifecycle.New(lifecycle.Options{Source: src, Dir: f.dir}), log
+}
+
+// launchArgs are the arguments of each launch trustScript recorded.
+func launchArgs(t *testing.T, log string) []string {
+	t.Helper()
+	b, _ := os.ReadFile(log + ".args")
+	return strings.Split(strings.TrimSpace(string(b)), "\n")
+}
+
+// claude --bg refuses an --add-dir it does not trust, so the account login
+// first answers Claude Code's trust prompt in the skills folder, then adds
+// it.
+func TestCreateAccountLoginTrustsUserSkills(t *testing.T) {
+	f, h, log := accountSkills(t, "show", true)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if id, err := h.Create(ctx, protocol.SessionCreateRequest{Cwd: t.TempDir()}); err != nil || id != "7a7a7a7a" {
+		t.Fatalf("Create = %q, %v", id, err)
+	}
+	if got := readLog(t, log); got != "ui bg" {
+		t.Errorf("calls = %q, want trust prompt, launch", got)
+	}
+	dir := filepath.Join(f.dir, "user-skills")
+	if want, _ := filepath.EvalSymlinks(dir); readLog(t, log+".cwd") != want {
+		t.Errorf("trust prompt ran in %q, want %q", readLog(t, log+".cwd"), want)
+	}
+	wantEqual(t, "launches", launchArgs(t, log), []string{strings.Join(append(f.accountFlags(), "--add-dir", dir, "--bg"), " ")})
+}
+
+// Creates at the same time answer the trust prompt once.
+func TestCreateAccountLoginTrustsUserSkillsOnce(t *testing.T) {
+	f, h, log := accountSkills(t, "show", true)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cwds := []string{t.TempDir(), t.TempDir()}
+	errs := make([]error, len(cwds))
+	var wg sync.WaitGroup
+	for i, cwd := range cwds {
+		wg.Go(func() { _, errs[i] = h.Create(ctx, protocol.SessionCreateRequest{Cwd: cwd}) })
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
 		t.Fatal(err)
 	}
-	wantEqual(t, "args", f.calls(t)[0].Args, append(f.accountFlags(), "--bg"))
-	link := filepath.Join(f.dir, "user-skills", ".claude", "skills")
-	if got, err := os.Readlink(link); err != nil || got != skills {
-		t.Errorf("link = %q, %v; want %q", got, err, skills)
+	if got := readLog(t, log); got != "ui bg bg" {
+		t.Errorf("calls = %q, want one trust prompt, two launches", got)
+	}
+	want := strings.Join(append(f.accountFlags(), "--add-dir", filepath.Join(f.dir, "user-skills"), "--bg"), " ")
+	wantEqual(t, "launches", launchArgs(t, log), []string{want, want})
+}
+
+// A trust prompt that never shows, claude ending before it, or a yes that
+// Claude Code does not record fails the create before any launch, naming
+// the folder to trust by hand; without a deadline the prompt is waited for
+// 15 seconds.
+func TestCreateAccountLoginUserSkillsTrustFails(t *testing.T) {
+	cases := []struct {
+		name, prompt string
+		record       bool
+		timeout      time.Duration
+	}{
+		{"silent", "silent", true, 0},
+		{"exit", "exit", true, 10 * time.Second},
+		{"not recorded", "show", false, 10 * time.Second},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f, h, log := accountSkills(t, c.prompt, c.record)
+			ctx := context.Background()
+			if c.timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, c.timeout)
+				defer cancel()
+			}
+			start := time.Now()
+			_, err := h.Create(ctx, protocol.SessionCreateRequest{Cwd: t.TempDir()})
+			took := time.Since(start)
+			var pe *protocol.Error
+			dir := filepath.Join(f.dir, "user-skills")
+			if !errors.As(err, &pe) || pe.Code != protocol.CodeInternal || !strings.Contains(pe.Message, dir) || !strings.Contains(pe.Message, "Yes, I trust this folder") {
+				t.Fatalf("error = %v, want the trust failure naming %s", err, dir)
+			}
+			if got := readLog(t, log); got != "ui" {
+				t.Errorf("calls = %q, want the trust prompt only", got)
+			}
+			if c.timeout == 0 && (took < 14*time.Second || took > 20*time.Second) {
+				t.Errorf("waited %v for the trust prompt, want about 15s", took)
+			}
+		})
 	}
 }
 
@@ -633,8 +725,15 @@ func TestCreateClaudeFailures(t *testing.T) {
 // draws the 2.1.327 trust prompt, moves the selection to yes on Down and
 // removes the marker on Enter there, "deaf" does so too but drops the
 // first key, "silent" never draws it, "exit" ends at once. Every call appends
-// "bg" or "ui" to the log file.
+// "bg" or "ui" to the log file, a launch its arguments to log.args.
 func trustScript(t *testing.T, prompt string) (claude, marker, log string) {
+	t.Helper()
+	return trustScriptThen(t, prompt, "")
+}
+
+// trustScriptThen is trustScript that also runs the shell command onYes
+// when the prompt is answered with yes.
+func trustScriptThen(t *testing.T, prompt, onYes string) (claude, marker, log string) {
 	t.Helper()
 	dir := t.TempDir()
 	marker, log = filepath.Join(dir, "untrusted"), filepath.Join(dir, "log")
@@ -646,6 +745,7 @@ marker=`+marker+`
 for a in "$@"; do
 	if [ "$a" = --bg ]; then
 		echo bg >>"$log"
+		echo "$*" >>"$log.args"
 		if [ -f "$marker" ]; then
 			echo 'Error: Workspace not trusted. Please run claude in this directory first.' >&2
 			exit 1
@@ -672,6 +772,7 @@ draw "$mark" ' '
 draw ' ' "$mark"
 if [ "$(dd bs=1 count=1 2>/dev/null | od -An -c | tr -d ' \n')" = '\r' ]; then
 	rm -f "$marker"
+	`+onYes+`
 	printf '\033[2J\033[H> \r\n'
 	sleep 30
 fi
