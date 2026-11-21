@@ -311,6 +311,68 @@ func TestCommands(t *testing.T) {
 	}
 }
 
+// A session launched with --setting-sources without "user", as the
+// account login was before it added the user's skills back through
+// --add-dir, cannot run the user's own skills and commands, so they are
+// not offered; the project's and the plugins' still are.
+func TestCommandsFollowSettingSources(t *testing.T) {
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	linked := filepath.Join(t.TempDir(), "user-skills")
+	for _, c := range []struct {
+		name               string
+		flags              []string
+		personal, userCmds bool
+	}{
+		{"plain", []string{"--model", "opus"}, true, true},
+		{"no user settings", []string{"--setting-sources", "project,local", "--settings", "/x.json"}, false, false},
+		{"skills added back", []string{"--setting-sources", "project,local", "--settings", "/x.json", "--add-dir", linked}, true, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cwd := t.TempDir()
+			write(filepath.Join(cwd, ".claude", "skills", "batch-commit", "SKILL.md"), "---\nname: batch-commit\ndescription: 分批提交\n---\n")
+			f := newFixture(t, setup{cwd: cwd})
+			write(filepath.Join(f.sample, "skills", "personal", "SKILL.md"), "---\nname: personal\ndisable-model-invocation: true\ndescription: 个人技能\n---\n")
+			write(filepath.Join(f.sample, "commands", "mine.md"), "---\ndescription: 个人命令\n---\nbody\n")
+			demo := filepath.Join(f.sample, "plugins", "cache", "mk", "demo", "1.0.0")
+			write(filepath.Join(demo, "commands", "run.md"), "---\ndescription: 运行演示\n---\nbody\n")
+			write(filepath.Join(f.sample, "settings.json"), `{"enabledPlugins":{"demo@mk":true}}`)
+			write(filepath.Join(f.sample, "plugins", "installed_plugins.json"), `{"version":2,"plugins":{"demo@mk":[{"scope":"user","installPath":"`+demo+`"}]}}`)
+			if err := os.MkdirAll(filepath.Join(linked, ".claude"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			_ = os.Remove(filepath.Join(linked, ".claude", "skills"))
+			if err := os.Symlink(filepath.Join(f.sample, "skills"), filepath.Join(linked, ".claude", "skills")); err != nil {
+				t.Fatal(err)
+			}
+			job, _ := json.Marshal(map[string]any{"respawnFlags": c.flags, "cwd": cwd})
+			write(filepath.Join(f.sample, "jobs", shortID, "state.json"), string(job))
+
+			var res protocol.ChatCommandsResponse
+			if err := json.Unmarshal(f.ok(t, "c1", protocol.MethodChatCommands, protocol.ChatCommandsRequest{SessionID: shortID}), &res); err != nil {
+				t.Fatal(err)
+			}
+			got := map[string]bool{}
+			for _, cmd := range res.Commands {
+				got[cmd.Name] = true
+			}
+			want := map[string]bool{"batch-commit": true, "demo:run": true, "personal": c.personal, "mine": c.userCmds}
+			for name, listed := range want {
+				if got[name] != listed {
+					t.Errorf("%s listed = %v, want %v", name, got[name], listed)
+				}
+			}
+		})
+	}
+}
+
 func TestMethodsListsAllChatMethods(t *testing.T) {
 	h := chat.New(chat.Options{})
 	defer h.Close()

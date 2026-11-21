@@ -228,9 +228,12 @@ clauderc revoke <id>     # 吊销一台手机，它的连接会立即断开
 
 - `machine-id` 是这台目标机的标识，首次运行时生成。把配置拷到别的电脑时不要带上它，否则后运行的那台会被中转服务器拒绝
 - `profiles.json` 记着见过的启动档位和每个档位最近一次的启动参数，会话全部移出后分组仍然显示，手机选档位新建时也从这里取接口和模型，权限 600
-- `launch/` 放新建会话用的文件：账户登录用的设置副本和自定义接口的 API key，权限 600
+- `forks.json` 记着目标机替账户登录的会话 fork 出的副本各自的来源，会话页靠它把副本挂在来源下面
+- `launch/` 放新建会话用的文件：账户登录用的设置副本和自定义接口的 API key，权限 600；`launch/user-skills/` 里只有一个指向 `~/.claude/skills` 的软链，账户登录的会话靠它用上个人技能
 - `agent.pid` 和 `agent.log` 是 `clauderc start` 在后台运行时的进程号和日志
 - `agent.lock` 保证同一份配置只运行一个，里面写着正在运行的进程号
+
+用账户登录新建的会话不读 `~/.claude/settings.json`，个人技能要靠 `launch/user-skills/` 接回来，而 Claude Code 只接受信任过的目录。所以想在这类会话里用个人技能，要在目标机上进入 `launch/user-skills/` 运行一次 `claude`，选「Yes, I trust this folder」。这个目录在第一次用账户登录新建会话后才出现。没信任时会话照常启动，只是没有个人技能，`agent.log` 里会有一条提示。
 
 5 小时和每周用量是目标机程序拿 Claude Code 的登录凭证向 `api.anthropic.com` 查的。凭证在 macOS 上从钥匙串里的 `Claude Code-credentials` 读，其他情况读 `~/.claude/.credentials.json`。电脑上没有登录官方账号时，APP 不显示用量。
 

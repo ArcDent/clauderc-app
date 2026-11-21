@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -297,6 +298,64 @@ func TestCreateAccountLoginWithoutSettings(t *testing.T) {
 	}
 }
 
+// The account login leaves out the user settings and with them the user's
+// skills, so they are added back through a directory linking to them,
+// trusted here through a folder above it; a link left pointing elsewhere
+// is replaced.
+func TestCreateAccountLoginAddsUserSkills(t *testing.T) {
+	f := newFixture(t)
+	skills := filepath.Join(f.claudeDir, "skills")
+	if err := os.MkdirAll(skills, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(f.claudeDir, ".claude.json"), map[string]any{
+		"projects": map[string]any{f.dir: map[string]any{"hasTrustDialogAccepted": true}},
+	})
+	link := filepath.Join(f.dir, "user-skills", ".claude", "skills")
+	if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), link); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := f.h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := append(f.accountFlags(), "--add-dir", filepath.Join(f.dir, "user-skills"), "--bg")
+	for i, c := range f.calls(t) {
+		wantEqual(t, fmt.Sprintf("args of create %d", i+1), c.Args, want)
+	}
+	if got, err := os.Readlink(link); err != nil || got != skills {
+		t.Errorf("link = %q, %v; want %q", got, err, skills)
+	}
+}
+
+// claude --bg refuses an --add-dir it does not trust, so an untrusted
+// skills directory is left out, its link made for the user to trust it.
+func TestCreateAccountLoginSkipsUntrustedSkills(t *testing.T) {
+	f := newFixture(t)
+	skills := filepath.Join(f.claudeDir, "skills")
+	if err := os.MkdirAll(skills, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(f.claudeDir, ".claude.json"), map[string]any{
+		"projects": map[string]any{
+			f.dir:                                 map[string]any{"hasTrustDialogAccepted": false},
+			filepath.Join(f.dir, "user-skills-2"): map[string]any{"hasTrustDialogAccepted": true},
+		},
+	})
+	if _, err := f.h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	wantEqual(t, "args", f.calls(t)[0].Args, append(f.accountFlags(), "--bg"))
+	link := filepath.Join(f.dir, "user-skills", ".claude", "skills")
+	if got, err := os.Readlink(link); err != nil || got != skills {
+		t.Errorf("link = %q, %v; want %q", got, err, skills)
+	}
+}
+
 func TestCreateWithoutNameAndPrompt(t *testing.T) {
 	f := newFixture(t)
 	id, err := f.h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: t.TempDir()})
@@ -358,6 +417,39 @@ func TestCreateInWorktree(t *testing.T) {
 	}
 	if n := len(f.calls(t)); n != 1 {
 		t.Errorf("claude ran %d times, want only the first launch", n)
+	}
+}
+
+// Fork copies a session that refuses /fork with its own launch flags,
+// --resume --fork-session and the instruction, where the session works,
+// and records the copy's source, which the session list then shows.
+func TestFork(t *testing.T) {
+	f := newFixture(t)
+	const sid = "8f0c2a5e-0000-4000-8000-000000000001"
+	work := t.TempDir()
+	f.setAgents(t, session{id: "src00001", sessionID: sid, cwd: work})
+	f.job(t, "src00001", []string{"--setting-sources", "project,local", "--settings", "/l/account-settings.json", "-n", "prev", "--model", "opus"}, nil, "2026-11-13T08:00:00.000Z")
+	if err := f.h.Fork(context.Background(), "src00001", "只回复 FORKED"); err != nil {
+		t.Fatal(err)
+	}
+	calls := f.launches(t)
+	if len(calls) != 1 {
+		t.Fatalf("claude launched %d times, want once", len(calls))
+	}
+	wantEqual(t, "args", calls[0].Args, []string{"--setting-sources", "project,local", "--settings", "/l/account-settings.json", "--model", "opus",
+		"--bg", "--resume", sid, "--fork-session", "--", "只回复 FORKED"})
+	if want := realDir(t, work); calls[0].Cwd != want {
+		t.Errorf("cwd = %q, want %q", calls[0].Cwd, want)
+	}
+
+	f.setAgents(t, session{id: "src00001", sessionID: sid, cwd: work}, session{id: "f00dcafe", sessionID: "f00dcafe-0000-4000-8000-000000000002", cwd: work})
+	list, err := f.src.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(list.Sessions, func(s protocol.Session) bool { return s.ID == "f00dcafe" })
+	if i < 0 || list.Sessions[i].ForkOf != "src00001" {
+		t.Errorf("sessions = %+v, want f00dcafe forked from src00001", list.Sessions)
 	}
 }
 

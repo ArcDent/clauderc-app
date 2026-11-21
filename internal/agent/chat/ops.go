@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -386,8 +388,37 @@ func (h *Handler) commands(ctx context.Context, req protocol.Envelope) protocol.
 	if f := openFollower(h.opts.Source.ClaudeDir, target.SessionID); f != nil {
 		skills = f.Info().Skills
 	}
-	local := transcript.LocalCommands(h.opts.Source.ClaudeDir, target.Cwd)
+	var flags []string
+	if t, ok := h.opts.Source.SessionTemplate(target.ID); ok {
+		flags = t.Flags
+	}
+	userSkills, userCommands := userSources(flags, h.opts.Source.ClaudeDir)
+	local := transcript.LocalCommands(h.opts.Source.ClaudeDir, target.Cwd, userSkills, userCommands)
 	return agent.Reply(req, protocol.ChatCommandsResponse{Commands: transcript.Commands(skills, local)})
+}
+
+// userSources tells whether a session launched with flags loads the
+// skills and the commands under claudeDir. --setting-sources without
+// "user" leaves both out, as for the account login, which adds the skills
+// back with an --add-dir whose .claude/skills leads to them.
+func userSources(flags []string, claudeDir string) (skills, commands bool) {
+	i := slices.Index(flags, "--setting-sources")
+	if i < 0 || i+1 >= len(flags) || slices.Contains(strings.Split(flags[i+1], ","), "user") {
+		return true, true
+	}
+	want, err := filepath.EvalSymlinks(filepath.Join(claudeDir, "skills"))
+	if err != nil {
+		return false, false
+	}
+	for j, f := range flags {
+		if f != "--add-dir" || j+1 >= len(flags) {
+			continue
+		}
+		if got, err := filepath.EvalSymlinks(filepath.Join(flags[j+1], ".claude", "skills")); err == nil && got == want {
+			return true, false
+		}
+	}
+	return false, false
 }
 
 // setScreenMode records the mode read from the status line of session id

@@ -60,7 +60,7 @@ func Run(ctx context.Context, o Options) error {
 	var list *sessions.Handler
 	life := lifecycle.New(lifecycle.Options{Source: src, Dir: cfg.LaunchDir, Logger: log, Changed: func() { list.Refresh() }})
 	plan := usage.New(usage.Options{ClaudeDir: cfg.ClaudeDir, UserAgent: "clauderc/" + o.Version, Logger: log})
-	chats := chat.New(chat.Options{Source: src, Push: c, Waker: life, Attach: o.Attach, ResumeFile: cfg.ResumeFile, Usage: plan.Get, Logger: log})
+	chats := chat.New(chat.Options{Source: src, Push: c, Waker: life, Forker: life, Attach: o.Attach, ResumeFile: cfg.ResumeFile, Usage: plan.Get, Logger: log})
 	defer chats.Close()
 	list = sessions.New(sessions.Options{Source: src, Push: c, Dialog: chats.HasDialog})
 	defer list.Close()

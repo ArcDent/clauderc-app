@@ -189,6 +189,48 @@ func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest)
 	return id, nil
 }
 
+// Fork starts a copy of the session with short id id that carries on its
+// conversation, for a session that refuses /fork: Claude Code refuses it
+// in a session launched with --setting-sources, as the account login is,
+// since the copy would not inherit it (2.1.329). claude runs where the
+// session works with its own launch flags, --bg, --resume <session id>
+// --fork-session and instruction, when given, as the copy's first
+// message; the copy's source is recorded with RecordFork, since Claude
+// Code records it only for /fork. It implements the chat package's
+// Forker.
+func (h *Handler) Fork(ctx context.Context, id, instruction string) error {
+	t, err := h.target(ctx, id)
+	if err != nil {
+		return err
+	}
+	tmpl, ok := h.opts.Source.SessionTemplate(t.ID)
+	if !ok {
+		return h.internal("读取会话的启动记录失败，请在目标机上查看日志", fmt.Errorf("no launch record for %s", t.ID))
+	}
+	dir := t.Cwd
+	if t.Worktree != "" {
+		dir = t.Worktree
+	}
+	args := append(slices.Clone(tmpl.Flags), "--bg", "--resume", t.SessionID, "--fork-session")
+	if instruction != "" {
+		args = append(args, "--", instruction)
+	}
+	const failed = "Fork 失败，请在目标机上查看日志"
+	out, err := h.run(ctx, dir, tmpl.ProviderEnv, "--bg", args)
+	if err != nil {
+		return h.internal(failed, err)
+	}
+	copyID := parseBackgrounded(out)
+	if copyID == "" {
+		return h.internal(failed, fmt.Errorf("claude --bg --fork-session: no session id in output: %s", tail(out)))
+	}
+	if err := h.opts.Source.RecordFork(copyID, t.SessionID); err != nil {
+		h.opts.Logger.Error("record fork", "err", err)
+	}
+	h.opts.Changed()
+	return nil
+}
+
 // firstPartyURL is the API the account login talks to.
 const firstPartyURL = "https://api.anthropic.com"
 
@@ -199,6 +241,11 @@ const accountPreset = "api.anthropic.com"
 // accountSettingsFile, in Options.Dir, is the account login's copy of the
 // user settings.
 const accountSettingsFile = "account-settings.json"
+
+// userSkillsDir, in Options.Dir, is added to the account login with
+// --add-dir: its .claude/skills links to the user's skills, which Claude
+// Code leaves out when the user settings are.
+const userSkillsDir = "user-skills"
 
 // maxModelLen caps a model name.
 const maxModelLen = 128
@@ -312,7 +359,8 @@ func (h *Handler) endpointFlags(baseURL, key string) ([]string, error) {
 // accountFlags starts claude on the account login. The user settings may
 // point every launch at a gateway, which Claude Code then refuses to leave
 // (No LLM gateway), so they are left out and a copy without the gateway
-// is passed instead; project settings still apply.
+// is passed instead; project settings still apply. The user's skills,
+// left out with them, come back through userSkillsDir.
 func (h *Handler) accountFlags() ([]string, error) {
 	data, err := accountSettings(filepath.Join(h.opts.Source.ClaudeDir, "settings.json"))
 	if err != nil {
@@ -322,7 +370,91 @@ func (h *Handler) accountFlags() ([]string, error) {
 	if err := keyfile.Write(path, data); err != nil {
 		return nil, h.internal("启动 claude 失败，请在目标机上查看日志", err)
 	}
-	return []string{"--setting-sources", "project,local", "--settings", path}, nil
+	flags := []string{"--setting-sources", "project,local", "--settings", path}
+	dir, ok, err := h.userSkills()
+	if err != nil {
+		return nil, h.internal("启动 claude 失败，请在目标机上查看日志", err)
+	}
+	if ok {
+		flags = append(flags, "--add-dir", dir)
+	}
+	return flags, nil
+}
+
+// userSkills makes userSkillsDir's .claude/skills link to
+// <ClaudeDir>/skills and returns userSkillsDir; ok is false when the user
+// has no skills directory, or when Claude Code does not trust the folder,
+// as claude --bg refuses an --add-dir it does not trust. The link is made
+// all the same, so the user can start claude there once to trust it.
+func (h *Handler) userSkills() (dir string, ok bool, err error) {
+	target := filepath.Join(h.opts.Source.ClaudeDir, "skills")
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		return "", false, nil
+	}
+	dir = filepath.Join(h.opts.Dir, userSkillsDir)
+	link := filepath.Join(dir, ".claude", "skills")
+	if cur, err := os.Readlink(link); err != nil || cur != target {
+		if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
+			return "", false, err
+		}
+		_ = os.Remove(link)
+		if err := os.Symlink(target, link); err != nil {
+			// A create running at the same time may have made it first.
+			if cur, rerr := os.Readlink(link); rerr != nil || cur != target {
+				return "", false, err
+			}
+		}
+	}
+	if !trusted(globalConfig(h.opts.Source.ClaudeDir), dir) {
+		h.opts.Logger.Warn("账户登录的会话不带个人技能：claude --bg 只接受信任过的目录，在这个目录里运行一次 claude 并同意信任", "dir", dir)
+		return dir, false, nil
+	}
+	return dir, true, nil
+}
+
+// globalConfig is Claude Code's global config file, which records the
+// folders the user trusts: ~/.claude.json beside the default data
+// directory, else inside the data directory, as with CLAUDE_CONFIG_DIR.
+func globalConfig(claudeDir string) string {
+	if home, err := os.UserHomeDir(); err == nil && claudeDir == filepath.Join(home, ".claude") {
+		return filepath.Join(home, ".claude.json")
+	}
+	return filepath.Join(claudeDir, ".claude.json")
+}
+
+// trusted reports whether the global config at config records the trust
+// prompt accepted for dir or a folder above it, looked up both as given
+// and with symlinks resolved. An unreadable config trusts nothing.
+func trusted(config, dir string) bool {
+	raw, err := os.ReadFile(config)
+	if err != nil {
+		return false
+	}
+	var c struct {
+		Projects map[string]struct {
+			HasTrustDialogAccepted bool `json:"hasTrustDialogAccepted"`
+		} `json:"projects"`
+	}
+	if json.Unmarshal(raw, &c) != nil {
+		return false
+	}
+	paths := []string{dir}
+	if real, err := filepath.EvalSymlinks(dir); err == nil && real != dir {
+		paths = append(paths, real)
+	}
+	for _, p := range paths {
+		for {
+			if c.Projects[p].HasTrustDialogAccepted {
+				return true
+			}
+			parent := filepath.Dir(p)
+			if parent == p {
+				break
+			}
+			p = parent
+		}
+	}
+	return false
 }
 
 // accountSettings returns the user settings at path, {} when there are
