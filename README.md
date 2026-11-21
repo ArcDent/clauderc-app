@@ -233,7 +233,7 @@ clauderc revoke <id>     # 吊销一台手机，它的连接会立即断开
 - `agent.pid` 和 `agent.log` 是 `clauderc start` 在后台运行时的进程号和日志
 - `agent.lock` 保证同一份配置只运行一个，里面写着正在运行的进程号
 
-用账户登录新建的会话不读 `~/.claude/settings.json`，个人技能要靠 `launch/user-skills/` 接回来，而 Claude Code 只接受信任过的目录。所以想在这类会话里用个人技能，要在目标机上进入 `launch/user-skills/` 运行一次 `claude`，选「Yes, I trust this folder」。这个目录在第一次用账户登录新建会话后才出现。没信任时会话照常启动，只是没有个人技能，`agent.log` 里会有一条提示。
+用账户登录新建的会话不读 `~/.claude/settings.json`，个人技能要靠 `launch/user-skills/` 接回来，而 Claude Code 只接受信任过的目录。第一次用账户登录新建会话时，目标机会在这个目录里替你点一次 Claude Code 的信任提示，之后的会话都带个人技能。万一自动信任没成功，这次新建会报错，按提示在目标机上进入 `launch/user-skills/` 运行一次 `claude`，选「Yes, I trust this folder」，再重新新建。
 
 5 小时和每周用量是目标机程序拿 Claude Code 的登录凭证向 `api.anthropic.com` 查的。凭证在 macOS 上从钥匙串里的 `Claude Code-credentials` 读，其他情况读 `~/.claude/.credentials.json`。电脑上没有登录官方账号时，APP 不显示用量。
 

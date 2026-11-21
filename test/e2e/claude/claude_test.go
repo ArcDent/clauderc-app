@@ -169,9 +169,9 @@ func newHarness(t *testing.T) *harness {
 	for _, tg := range targets {
 		baseline[tg.ID] = true
 	}
-	// Under the repository, which the user trusts: claude --bg refuses an
-	// --add-dir it does not trust, so only there does the account login
-	// add the user's skills.
+	// Under the repository, which the user trusts, so the account login
+	// adds the user's skills without answering Claude Code's trust prompt
+	// for them first.
 	dir := filepath.Join(x.root, ".local", "e2e-ws", "launch")
 	x.launch = dir
 	// The errors behind an internal failure go to stderr, so a failed
