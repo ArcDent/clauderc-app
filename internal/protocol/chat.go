@@ -68,6 +68,9 @@ type ChatItem struct {
 	Tool *ToolCall `json:"tool,omitempty"`
 	// Queued marks a user item still waiting in Claude Code's queue.
 	Queued bool `json:"queued,omitempty"`
+	// UUID is set for a user item once its record is in the transcript:
+	// the record's uuid, which chat.rewind names.
+	UUID string `json:"uuid,omitempty"`
 }
 
 // ToolCall is a tool_use paired with its tool_result.
@@ -242,6 +245,30 @@ type ChatAutoResumeRequest struct {
 // now; null when the session no longer waits on one.
 type ChatAutoResumeResponse struct {
 	Limit *Limit `json:"limit"`
+}
+
+// RewindRestore is what chat.rewind takes back, as the /rewind panel
+// offers it.
+type RewindRestore string
+
+const (
+	// RewindBoth is "Restore code and conversation".
+	RewindBoth RewindRestore = "both"
+	// RewindConversation is "Restore conversation": the code stays.
+	RewindConversation RewindRestore = "conversation"
+	// RewindCode is "Restore code": the conversation stays.
+	RewindCode RewindRestore = "code"
+)
+
+// ChatRewindRequest rewinds the session to before the user item whose
+// UUID it names. The agent goes through Claude Code's /rewind panel and
+// presses Enter only when the line under the cursor matches the message
+// and Restore is among the panel's choices. Taking the conversation back
+// puts the message into the phone's input box; the response is empty.
+type ChatRewindRequest struct {
+	SessionID string        `json:"sessionId"`
+	UUID      string        `json:"uuid"`
+	Restore   RewindRestore `json:"restore"`
 }
 
 // PendingKind tells a permission request from a question (design D6).

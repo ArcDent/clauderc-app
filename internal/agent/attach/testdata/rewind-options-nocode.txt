@@ -1,0 +1,36 @@
+▝▜██████▀  Haiku 5.5 with low effort
+ ▝▝   ▝▝   ~/rewind
+
+
+❯ 只回复 OK
+
+⏺ OK
+
+✻ Cooked for 4s · done 12:24 AM
+
+❯ 只回复 ONE
+
+⏺ 好的
+
+✻ Sautéed for 5s · done 12:24 AM
+
+❯ 只回复 TWO
+
+⏺ TWO
+
+✻ Worked for 3s · done 12:25 AM
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  Rewind
+
+  Restore to the point before you sent this message:
+
+  │ 只回复 TWO
+  │ (9s ago)
+
+  The conversation goes back to before this message.
+  The code will be unchanged.
+
+  ❯ 1. Restore conversation
+    2. Summarize from here
+    3. Summarize up to here
+    4. Never mind

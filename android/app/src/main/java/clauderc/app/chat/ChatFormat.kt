@@ -5,10 +5,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import clauderc.app.protocol.ChatItem
 import clauderc.app.protocol.Command
@@ -352,35 +350,3 @@ fun splitMarkers(text: String): Pair<String, List<String>> {
 }
 
 private val markerPrefixes = listOf("result:", "needs input:", "failed:")
-
-/**
- * A light Markdown pass for assistant text: `code`, **bold** and fenced
- * blocks. Anything else stays as written.
- */
-fun richText(text: String, codeColor: Color): AnnotatedString = buildAnnotatedString {
-    var at = 0
-    for (m in fence.findAll(text)) {
-        inline(text.substring(at, m.range.first), codeColor)
-        withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = 0.86.em, color = codeColor)) { append(m.groupValues[1].trimEnd('\n')) }
-        at = m.range.last + 1
-    }
-    inline(text.substring(at), codeColor)
-}
-
-// Compiled once: richText runs for every reply that scrolls into view.
-private val fence = Regex("```[^\\n]*\\n([\\s\\S]*?)```")
-private val token = Regex("`([^`\\n]+)`|\\*\\*([^*\\n]+)\\*\\*")
-
-private fun AnnotatedString.Builder.inline(s: String, codeColor: Color) {
-    var at = 0
-    for (m in token.findAll(s)) {
-        append(s.substring(at, m.range.first))
-        if (m.groupValues[1].isNotEmpty()) {
-            withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = 0.86.em, color = codeColor)) { append(m.groupValues[1]) }
-        } else {
-            withStyle(SpanStyle(fontWeight = FontWeight.Medium)) { append(m.groupValues[2]) }
-        }
-        at = m.range.last + 1
-    }
-    append(s.substring(at))
-}

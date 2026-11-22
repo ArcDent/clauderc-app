@@ -5,8 +5,9 @@
 // the session's side of sending a message: pasted text followed by Enter
 // becomes a user record, or an enqueue record, appended to the transcript.
 // It draws the input box between two rules, a status line that Shift+Tab
-// cycles and Ctrl+L redraws, and a /model picker (the one recorded from
-// Claude Code 2.1.323) that arrows move in, s picks from and Esc closes.
+// cycles and Ctrl+L redraws, a /model picker (the one recorded from
+// Claude Code 2.1.323) that arrows move in, s picks from and Esc closes,
+// and with RewindEnv a /rewind panel laid out as Claude Code 2.1.330 does.
 // Only tests import this package; their TestMain calls RunIfFake first.
 package fakeattach
 
@@ -31,6 +32,8 @@ const (
 	envDeliv = "FAKE_ATTACH_DELIVER"
 	envModes = "FAKE_ATTACH_MODES"
 	envConf  = "FAKE_ATTACH_CONFIRM"
+	envRew   = "FAKE_ATTACH_REWIND"
+	envRewD  = "FAKE_ATTACH_REWIND_DELAY_MS"
 )
 
 // Command is the argv of a fake attach to session id: the running test
@@ -77,6 +80,22 @@ func ConfirmEnv() string {
 	return envConf + "=1"
 }
 
+// RewindEnv makes /rewind, or Esc twice on the empty input, open a panel
+// listing rows, the user's messages oldest first, whose ways back are
+// options. Choosing one that takes the conversation back puts the message
+// into the input box; like Claude Code, the panel writes nothing to the
+// transcript.
+func RewindEnv(rows, options []string) string {
+	b, _ := json.Marshal(map[string][]string{"rows": rows, "options": options})
+	return envRew + "=" + string(b)
+}
+
+// RewindDelayEnv makes the rewind panel put the message into the input
+// box d after it closes, as Claude Code does while it restores files.
+func RewindDelayEnv(d time.Duration) string {
+	return envRewD + "=" + strconv.FormatInt(d.Milliseconds(), 10)
+}
+
 // Gone reports whether no process with pid exists.
 func Gone(pid int) bool {
 	return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
@@ -119,6 +138,13 @@ func run() error {
 	if m := os.Getenv(envModes); m != "" {
 		in.modes = strings.Split(m, ",")
 	}
+	if r := os.Getenv(envRew); r != "" {
+		var cfg struct{ Rows, Options []string }
+		if err := json.Unmarshal([]byte(r), &cfg); err != nil {
+			return err
+		}
+		in.rows, in.options = cfg.Rows, cfg.Options
+	}
 	in.render()
 	buf := make([]byte, 4096)
 	for {
@@ -149,6 +175,16 @@ type input struct {
 	confirm bool
 	// status is the status line drawn above the input box, "" for none.
 	status string
+	// text is what the input box shows, which only the rewind panel puts there.
+	text string
+	// rows and options make up the rewind panel; rewind is 1 while its list
+	// shows, 2 while the ways back for row show; row and option are the
+	// cursors.
+	rows, options       []string
+	rewind, row, option int
+	// escAt is when Esc was last pressed on the input box: a second one
+	// soon after opens the rewind panel, as in Claude Code.
+	escAt time.Time
 }
 
 // footers are the status lines of each mode (RESULTS.md, mode_cycle).
@@ -198,19 +234,45 @@ func (in *input) render() {
 		b.WriteString("\r\n   Enter to set as default · s to use this session only · Esc to cancel\r\n")
 	case in.confirm:
 		b.WriteString("   Switch model?\r\n   ❯ 1. Yes, switch to the model\r\n")
+	case in.rewind == 1:
+		b.WriteString(strings.Repeat("▔", 40) + "\r\n  Rewind\r\n\r\n  Restore the code and/or conversation to the point before…\r\n\r\n")
+		for i, r := range append(append([]string{}, in.rows...), "(current)") {
+			mark := "  "
+			if i == in.row {
+				mark = "❯ "
+			}
+			b.WriteString("  " + mark + r + "\r\n")
+			if i < len(in.rows) {
+				b.WriteString("    No code changes\r\n\r\n")
+			}
+		}
+		b.WriteString("\r\n  Enter to continue · Esc to cancel\r\n")
+	case in.rewind == 2:
+		b.WriteString(strings.Repeat("▔", 40) + "\r\n  Rewind\r\n\r\n  Restore to the point before you sent this message:\r\n\r\n  │ " + in.rows[in.row] + "\r\n\r\n")
+		for i, o := range in.options {
+			mark := "  "
+			if i == in.option {
+				mark = "❯ "
+			}
+			fmt.Fprintf(&b, "  %s%d. %s\r\n", mark, i+1, o)
+		}
 	default:
 		// The input box between two rules, as Claude Code draws it.
 		rule := strings.Repeat("─", 40)
 		if in.status != "" {
 			b.WriteString(in.status + "\r\n")
 		}
-		b.WriteString(rule + "\r\n❯\u00a0\r\n" + rule + "\x1b[40;1H  " + footers[in.modes[in.mode]])
+		b.WriteString(rule + "\r\n❯\u00a0" + in.text + "\r\n" + rule + "\x1b[40;1H  " + footers[in.modes[in.mode]])
 	}
 	_, _ = in.out.WriteString(b.String())
 }
 
 // key handles one key outside a paste; it reports whether it was used.
 func (in *input) key(k string) bool {
+	if in.rewind > 0 && in.rewindKey(k) {
+		in.render()
+		return true
+	}
 	switch {
 	case k == "\x0c":
 	case k == "\x1b[Z" && !in.picker:
@@ -221,6 +283,12 @@ func (in *input) key(k string) bool {
 		in.cursor = (in.cursor + 1) % len(pickerItems)
 	case k == "\x1b" && in.picker:
 		in.picker = false
+	case k == "\x1b" && in.rows != nil && !in.confirm && in.text == "":
+		if time.Since(in.escAt) < time.Second {
+			in.rewind, in.row, in.escAt = 1, len(in.rows), time.Time{}
+		} else {
+			in.escAt = time.Now()
+		}
 	case k == "s" && in.picker:
 		in.picker = false
 		in.confirm = os.Getenv(envConf) == "1"
@@ -229,10 +297,50 @@ func (in *input) key(k string) bool {
 	case k == "\r" && len(in.pastes) > 0 && in.pastes[len(in.pastes)-1] == "/model":
 		in.pastes = nil
 		in.picker, in.cursor = true, pickerCurrent
+	case k == "\r" && len(in.pastes) > 0 && in.pastes[len(in.pastes)-1] == "/rewind" && in.rows != nil:
+		in.pastes = nil
+		in.rewind, in.row = 1, len(in.rows)
 	default:
 		return false
 	}
 	in.render()
+	return true
+}
+
+// rewindKey handles a key while the rewind panel shows.
+func (in *input) rewindKey(k string) bool {
+	switch {
+	case k == "\x1b[A" && in.rewind == 1:
+		in.row = max(in.row-1, 0)
+	case k == "\x1b[B" && in.rewind == 1:
+		in.row = min(in.row+1, len(in.rows))
+	case k == "\r" && in.rewind == 1:
+		if in.row == len(in.rows) {
+			in.rewind = 0
+		} else {
+			in.rewind, in.option = 2, 0
+		}
+	case k == "\x1b" && in.rewind == 1:
+		in.rewind = 0
+	case k == "\x1b[A" && in.rewind == 2:
+		in.option = max(in.option-1, 0)
+	case k == "\x1b[B" && in.rewind == 2:
+		in.option = min(in.option+1, len(in.options)-1)
+	case k == "\r" && in.rewind == 2:
+		if o := in.options[in.option]; strings.Contains(o, "conversation") {
+			text := in.rows[in.row]
+			if ms, _ := strconv.Atoi(os.Getenv(envRewD)); ms > 0 {
+				time.AfterFunc(time.Duration(ms)*time.Millisecond, func() { in.text = text; in.render() })
+			} else {
+				in.text = text
+			}
+		}
+		in.rewind = 0
+	case k == "\x1b" && in.rewind == 2:
+		in.rewind = 1
+	default:
+		return false
+	}
 	return true
 }
 
@@ -274,6 +382,10 @@ func (in *input) feed(b []byte) error {
 		case d[0] == 0x15:
 			in.pending = d[1:]
 			in.pastes = nil
+			if in.text != "" {
+				in.text = ""
+				in.render()
+			}
 		default:
 			in.pending = d[1:]
 		}

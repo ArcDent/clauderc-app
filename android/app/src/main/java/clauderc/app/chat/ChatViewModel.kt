@@ -18,6 +18,8 @@ import clauderc.app.protocol.ChatCommandsResponse
 import clauderc.app.protocol.ChatImageRequest
 import clauderc.app.protocol.ChatImageResponse
 import clauderc.app.protocol.ChatItem
+import clauderc.app.protocol.ChatRewindRequest
+import clauderc.app.protocol.RewindRestore
 import clauderc.app.protocol.ChatItemsEvent
 import clauderc.app.protocol.ChatLimits
 import clauderc.app.protocol.ChatModelsResponse
@@ -103,7 +105,7 @@ data class Outgoing(
 data class SendFailure(val message: String, val out: Outgoing?)
 
 /** Text put back into the composer after a failed send; [id] tells two restores of the same text apart. */
-data class Restore(val id: Long, val text: String)
+data class Restore(val id: Long, val text: String, val replace: Boolean = false)
 
 /** Drops the outgoing messages that [delivered] user items or slash command rows show, oldest first. */
 fun settleOutgoing(outgoing: List<Outgoing>, delivered: List<ChatItem>): List<Outgoing> {
@@ -211,6 +213,8 @@ data class ChatUiState(
     /** A short centered note under the last item, e.g. 「已中断」. */
     val notice: String? = null,
     val waking: Boolean = false,
+    /** chat.rewind is on its way: 「正在回溯…」 under the last item. */
+    val rewinding: Boolean = false,
     val attachments: List<Attachment> = emptyList(),
     val attachError: String? = null,
     val sending: Boolean = false,
@@ -722,6 +726,33 @@ class ChatViewModel(
             } catch (e: Exception) {
                 _state.update { s -> if (s.model == label) s.copy(model = before.model, models = before.models) else s }
                 _messages.send("切换模型失败：${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Rewinds the session to before the user's message [item] through Claude Code's /rewind panel,
+     * taking back what [restore] names. Taking the conversation back puts the message into the composer
+     * in place of what is there; the agent takes the messages away itself. When the agent could not
+     * match the panel, the snackbar says so and [onFailed] opens the terminal view to do it by hand.
+     */
+    fun rewind(item: ChatItem, restore: String, onFailed: () -> Unit) {
+        val uuid = item.uuid ?: return
+        if (_state.value.rewinding) return
+        _state.update { it.copy(rewinding = true) }
+        viewModelScope.launch {
+            try {
+                relay.call(Method.CHAT_REWIND, machineId, ChatRewindRequest(sessionId, uuid, restore), ChatRewindRequest.serializer(), Empty.serializer())
+                _state.update {
+                    if (restore == RewindRestore.CODE) it.copy(rewinding = false)
+                    else it.copy(rewinding = false, restore = Restore(cache.nextId(), item.text.orEmpty(), replace = true))
+                }
+                if (restore == RewindRestore.CODE) _messages.send("代码已回到这条消息之前")
+            } catch (e: Exception) {
+                _state.update { it.copy(rewinding = false) }
+                val failed = e is RemoteException && e.code == ErrorCode.REWIND_FAILED
+                _messages.send(if (failed) "没能回溯：Claude Code 里对不上这条消息，已退出面板" else "没能回溯：${e.message}")
+                if (failed) onFailed()
             }
         }
     }

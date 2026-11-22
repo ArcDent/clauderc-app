@@ -173,6 +173,7 @@ func (h *Handler) Methods() []protocol.Method {
 		protocol.MethodChatToolOutput,
 		protocol.MethodChatImage,
 		protocol.MethodChatAutoResume,
+		protocol.MethodChatRewind,
 		protocol.MethodTermOpen,
 		protocol.MethodTermKey,
 		protocol.MethodTermClose,
@@ -215,6 +216,8 @@ func (h *Handler) Handle(ctx context.Context, req protocol.Envelope) protocol.En
 		return h.image(ctx, req)
 	case protocol.MethodChatAutoResume:
 		return h.autoResume(ctx, req)
+	case protocol.MethodChatRewind:
+		return h.rewind(ctx, req)
 	case protocol.MethodTermOpen:
 		return h.termOpen(ctx, req)
 	case protocol.MethodTermKey:
@@ -386,6 +389,9 @@ func openFollower(claudeDir, sessionID string) *transcript.Follower {
 	if err != nil {
 		return nil
 	}
+	if uuid, ok := rewinds.Load(rewindKey(claudeDir, sessionID)); ok {
+		f.Rewind(uuid.(string))
+	}
 	return f
 }
 
@@ -465,6 +471,8 @@ type session struct {
 	// last status and pending prompt sent to the phones
 	status  protocol.ChatStatus
 	pending *protocol.Pending
+	// rw follows the /rewind panel on the screen; only pollScreen uses it.
+	rw rewindWatch
 }
 
 // screenInterval is how often an open chat reads the status line and the
@@ -583,6 +591,7 @@ func (s *session) pollScreen() {
 		return
 	}
 	lines := conn.View().Lines
+	s.watchRewind(strings.Join(lines, "\n"))
 	// A mode changed on the session itself, such as by /plan, shows in
 	// its status line.
 	if mode, ok := attach.ParseMode(strings.Join(lines, "\n")); ok {

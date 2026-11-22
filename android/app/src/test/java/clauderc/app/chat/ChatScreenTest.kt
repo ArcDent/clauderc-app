@@ -29,6 +29,27 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.runtime.snapshots.Snapshot
+import clauderc.app.testing.ShadowMagnifier
+import kotlin.math.abs
+import kotlinx.coroutines.awaitCancellation
+import clauderc.app.data.UiStyle
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuProvider
+import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider
+import androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider
+import androidx.compose.foundation.text.contextmenu.data.TextContextMenuSession
+import androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys
+import androidx.compose.foundation.text.contextmenu.data.TextContextMenuItem
+import org.junit.Assert.assertFalse
+import clauderc.app.ui.theme.ClaudercMotion
+import androidx.test.core.app.ApplicationProvider
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -92,6 +113,140 @@ class ChatScreenTest {
 
     private fun show(state: ChatUiState, actions: ChatActions = ChatActions()) {
         compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, actions) } }
+    }
+
+    private fun clipboardText() = ApplicationProvider.getApplicationContext<android.app.Application>()
+        .getSystemService(android.content.ClipboardManager::class.java).primaryClip?.getItemAt(0)?.text?.toString()
+
+    /** Round 8: the copy button in a code block's head. */
+    @Test fun theCodeCopyButtonCopiesTheCodeAndTurnsIntoATickAndBack() {
+        val m = ClaudercMotion()
+        val code = "func backoff(n int) time.Duration {\n\treturn time.Second << n\n}"
+        compose.mainClock.autoAdvance = false
+        show(baseState().copy(items = listOf(ChatItem(1, ItemKind.ASSISTANT, text = "看这段：\n\n```go\n$code\n```")), hasMore = false))
+        compose.mainClock.advanceTimeBy(1_000)
+        val button = compose.onNodeWithContentDescription("复制代码")
+        fun frame() = button.captureToImage().asAndroidBitmap()
+        val idle = frame()
+        button.performClick()
+        compose.mainClock.advanceTimeByFrame()
+        assertEquals("the code as written, no language or fences", code, clipboardText())
+        compose.mainClock.advanceTimeBy(m.durS / 2L)
+        val leaving = frame()
+        compose.mainClock.advanceTimeBy(m.durS + m.durM.toLong())
+        val tick = frame()
+        compose.onNode(hasText("已复制", substring = true)).assertDoesNotExist()
+        // 1.5s after the tap it turns back, animated too.
+        compose.mainClock.advanceTimeBy(1_500L - m.durS / 2 - m.durS - m.durM + m.durS)
+        val returning = frame()
+        compose.mainClock.advanceTimeBy(m.durS + m.durM + 200L)
+        val back = frame()
+        assertFalse("the copy icon leaves gradually", leaving.sameAs(idle) || leaving.sameAs(tick))
+        assertFalse("then shows a tick", tick.sameAs(idle))
+        assertFalse("which turns back gradually", returning.sameAs(tick) || returning.sameAs(back))
+        assertTrue("back to the copy icon", back.sameAs(idle))
+    }
+
+    /** Stands in for the system's text toolbar: notes the menu the page asks for while it is up. */
+    private class FakeToolbar : TextContextMenuProvider {
+        var shown: TextContextMenuDataProvider? = null
+        var times = 0
+
+        override suspend fun showTextContextMenu(dataProvider: TextContextMenuDataProvider) {
+            shown = dataProvider
+            times++
+            try {
+                awaitCancellation()
+            } finally {
+                if (shown === dataProvider) shown = null
+            }
+        }
+
+        fun click(key: Any) = shown!!.data().components.filterIsInstance<TextContextMenuItem>().single { it.key == key }
+            .onClick(object : TextContextMenuSession { override fun close() {} })
+    }
+
+    /**
+     * Waits until [shown], the selection's toolbar having come up: it comes up a beat after the long
+     * press, and waitForIdle does not always wait for it.
+     */
+    private fun awaitToolbar(what: String, shown: () -> Boolean) = compose.waitUntil(what, 3_000, shown)
+
+    private fun showSelecting(state: ChatUiState, toolbar: FakeToolbar, style: UiStyle = UiStyle.Clear): () -> ClaudercColors {
+        var colors: ClaudercColors? = null
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = style) {
+                colors = Clauderc.colors
+                CompositionLocalProvider(LocalTextContextMenuToolbarProvider provides toolbar) { ChatScreen(state, ChatActions()) }
+            }
+        }
+        compose.waitForIdle()
+        return { colors!! }
+    }
+
+    private val selectable = "跑完了：\n\n```sh\ngo vet ./...\n```\n\n没有问题，可以提交。"
+
+    @Config(shadows = [ShadowMagnifier::class])
+    @Test fun aFinishedReplyAndTheUsersMessageSelectOnALongPress() {
+        val toolbar = FakeToolbar()
+        showSelecting(baseState().copy(items = listOf(ChatItem(1, ItemKind.USER, text = "跑一遍 go vet 再提交"), ChatItem(2, ItemKind.ASSISTANT, text = selectable)), hasMore = false), toolbar)
+        compose.onNodeWithText("没有问题，可以提交。").performTouchInput { longClick() }
+        awaitToolbar("the reply's selection brings up the toolbar") { toolbar.shown != null }
+        // Select all and copy: the code head's language and button are not part of it.
+        toolbar.click(TextContextMenuKeys.SelectAllKey)
+        compose.waitForIdle()
+        toolbar.click(TextContextMenuKeys.CopyKey)
+        compose.waitForIdle()
+        val copied = clipboardText().orEmpty()
+        assertTrue("copied 「$copied」", copied.startsWith("跑完了：") && "go vet ./..." in copied && copied.endsWith("没有问题，可以提交。"))
+        assertFalse("no button or language in 「$copied」", "复制" in copied || "sh" in copied)
+        compose.onNodeWithText("已复制").assertIsDisplayed()
+
+        val before = toolbar.times
+        compose.onNodeWithText("跑一遍 go vet 再提交").performTouchInput { longClick() }
+        awaitToolbar("the user's message selects too") { toolbar.times > before && toolbar.shown != null }
+    }
+
+    @Config(shadows = [ShadowMagnifier::class])
+    @Test fun aReplyTypingOutCannotBeSelected() {
+        val toolbar = FakeToolbar()
+        val long = "第一，聊天记录改成文件变了才读。".repeat(40)
+        compose.mainClock.autoAdvance = false
+        var state by mutableStateOf(baseState().copy(items = page(1L..3L), hasMore = false, opened = true))
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                CompositionLocalProvider(LocalTextContextMenuToolbarProvider provides toolbar) { ChatScreen(state, ChatActions()) }
+            }
+        }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.runOnUiThread { state = state.copy(items = state.items + ChatItem(4, ItemKind.ASSISTANT, text = long)) }
+        Snapshot.sendApplyNotifications()
+        compose.mainClock.advanceTimeBy(400)
+        val typing = compose.onNode(hasText("第一，聊天记录", substring = true))
+        typing.performTouchInput { longClick() }
+        compose.mainClock.advanceTimeBy(100)
+        val shown = typing.fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString("") { it.text }
+        assertTrue("still typing: ${shown.length} of ${long.length}", shown.length < long.length)
+        assertEquals("no selection while it types", 0, toolbar.times)
+    }
+
+    @Config(shadows = [ShadowMagnifier::class])
+    @Test fun stickersSelectionOnTheUsersBubbleShowsOnItsAccent() {
+        val toolbar = FakeToolbar()
+        val colors = showSelecting(baseState().copy(items = listOf(ChatItem(1, ItemKind.USER, text = "跑一遍 go vet 再提交")), hasMore = false), toolbar, UiStyle.Sticker)
+        val bubble = compose.onNodeWithText("跑一遍 go vet 再提交")
+        bubble.performTouchInput { longClick(Offset(width * 0.3f, height / 2f)) }
+        awaitToolbar("the user's message selects") { toolbar.shown != null }
+        val c = colors()
+        val selection = c.onAccent.copy(alpha = 0.28f).compositeOver(c.accent)
+        assertTrue("the selection $selection stands out from the bubble ${c.accent}", abs(selection.luminance() - c.accent.luminance()) > 0.05f)
+        val px = bubble.captureToImage().toPixelMap()
+        var hits = 0
+        for (x in 0 until px.width) for (y in 0 until px.height) {
+            val p = px[x, y]
+            if (abs(p.red - selection.red) < 0.02f && abs(p.green - selection.green) < 0.02f && abs(p.blue - selection.blue) < 0.02f) hits++
+        }
+        assertTrue("selected text shows in the selection colour: $hits pixels", hits > 50)
     }
 
     @Test fun opensAtTheBottomWithToolRowsFolded() {
@@ -162,7 +317,9 @@ class ChatScreenTest {
             ),
         )
         show(baseState().copy(items = items, hasMore = false))
-        val bubble = compose.onNodeWithText("删除前我会单独复述范围，等你第二次确认。\n\n喵呜~").assertIsDisplayed()
+        // Round 8: the two paragraphs left in the bubble are two blocks.
+        val bubble = compose.onNodeWithText("删除前我会单独复述范围，等你第二次确认。").assertIsDisplayed()
+        compose.onNodeWithText("喵呜~").assertIsDisplayed()
         compose.onNode(hasText("needs input:", substring = true) and hasText("确认。", substring = true)).assertDoesNotExist()
         val mark = compose.onNodeWithText("needs input: 是否现在开始 collector 和 feed 切换？").assertIsDisplayed()
         // A Text's semantics bounds sit inside its padding, so the bubble's left is where its text starts.
@@ -718,5 +875,71 @@ class ChatScreenTest {
         state = state.copy(attachments = List(6) { Attachment("p$it.jpg", ByteArray(1_000)) })
         compose.onNodeWithText("0.0 / 11 MB").assertIsDisplayed()
         compose.onNodeWithContentDescription("再添加图片").performScrollTo().assertIsDisplayed()
+    }
+
+    // ---------- Round 9: formulas in replies ----------
+
+    private val formulas = listOf(
+        "面积是 \$x^2\$，写错的 \$\\backofff(n)\$ 照原文显示。",
+        "",
+        "\$\$",
+        "T_k = \\sum_{n=1}^{k} 2^{n-1} = 2^k - 1 \\qquad \\text{前 k 次一共要等这么久，到上限以后每次再多等三十秒}",
+        "\$\$",
+    ).joinToString("\n")
+
+    @Config(shadows = [ShadowMagnifier::class])
+    @Test fun formulasCopyAsTheirLaTeX() {
+        val toolbar = FakeToolbar()
+        showSelecting(baseState().copy(items = listOf(ChatItem(1, ItemKind.ASSISTANT, text = formulas)), hasMore = false), toolbar)
+        compose.onNode(hasText("面积是", substring = true)).performTouchInput { longClick(Offset(width * 0.05f, height / 2f)) }
+        awaitToolbar("the reply selects") { toolbar.shown != null }
+        toolbar.click(TextContextMenuKeys.SelectAllKey)
+        compose.waitForIdle()
+        toolbar.click(TextContextMenuKeys.CopyKey)
+        compose.waitForIdle()
+        val copied = clipboardText().orEmpty()
+        assertTrue("copied 「$copied」", copied.startsWith("面积是 \$x^2\$，写错的 \$\\backofff(n)\$ 照原文显示。") && "\$\$ T_k = \\sum_{n=1}^{k} 2^{n-1}" in copied)
+    }
+
+    @Test fun aWideFormulaScrollsInPlaceAndOneThatCannotBeDrawnShowsAsWritten() {
+        show(baseState().copy(items = listOf(ChatItem(1, ItemKind.ASSISTANT, text = formulas)), hasMore = false))
+        compose.waitForIdle()
+        val range = compose.onNodeWithTag("math", useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
+        assertTrue("the block formula is wider than the bubble: ${range.maxValue()}", range.maxValue() > 0f && range.value() == 0f)
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        compose.onNode(hasText("面积是", substring = true), useUnmergedTree = true).fetchSemanticsNode()
+            .config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts)
+        val layout = layouts.single()
+        assertEquals("x² is drawn in its place", 1, layout.placeholderRects.filterNotNull().size)
+        val text = layout.layoutInput.text
+        val bad = "\$\\backofff(n)\$"
+        val at = text.text.indexOf(bad)
+        assertTrue("the unknown command shows as written, in mono", at >= 0 && text.spanStyles.any { it.start == at && it.end == at + bad.length && it.item.fontFamily == clauderc.app.ui.theme.MonoFamily })
+    }
+
+    @Test fun formulasTakeTheTextsColourInEveryStyle() {
+        var look by mutableStateOf(UiStyle.Clear to false)
+        var fg = Color.Unspecified
+        compose.setContent {
+            ClaudercTheme(darkTheme = look.second, style = look.first) {
+                fg = Clauderc.colors.fg
+                ChatScreen(baseState().copy(items = listOf(ChatItem(1, ItemKind.ASSISTANT, text = "\$\$\n\\blacksquare\\ \\mathbf{M}\n\$\$")), hasMore = false), ChatActions())
+            }
+        }
+        for (style in UiStyle.entries) for (dark in listOf(false, true)) {
+            compose.runOnUiThread { look = style to dark }
+            compose.waitForIdle()
+            val px = compose.onNodeWithTag("math", useUnmergedTree = true).captureToImage().toPixelMap()
+            val back = px[0, 0]
+            var ink = back
+            var far = 0f
+            for (x in 0 until px.width) for (y in 0 until px.height) {
+                val p = px[x, y]
+                val d = abs(p.red - back.red) + abs(p.green - back.green) + abs(p.blue - back.blue)
+                if (d > far) { far = d; ink = p }
+            }
+            val off = abs(ink.red - fg.red) + abs(ink.green - fg.green) + abs(ink.blue - fg.blue)
+            assertTrue("$style dark=$dark: formula ink $ink, text $fg", off < 0.06f)
+        }
     }
 }

@@ -1,0 +1,34 @@
+
+
+✻ Churned for 5s · done 12:00 AM
+
+❯ 只回复 ONE
+
+⏺ ONE
+
+✻ Brewed for 3s · done 12:00 AM
+
+❯ 请用 Edit 工具把 note.txt 里的 v1 改成 v2，然后只回复 TWO
+
+  Read 1 file
+
+⏺ Update(note.txt)
+  ⎿  Added 1 line, removed 1 line
+      1 -v1
+      1 +v2
+
+⏺ TWO
+
+✻ Cogitated for 10s · done 12:00 AM
+
+❯ 只回复 THREE
+
+⏺ THREE
+
+✻ Cogitated for 4s · done 12:00 AM
+
+─────────────────────────────────────────────────────────────────────────────────────────────── e2e-rewind_code-71befc ─
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Model: Haiku 5.5  Ctx: 53.8k  ⎇ main  (+837,-127) 
+  ⏸ manual mode on

@@ -78,7 +78,38 @@ class LiveReplyTest {
     /** The bubble typing out [reply]: the one reply whose text so far begins it. */
     private fun typing(): SemanticsNode = compose.onAllNodesWithTag("reply", useUnmergedTree = true).fetchSemanticsNodes().single { reply.startsWith(it.shown()) }
 
-    private fun SemanticsNode.shown() = config[SemanticsProperties.Text].joinToString("") { it.text }
+    /** The text a reply shows: its blocks' texts one after another. */
+    private fun SemanticsNode.shown(): String =
+        config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text } + children.joinToString("") { it.shown() }
+
+    /** Round 8: a reply with a heading, a list, code and a table. */
+    private val markdown = listOf(
+        "## 重连退避",
+        "",
+        "逻辑在 `internal/relay/conn.go` 的 `redial` 里，分三步：",
+        "",
+        "1. 第一次断开后等 **1 秒**",
+        "2. 之后每次翻倍，最多等 30 秒",
+        "3. 连上并收到第一个心跳后清零",
+        "",
+        "```go",
+        "func backoff(n int) time.Duration {",
+        "\td := time.Second << n",
+        "\tif d > 30*time.Second || d <= 0 { // 移位溢出成负数时也取上限",
+        "\t\treturn 30 * time.Second",
+        "\t}",
+        "\treturn d",
+        "}",
+        "```",
+        "",
+        "| 第几次 | 等待 | 累计 |",
+        "|---|---|---|",
+        "| 1 | 1s | 1s |",
+        "| 6 | 30s | 61s |",
+    ).joinToString("\n")
+
+    /** The newest reply's text as shown, in all its blocks. */
+    private fun newestShown() = lowestReply().shown()
 
     @Test fun aNewReplyTypesOutAtTheMockupsSpeed() {
         show(ChatUiState(loading = false, items = items(6)))
@@ -125,6 +156,59 @@ class LiveReplyTest {
             heights += b.height
         }
         assertTrue("still typing: $heights", heights.last() > heights.first())
+        assertTrue("bottoms $bottoms above $listBottom", bottoms.all { kotlin.math.abs(it - bottoms.first()) < 1f } && bottoms.first() < listBottom && listBottom - bottoms.first() < 100f)
+    }
+
+    @Test fun aMarkdownReplyTypesOutBlockByBlockAndNeverShrinks() {
+        show(ChatUiState(loading = false, items = items(6)))
+        next { it.copy(items = it.items + ChatItem(7, ItemKind.ASSISTANT, text = markdown)) }
+        val total = mdBlocks(markdown).sumOf { it.shownLength() }
+        var last = newestShown().length
+        assertTrue("the first frame shows $last of $total", last < total)
+        val lengths = mutableListOf<Int>()
+        for (t in 1..60) {
+            compose.mainClock.advanceTimeBy(100)
+            val n = newestShown().length
+            assertTrue("never shrinks: $n after $last", n >= last)
+            last = n
+            lengths += n
+        }
+        // All of it in the end, a while before the last frame: 格栅 adds 「## 」 before the heading and code shows its tabs four wide.
+        assertTrue("typed out in full: $lengths of $total", lengths.last() >= total && lengths[lengths.size - 10] == lengths.last())
+        compose.onNodeWithText("重连退避", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("61s", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    /** Round 9: a formula shows whole once typing reaches its end, never half of it. */
+    @Test fun aFormulaTypesOutWholeNeverHalf() {
+        val math = "面积是 \$x^2\$，周长是 \$2\\pi r\$。\n\n\$\$\n\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}\n\$\$\n\n就这些。"
+        show(ChatUiState(loading = false, items = items(6)))
+        next { it.copy(items = it.items + ChatItem(7, ItemKind.ASSISTANT, text = math)) }
+        val frames = mutableListOf<String>()
+        for (t in 1..40) {
+            compose.mainClock.advanceTimeBy(100)
+            val s = newestShown()
+            assertTrue("「$s」 shows half a formula", s.count { it == '$' } % 2 == 0)
+            frames += s
+        }
+        assertTrue("the inline formula shows before the block one", frames.any { "\$x^2\$" in it && "\\sum" !in it })
+        assertTrue("all of it in the end: ${frames.last()}", "\\frac{n(n+1)}{2}" in frames.last() && frames.last().endsWith("就这些。"))
+    }
+
+    @Test fun whileAMarkdownReplyTypesTheListStaysAtTheBottom() {
+        show(ChatUiState(loading = false, items = items(30)))
+        val listBottom = compose.onNodeWithTag("chatList").fetchSemanticsNode().boundsInRoot.bottom
+        next { it.copy(items = it.items + ChatItem(31, ItemKind.ASSISTANT, text = markdown)) }
+        compose.mainClock.advanceTimeBy(durM + 50)
+        val bottoms = mutableListOf<Float>()
+        val heights = mutableListOf<Float>()
+        repeat(30) {
+            compose.mainClock.advanceTimeBy(100)
+            val b = lowestReply().boundsInRoot
+            bottoms += b.bottom
+            heights += b.height
+        }
+        assertTrue("grows as it types: $heights", heights.last() > heights.first() && heights.zipWithNext().all { (a, b) -> b >= a - 0.5f })
         assertTrue("bottoms $bottoms above $listBottom", bottoms.all { kotlin.math.abs(it - bottoms.first()) < 1f } && bottoms.first() < listBottom && listBottom - bottoms.first() < 100f)
     }
 

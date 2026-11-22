@@ -2,13 +2,14 @@ package clauderc.app.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -290,29 +291,48 @@ fun ClaudercDialog(
 /**
  * .pmenu: a small menu that grows out from under the icon it hangs from, its right edge 4dp in from the
  * icon's (scale 0.86 and a fade from its top right corner, on the enter rule; back on the leaving rule).
- * A tap outside or back closes it, with no scrim. Put it inside the icon's box.
+ * A tap outside or back closes it, with no scrim. Put it inside the icon's box. [place] puts it elsewhere,
+ * growing from [origin], which can change once [place] has placed it; [width] fixes its width.
  */
 @Composable
-fun PopMenu(open: Boolean, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+fun PopMenu(
+    open: Boolean,
+    onDismiss: () -> Unit,
+    place: PopupPositionProvider? = null,
+    origin: () -> TransformOrigin = { TransformOrigin(1f, 0f) },
+    width: Dp? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     val shown = remember { MutableTransitionState(false) }
     shown.targetState = open
     if (!shown.currentState && !shown.targetState && shown.isIdle) return
     val c = Clauderc.colors
     val ui = Clauderc.style
     val density = LocalDensity.current
-    val place = remember(density) { BelowEnd(with(density) { 4.dp.roundToPx() }, with(density) { 2.dp.roundToPx() }) }
-    Popup(popupPositionProvider = place, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
-        AnimatedVisibility(
-            shown,
-            enter = fadeIn(Motion.enter()) + scaleIn(Motion.enter(), initialScale = 0.86f, transformOrigin = TransformOrigin(1f, 0f)),
-            exit = fadeOut(Motion.exit()) + scaleOut(Motion.exit(), targetScale = 0.86f, transformOrigin = TransformOrigin(1f, 0f)),
-        ) {
+    val belowEnd = remember(density) { BelowEnd(with(density) { 4.dp.roundToPx() }, with(density) { 2.dp.roundToPx() }) }
+    Popup(popupPositionProvider = place ?: belowEnd, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+        AnimatedVisibility(shown, enter = fadeIn(Motion.enter()), exit = fadeOut(Motion.exit())) {
+            // Scaled in the layer rather than with scaleIn, so the corner it grows from is read when it draws.
+            val scale by transition.animateFloat({ if (targetState == EnterExitState.Visible) Motion.enter() else Motion.exit() }, label = "popMenuScale") {
+                if (it == EnterExitState.Visible) 1f else 0.86f
+            }
             val surface = when (ui) {
                 UiStyle.Sticker -> Modifier.padding(bottom = 5.dp).sticker(c.sheet, c.ink, 18.dp, drop = 5.dp).padding(vertical = 6.dp)
                 UiStyle.Grid -> Modifier.background(c.bg).border(2.dp, c.fg)
                 UiStyle.Clear -> Modifier.shadow(18.dp, RoundedCornerShape(22.dp)).clip(RoundedCornerShape(22.dp)).background(c.pane.compositeOver(c.sheet)).topHighlight(c.rim).padding(vertical = 6.dp)
             }
-            Column(Modifier.testTag("popMenu").widthIn(min = 188.dp).width(IntrinsicSize.Max).then(surface), content = content)
+            Column(
+                Modifier
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        transformOrigin = origin()
+                    }
+                    .testTag("popMenu")
+                    .then(if (width != null) Modifier.width(width) else Modifier.widthIn(min = 188.dp).width(IntrinsicSize.Max))
+                    .then(surface),
+                content = content,
+            )
         }
     }
 }
@@ -353,6 +373,9 @@ private class BelowEnd(private val inset: Int, private val gap: Int) : PopupPosi
         return IntOffset(x, y)
     }
 }
+
+/** The snackbar of the screen around, for what deep inside it tells the user, such as 「已复制链接」. */
+val LocalSnack = staticCompositionLocalOf<SnackState?> { null }
 
 /** State for the single snackbar a screen shows at a time. */
 @Stable

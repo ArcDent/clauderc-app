@@ -5,7 +5,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;700&display=swap">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300..500,0..1,0&icon_names=account_tree,add,alt_route,animation,arrow_back,arrow_upward,backspace,battery_full,call_split,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,contrast,delete,description,dns,download,edit,error,expand_more,folder,forum,image,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,keyboard_return,keyboard_tab,lock,more_vert,palette,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,settings,signal_cellular_alt,stop,style,terminal,upload,visibility,visibility_off,wallpaper,warning,wifi&display=block">
+<!-- 第九轮：公式用 KaTeX 画，APP 里的库用的也是 KaTeX 字体 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300..500,0..1,0&icon_names=account_tree,add,alt_route,animation,arrow_back,arrow_upward,backspace,battery_full,call_split,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,content_copy,contrast,delete,description,dns,download,edit,error,expand_more,folder,forum,history,image,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,keyboard_return,keyboard_tab,lock,mail,more_vert,open_in_browser,palette,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,settings,signal_cellular_alt,stop,style,terminal,upload,visibility,visibility_off,wallpaper,warning,wifi&display=block">
 <style>
 /* 下面这段从 index.html 原样复制：APP 主题变量、通用样式和各页面样式。改设计稿时两边一起改。 */
 :root {
@@ -1689,6 +1692,107 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-dir="clear"] .fnote { background: color-mix(in srgb, var(--c-danger) 12%, var(--k-pane)); -webkit-backdrop-filter: blur(22px) saturate(1.8); backdrop-filter: blur(22px) saturate(1.8); box-shadow: inset 0 1px 1px var(--k-rimc), 0 0 0 0.5px color-mix(in srgb, var(--c-danger) 40%, transparent), 0 10px 22px -10px rgba(0, 0, 0, 0.3); }
 [data-dir="grid"] .fnote { border-radius: 0; font-family: var(--font-mono); box-shadow: 0 0 0 1px var(--c-danger), 4px 4px 0 color-mix(in srgb, var(--c-danger) 35%, transparent); }
 [data-dir="sticker"] .fnote { border-radius: var(--k-r); border: 2px solid var(--k-ink); box-shadow: 0 4px 0 var(--k-ink); font-weight: 700; background: color-mix(in srgb, var(--c-danger) 18%, var(--c-sheet)); }
+
+/* ================= 第八轮：回复的 Markdown、链接、代码块复制和长按选字（2026-11-21 已批准） ================= */
+/* 分块的回复：块之间 8px，标题上面多留一点；单个换行照旧换行 */
+.bubble.md { white-space: normal; }
+.md > * + * { margin-top: var(--sp-2); }
+.md > * + .md-h { margin-top: var(--sp-4); }
+.md p { margin: 0; }
+.md .md-h { margin: 0; font-weight: 600; line-height: 1.4; }
+.md h2.md-h { font-size: 18px; }
+.md h3.md-h { font-size: 16px; }
+.md h4.md-h { font-size: 15px; }
+.md ul, .md ol { margin: 0; padding-left: 1.4em; }
+.md li + li { margin-top: 2px; }
+.md li::marker { color: var(--c-fg-3); }
+.md blockquote { margin: 0; padding-left: 12px; box-shadow: inset 2px 0 0 var(--c-surface-2); color: var(--c-fg-2); }
+.md b { font-weight: 600; }
+/* 链接不换颜色，只加一道细下划线，黑底、白底、主题色底上都看得清 */
+.lk { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); cursor: pointer; border-radius: 3px; }
+.lk:active { background: color-mix(in srgb, currentColor 12%, transparent); }
+/* 代码块：单色等宽，在块里横向滚动；顶上一行是语言名和复制 */
+.cb { border-radius: 14px; background: var(--c-bg); margin: 0 -6px; overflow: hidden; }
+.cb-h { display: flex; align-items: center; gap: var(--sp-2); height: 30px; padding: 0 3px 0 12px; user-select: none; -webkit-user-select: none; }
+.cb-lang { flex: 1; font-family: var(--font-mono); font-size: 11px; color: var(--c-fg-3); }
+.cb-copy { flex: none; position: relative; width: 30px; height: 30px; border: 0; border-radius: 50%; background: none; color: var(--c-fg-2); display: grid; place-items: center; }
+.cb-copy > * { grid-area: 1 / 1; }
+.cb-copy .ms { font-size: 17px; }
+/* 对勾和复制图标一样大，线宽和图标笔画一致；贴纸的线粗一点，跟墨线走 */
+.cb-i2 { width: 18px; height: 18px; opacity: 0; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.cb-i2 path { stroke-dasharray: 22; stroke-dashoffset: 22; }
+.cb-copy.done { color: var(--c-fg); }
+[data-dir="sticker"] .cb-i2 { stroke-width: 2.4; }
+.cb pre { margin: 0; padding: 0 12px 12px; overflow-x: auto; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; white-space: pre; tab-size: 4; scrollbar-width: none; }
+.cb pre::-webkit-scrollbar, .tb::-webkit-scrollbar { display: none; }
+/* 表格：在块里横向滚动，表头小一号二级灰，行间一道细线 */
+.tb { overflow-x: auto; margin: 0 -6px; scrollbar-width: none; }
+.tb table { border-collapse: collapse; font-size: 13.5px; line-height: 1.5; white-space: nowrap; }
+.tb th { font-weight: 500; font-size: var(--fs-caption); color: var(--c-fg-2); text-align: left; }
+.tb th, .tb td { padding: 6px 16px 6px 6px; }
+.tb tbody td { box-shadow: inset 0 1px 0 var(--c-line); }
+/* 逐字出现中的回复先不能选；选区颜色按气泡底色配 */
+.bubble.typing { user-select: none; -webkit-user-select: none; }
+.bubble.ai ::selection { background: color-mix(in srgb, var(--c-accent) 28%, transparent); }
+.bubble.me::selection, .bubble.me ::selection { background: color-mix(in srgb, var(--c-bg) 36%, transparent); color: inherit; }
+[data-dir="sticker"] .bubble.me::selection, [data-dir="sticker"] .bubble.me ::selection { background: color-mix(in srgb, var(--c-on-accent) 28%, transparent); }
+/* 格栅：标题前面带井号，列表用短横，代码块和表格直角，表头下一道粗线 */
+[data-dir="grid"] .md .md-h { font-family: var(--font-mono); font-weight: 700; }
+[data-dir="grid"] .md .md-h::before { color: var(--c-fg-3); }
+[data-dir="grid"] .md h2.md-h::before { content: "# "; }
+[data-dir="grid"] .md h3.md-h::before { content: "## "; }
+[data-dir="grid"] .md h4.md-h::before { content: "### "; }
+[data-dir="grid"] .md ul { list-style: none; }
+[data-dir="grid"] .md ul > li::before { content: "-"; display: inline-block; width: 1.4em; margin-left: -1.4em; font-family: var(--font-mono); color: var(--c-fg-3); }
+[data-dir="grid"] .md blockquote { box-shadow: inset 2px 0 0 var(--c-fg-3); }
+[data-dir="grid"] .cb { border-radius: 0; background: var(--c-surface); margin: 0; }
+[data-dir="grid"] .cb-copy { border-radius: 0; }
+[data-dir="grid"] .tb { margin: 0; }
+[data-dir="grid"] .tb table { font-family: var(--font-mono); font-size: 12px; }
+[data-dir="grid"] .tb thead th { color: var(--c-fg); box-shadow: inset 0 -2px 0 var(--c-fg); }
+/* 贴纸：代码块和表格描一圈墨线，不加硬阴影；表头平涂一层淡主题色 */
+[data-dir="sticker"] .md .md-h { font-weight: 800; }
+[data-dir="sticker"] .md blockquote { box-shadow: inset 3px 0 0 var(--c-accent); }
+[data-dir="sticker"] .cb { border: 2px solid var(--k-ink); }
+[data-dir="sticker"] .tb table { border: 2px solid var(--k-ink); border-radius: 12px; border-collapse: separate; border-spacing: 0; overflow: hidden; }
+[data-dir="sticker"] .tb thead th { background: color-mix(in srgb, var(--c-accent) 22%, transparent); color: var(--c-fg); font-weight: 700; }
+[data-dir="sticker"] .tb tbody td { box-shadow: inset 0 1.5px 0 var(--c-line); }
+/* 链接的小菜单：贴在链接下面，第一行是完整网址，再给打开和复制 */
+.lkm { width: 252px; min-width: 0; }
+.lkm .lk-url { margin: 0; padding: 8px var(--sp-4) 6px; font-family: var(--font-mono); font-size: 11px; line-height: 1.55; color: var(--c-fg-3); overflow-wrap: anywhere; }
+/* 系统自带的选字工具栏：样子由系统决定，不跟 APP 的样式走 */
+.seltb { position: absolute; z-index: 45; display: flex; gap: 2px; padding: 4px; border-radius: 12px; background: #FFFFFF; color: #1C1B1F; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16), 0 10px 24px -8px rgba(0, 0, 0, 0.28); font: 14px/1 Roboto, system-ui, sans-serif; }
+.seltb button { border: 0; background: none; color: inherit; font: inherit; padding: 10px 12px; border-radius: 8px; }
+.seltb button:active { background: rgba(0, 0, 0, 0.08); }
+[data-mode="dark"] .seltb { background: #2B2930; color: #E6E1E5; }
+
+/* ================= 第九轮：回复里的公式、用户消息左滑回溯（2026-11-22 已批准） ================= */
+/* 公式和正文同色；行内公式贴着基线跟文字走，块级公式单独一块，比气泡宽时在块里横向滚动 */
+.mxi .katex { font-size: 1.06em; }
+.mx { overflow-x: auto; overflow-y: hidden; margin: 0 -6px; padding: 2px 6px; scrollbar-width: none; }
+.mx::-webkit-scrollbar { display: none; }
+.mx .katex-display { margin: 0; width: max-content; min-width: 100%; }
+.mx .katex { font-size: 1.12em; }
+/* 画不了的公式照原文显示：等宽、二级灰，不加底色 */
+.mx-src { font-family: var(--font-mono); font-size: 0.86em; color: var(--c-fg-2); }
+.mx > .mx-src { display: block; white-space: pre; padding: 4px 0; }
+/* 格栅：块级公式靠左，和代码块左边对齐 */
+[data-dir="grid"] .mx { margin: 0; padding: 2px 0; }
+[data-dir="grid"] .mx .katex-display, [data-dir="grid"] .mx .katex-display > .katex { text-align: left; }
+/* 用户消息整行左滑：气泡跟着手指往左走，右边露出 60dp 宽的回溯小圆钮，松手过一半停住 */
+.mrow { --sw: 0px; position: relative; display: flex; justify-content: flex-end; margin-top: var(--sp-2); overflow-x: clip; touch-action: pan-y; }
+.mrow > .bubble.me { margin-top: 0; transform: translateX(var(--sw)); }
+.mrow.sw-anim > .bubble.me, .mrow.sw-anim > .rw-act { transition: transform var(--dur-m) var(--ease-emph); }
+/* 只有圆钮，不带小字；和单行气泡一样高，对着气泡竖直居中，单行消息时上下边齐平 */
+.rw-act { position: absolute; top: 50%; right: 0; width: 60px; border: 0; padding: 0; background: none; display: grid; place-items: center; transform: translate(calc(100% + var(--sw)), -50%); }
+.rw-act .ms { box-sizing: border-box; width: calc(15px * 1.55 + 20px); height: calc(15px * 1.55 + 20px); border-radius: 50%; display: grid; place-items: center; background: var(--c-fg); color: var(--c-bg); font-size: 20px; }
+[data-dir="grid"] .rw-act .ms { border-radius: 0; }
+[data-dir="sticker"] .rw-act .ms { width: calc(15px * 1.55 + 24px); height: calc(15px * 1.55 + 24px); background: var(--c-accent); color: var(--c-on-accent); border: 2px solid var(--k-ink); box-shadow: 0 3px 0 var(--k-ink); }
+/* 回溯面板：先引用那条消息，最多三行；改过文件的一轮再给三种回去的方式 */
+.rw-quote { margin: 0 var(--sp-page) var(--sp-2); padding-left: 12px; box-shadow: inset 2px 0 0 var(--c-surface-2); color: var(--c-fg-2); font-size: 14px; line-height: 1.55; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.rw-files { font-family: var(--font-mono); }
+[data-dir="grid"] .rw-quote { box-shadow: inset 2px 0 0 var(--c-fg-3); font-family: var(--font-mono); font-size: 13px; }
+[data-dir="sticker"] .rw-quote { box-shadow: inset 3px 0 0 var(--c-accent); }
 </style>
 
 <!-- 第四轮：卡通图标（24 格，2 像素圆头线，APP 里照这些路径画） -->
@@ -1722,13 +1826,15 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     </div>
     <div class="themes" role="group" aria-label="样式" id="styleSet"></div>
 
-    <section class="knob" id="r7">
-      <h2>第七轮（待批）</h2>
-      <h3>新建会话</h3>
-      <p class="desk-note" style="margin:0">入口只有会话页右上角一个。先选档位：目标机上已有的档位直接选，沿用它的接口和模型，新会话归到那个档位；官方就是账户登录，默认选它；选「自己填」才露出接口地址和 API key，两项都要填，新会话归到那个地址的档位。</p>
-      <p class="desk-note" style="margin:0">模型默认收着。选了档位，七个框里就是这个档位现在用的值，摘要写沿用档位的几项；改哪个框就只换那一项，摘要变成改了几项；清空的框跟目标机走。换档位会换成新档位的值，选自己填时框里的值不动。写法和环境变量一样，可以带 [1M]。新会话启动后，这个档位的模型就是这次的值。</p>
-      <p class="desk-note" style="margin:0">填错了不再在输入框下面写红字：输入框标红，顶栏下面滑出一张卡片，4 秒后、点一下、或者标红的项改过了就收回。聊天页的 Worktree 照抄当前会话，不用填。</p>
-      <div class="knob-btns"><button type="button" class="desk-btn" data-r7="open">打开新建页</button><button type="button" class="desk-btn" data-r7="custom">选自己填</button><button type="button" class="desk-btn" data-r7="models">展开模型</button><button type="button" class="desk-btn" data-r7="preset">选档位改一项模型启动</button><button type="button" class="desk-btn" data-r7="half">自己填只填地址</button><button type="button" class="desk-btn" data-r7="endpoint">自己填好接口启动</button></div>
+    <section class="knob" id="r9">
+      <h2>第九轮（2026-11-22 已批准）</h2>
+      <h3>回复里的公式</h3>
+      <p class="desk-note" style="margin:0">块级公式 $$…$$、\[…\] 单独占行，比气泡宽时在块里横向滚动；行内公式 \(…\)、$…$ 跟着文字走。公式和正文同色，块级的极简、贴纸居中，格栅靠左。价格「$5 到 $10」、$PATH 这类不算公式。写错或画不了的公式照原文显示成等宽灰字。逐字出现时公式到了整个出来，不出半截；选中复制得到原来的 LaTeX。</p>
+      <div class="knob-btns"><button type="button" class="desk-btn" data-r9="formula">打开公式示例</button><button type="button" class="desk-btn" data-r9="ftype">跑一轮带公式的回复</button><button type="button" class="desk-btn" data-r9="fsel">选中一段带公式的字</button></div>
+      <h3>用户消息左滑回溯</h3>
+      <p class="desk-note" style="margin:0">你发的消息整行左滑，右边让出 60dp，露出一枚回溯圆钮，不带小字，和单行气泡一样高、对着气泡竖直居中，松手过一半停住；会话在工作或等你确认时滑不动。点圆钮从底部升起面板，先引用这条消息；这一轮改过文件时选「对话和代码都回去」「只回对话」「只回代码」，没改文件就只回对话。Claude Code 面板里的两种总结不放进来。</p>
+      <p class="desk-note" style="margin:0">确认后底部出一行「正在回溯…」。回对话时这条和之后的消息收起，原文填回输入框；只回代码时对话不动，弹提示条。目标机在 Claude Code 面板里对不上这条消息时退出面板，手机弹提示条并打开终端视图，让你自己选。</p>
+      <div class="knob-btns"><button type="button" class="desk-btn" data-r9="swipe">左滑一条消息</button><button type="button" class="desk-btn" data-r9="sheet">打开回溯面板</button><button type="button" class="desk-btn" data-r9="ok">回溯成功</button><button type="button" class="desk-btn" data-r9="code">只回代码</button><button type="button" class="desk-btn" data-r9="fail">回溯失败转终端</button><button type="button" class="desk-btn" data-r9="busy">会话在工作时滑一下</button></div>
       <label class="check"><input type="checkbox" data-k="slow">慢放 5 倍</label>
     </section>
   </aside>
@@ -1773,6 +1879,159 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]; }); }
   function fmt(s) { return esc(s).replace(/`([^`]+)`/g, "<code>$1</code>"); }
+
+  // ---------- 第八轮：回复的 Markdown 分块 ----------
+  // 回复先切成块：段落、标题、列表、引用、代码块、表格；单个换行照旧换行。
+  // 逐字出现按块分配字数：文字按显示出来的字算，代码在框里一个个出来，表格到了整张出现。
+  // 第九轮：行内公式 \(…\)、$$…$$、$…$；单个 $ 照 Pandoc 的规矩：$ 里侧不能是空格，后一个 $ 后面不能紧跟数字，所以价格和 $PATH 不算
+  var INLINE_RE = /`([^`\n]+)`|(\$\$[^$\n]+?\$\$|\\\(.+?\\\)|(?<![\\$])\$[^\s$](?:[^$\n]*?[^\s$\\])?\$(?![\d$]))|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>"'`]+)/g;
+  var LINK_RE = /()()()\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>"'`]+)/g;
+  // 裸网址末尾粘上的标点不算网址；右括号只在多出来时去掉
+  function trimUrl(u) {
+    for (;;) {
+      var c = u.slice(-1);
+      if (/[.,;:!?'"。，；：！？、」』】》）]/.test(c)) u = u.slice(0, -1);
+      else if (c === ")" && (u.split("(").length < u.split(")").length)) u = u.slice(0, -1);
+      else return u;
+    }
+  }
+  // 行内切成记号：文字、行内代码、粗体、链接。linksOnly 用于你自己的消息，只认链接
+  function mdTokens(s, linksOnly) {
+    var re = linksOnly ? LINK_RE : INLINE_RE, out = [], at = 0, m;
+    re.lastIndex = 0;
+    while ((m = re.exec(s))) {
+      if (m.index > at) out.push({ k: "t", s: s.slice(at, m.index) });
+      if (m[1]) out.push({ k: "c", s: m[1] });
+      else if (m[2]) out.push({ k: "m", s: m[2] });
+      else if (m[3]) out.push({ k: "b", s: m[3] });
+      else if (m[4]) out.push({ k: "a", s: m[4], href: m[5] });
+      else {
+        var u = trimUrl(m[6]);
+        out.push({ k: "a", s: u, href: u });
+        if (u.length < m[6].length) out.push({ k: "t", s: m[6].slice(u.length) });
+      }
+      at = m.index + m[0].length;
+    }
+    if (at < s.length) out.push({ k: "t", s: s.slice(at) });
+    return out;
+  }
+  function tokLen(toks) { return toks.reduce(function (a, t) { return a + t.s.length; }, 0); }
+  // 只画前 n 个字
+  function inlineHtml(toks, n) {
+    var h = "";
+    for (var i = 0; i < toks.length && n > 0; i++) {
+      // 公式不出半截：整个都到了才画
+      if (toks[i].k === "m") { if (n < toks[i].s.length) break; h += mathHtml(toks[i].s, false); n -= toks[i].s.length; continue; }
+      var t = toks[i], s = t.s.slice(0, n), e = esc(s).replace(/\n/g, "<br>");
+      n -= s.length;
+      if (t.k === "c") h += "<code>" + e + "</code>";
+      else if (t.k === "b") h += "<b>" + e + "</b>";
+      else if (t.k === "a") h += '<span class="lk" role="link" data-act="link" data-v="' + esc(t.href) + '">' + e + "</span>";
+      else h += e;
+    }
+    return h;
+  }
+  var LIST_RE = /^\s*([-*]|\d+\.)\s+/, ROW_RE = /^\s*\|.*\|\s*$/;
+  function mdBlocks(text) {
+    var lines = text.split("\n"), out = [], para = [], i = 0, m;
+    function flush() { if (para.length) out.push({ t: "p", toks: mdTokens(para.join("\n")) }); para = []; }
+    function cells(l) { return l.trim().replace(/^\||\|$/g, "").split("|").map(function (c) { return mdTokens(c.trim()); }); }
+    while (i < lines.length) {
+      var l = lines[i];
+      if ((m = /^\s*```\s*([\w+-]*)\s*$/.exec(l))) {
+        // 没闭合的围栏到文末都算代码，逐字出现时代码框先出来
+        flush();
+        var code = [];
+        for (i++; i < lines.length && !/^\s*```\s*$/.test(lines[i]); i++) code.push(lines[i]);
+        out.push({ t: "code", lang: m[1], code: code.join("\n") });
+        i++;
+      } else if ((m = /^(#{1,3})\s+(.*)$/.exec(l))) {
+        flush(); out.push({ t: "h", lvl: m[1].length, toks: mdTokens(m[2]) }); i++;
+      } else if (/^\s*>/.test(l)) {
+        flush();
+        var q = [];
+        while (i < lines.length && /^\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/, ""));
+        out.push({ t: "q", toks: mdTokens(q.join("\n")) });
+      } else if (LIST_RE.test(l)) {
+        flush();
+        var ord = /^\s*\d/.test(l), start = parseInt(l, 10) || 1, items = [];
+        while (i < lines.length && LIST_RE.test(lines[i])) items.push(mdTokens(lines[i++].replace(LIST_RE, "")));
+        out.push({ t: ord ? "ol" : "ul", start: start, items: items });
+      } else if (ROW_RE.test(l) && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1] || "")) {
+        flush();
+        var head = cells(l), rows = [];
+        for (i += 2; i < lines.length && ROW_RE.test(lines[i]); i++) rows.push(cells(lines[i]));
+        out.push({ t: "table", head: head, rows: rows });
+      } else if (/^\s*(\$\$|\\\[)/.test(l) && mathEnd(lines, i) >= 0) {
+        // 第九轮：块级公式，开头单独占行，到以 $$ 或 \] 结尾的那一行为止；紧跟在一行文字下面也算
+        flush();
+        var j = mathEnd(lines, i);
+        out.push({ t: "math", written: lines.slice(i, j + 1).join("\n").trim() });
+        i = j + 1;
+      } else if (!l.trim()) { flush(); i++; }
+      else { para.push(l); i++; }
+    }
+    flush();
+    return out;
+  }
+  // 块级公式从第 i 行开始，结束在哪一行；没闭合返回 -1
+  function mathEnd(lines, i) {
+    var open = /^\s*\$\$/.test(lines[i]) ? "$$" : "\\[", close = open === "$$" ? "$$" : "\\]";
+    for (var j = i; j < lines.length; j++) {
+      var body = lines.slice(i, j + 1).join("\n").trim();
+      if (lines[j].trim().slice(-close.length) === close && body.length > open.length + close.length) return j;
+    }
+    return -1;
+  }
+  // 公式去掉定界符后交给 KaTeX；KaTeX 报错（写错、不认识的命令）就照原文显示
+  function texOf(w) {
+    if (w.slice(0, 2) === "$$") return w.slice(2, -2);
+    if (w.slice(0, 2) === "\\(" || w.slice(0, 2) === "\\[") return w.slice(2, -2);
+    return w.slice(1, -1);
+  }
+  function mathHtml(w, display) {
+    var out = null;
+    try { if (window.katex) out = katex.renderToString(texOf(w).trim(), { displayMode: display, throwOnError: true, strict: false, output: "html" }); } catch (err) { out = null; }
+    if (display) return '<div class="mx" data-src="' + esc(w) + '">' + (out || '<span class="mx-src">' + esc(w) + "</span>") + "</div>";
+    return out ? '<span class="mxi" data-src="' + esc(w) + '">' + out + "</span>" : '<span class="mxi mx-src" data-src="' + esc(w) + '">' + esc(w) + "</span>";
+  }
+  function blockLen(b) {
+    if (b.t === "math") return b.written.length;
+    if (b.t === "code") return b.code.length;
+    if (b.t === "ul" || b.t === "ol") return b.items.reduce(function (a, t) { return a + tokLen(t); }, 0);
+    if (b.t === "table") return [b.head].concat(b.rows).reduce(function (a, r) { return a + r.reduce(function (x, c) { return x + tokLen(c); }, 0); }, 0);
+    return tokLen(b.toks);
+  }
+  // 代码块角上的复制按钮，代码出完才出来；对勾是一笔画出来的线，和复制图标叠在同一个位置
+  function codeHtml(b, n) {
+    var copy = n >= b.code.length ? '<button type="button" class="cb-copy" data-act="cb-copy" aria-label="复制代码"><span class="ms cb-i1">content_copy</span><svg class="cb-i2" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.6l4.6 4.6L19.2 7.6"/></svg></button>' : "";
+    return '<div class="cb" data-code="' + esc(b.code) + '"><div class="cb-h"><span class="cb-lang">' + esc(b.lang) + "</span>" + copy + "</div><pre>" + esc(b.code.slice(0, n)) + "</pre></div>";
+  }
+  function blockHtml(b, n) {
+    if (b.t === "math") return n >= b.written.length ? mathHtml(b.written, true) : "";
+    if (b.t === "code") return codeHtml(b, n);
+    if (b.t === "table") {
+      var tr = function (r, tag) { return "<tr>" + r.map(function (c) { return "<" + tag + ">" + inlineHtml(c, Infinity) + "</" + tag + ">"; }).join("") + "</tr>"; };
+      return '<div class="tb"><table><thead>' + tr(b.head, "th") + "</thead><tbody>" + b.rows.map(function (r) { return tr(r, "td"); }).join("") + "</tbody></table></div>";
+    }
+    if (b.t === "ul" || b.t === "ol") {
+      var lis = "";
+      for (var i = 0; i < b.items.length && n > 0; i++) { lis += "<li>" + inlineHtml(b.items[i], n) + "</li>"; n -= tokLen(b.items[i]); }
+      return b.t === "ul" ? "<ul>" + lis + "</ul>" : '<ol start="' + b.start + '">' + lis + "</ol>";
+    }
+    if (b.t === "h") return "<h" + (b.lvl + 1) + ' class="md-h">' + inlineHtml(b.toks, n) + "</h" + (b.lvl + 1) + ">";
+    if (b.t === "q") return "<blockquote>" + inlineHtml(b.toks, n) + "</blockquote>";
+    return "<p>" + inlineHtml(b.toks, n) + "</p>";
+  }
+  function mdLen(text) { return mdBlocks(text).reduce(function (a, b) { return a + blockLen(b); }, 0); }
+  function mdHtml(text, n) {
+    var bl = mdBlocks(text), h = "";
+    if (n == null) n = Infinity;
+    for (var i = 0; i < bl.length && n > 0; i++) { h += blockHtml(bl[i], n); n -= blockLen(bl[i]); }
+    return h;
+  }
+  function aiHtml(it) { return mdHtml(it.text, it.typing ? Math.floor(it.shown) : null) || "&#8203;"; }
+  function meHtml(text) { return inlineHtml(mdTokens(text, true), Infinity); }
   function make(html) { var t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; }
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function noop() {}
@@ -1949,6 +2208,87 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     { k: "tool", verb: "运行", arg: "go test ./internal/transcript/...", detail: [["命令", "go test ./internal/transcript/..."], ["输出", "ok  \tclauderc/internal/agent/transcript\t0.81s"]] },
     { k: "ai", text: "You've hit your 5-hour limit · resets 10:40pm (Asia/Shanghai)" }
   ];
+  // 第八轮：带标题、列表、引用、代码块、表格和链接的回复
+  var MD_REPLY = [
+    "## 重连退避",
+    "",
+    "逻辑在 `internal/relay/conn.go` 的 `redial` 里，分三步：",
+    "",
+    "1. 第一次断开后等 **1 秒**",
+    "2. 之后每次翻倍，最多等 30 秒",
+    "3. 连上并收到第一个心跳后清零",
+    "",
+    "> 读失败和心跳超时走的是同一条路径，两种断开都会退避。",
+    "",
+    "```go",
+    "func backoff(n int) time.Duration {",
+    "\td := time.Second << n",
+    "\tif d > 30*time.Second || d <= 0 { // 移位溢出成负数时也取上限",
+    "\t\treturn 30 * time.Second",
+    "\t}",
+    "\treturn d",
+    "}",
+    "```",
+    "",
+    "| 第几次 | 等待 | 累计 | 说明 |",
+    "|---|---|---|---|",
+    "| 1 | 1s | 1s | 断开后立刻安排 |",
+    "| 2 | 2s | 3s | 翻倍 |",
+    "| 5 | 16s | 31s | 还在翻倍 |",
+    "| 6 | 30s | 61s | 到上限，之后一直是 30s |",
+    "",
+    "写法参考了 [gRPC 的连接退避说明](https://github.com/grpc/grpc/blob/master/doc/connection-backoff.md)。Duration 的文档：https://pkg.go.dev/time#Duration。"
+  ].join("\n");
+  var MD_REPLY2 = [
+    "补好了，加了一个表驱动的测试：",
+    "",
+    "```go",
+    "func TestBackoff(t *testing.T) {",
+    "\tfor n, want := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second} {",
+    "\t\tif got := backoff(n); got != want {",
+    "\t\t\tt.Errorf(\"backoff(%d) = %v, want %v\", n, got, want)",
+    "\t\t}",
+    "\t}",
+    "}",
+    "```",
+    "",
+    "本地这样跑过：",
+    "",
+    "```sh",
+    "go test -run TestBackoff -count=1 -v ./internal/relay/... 2>&1 | tee .local/backoff.log",
+    "```",
+    "",
+    "- 上限那一档单独测了 `n = 40`，不会溢出成负数",
+    "- `redial` 本身没改"
+  ].join("\n");
+  // 第九轮：带行内公式、块级公式、比气泡宽的公式和画不了的公式的回复
+  var MD_FORMULA = [
+    "可以直接算。第 $n$ 次断开后等 $d_n = \\min(2^{n-1},\\ 30)$ 秒，没到上限前，前 $k$ 次一共等",
+    "$$",
+    "T_k = \\sum_{n=1}^{k} 2^{n-1} = 2^k - 1",
+    "$$",
+    "到上限以后每次多等 30 秒，所以 $k > 5$ 时是 \\(T_k = 31 + 30(k-5)\\)。",
+    "",
+    "加上抖动，每次等待乘一个 0.8 到 1.2 之间均匀分布的系数，平均下来总时间不变：",
+    "",
+    "\\[ \\mathbb{E}\\big[\\tilde T_k\\big] = \\sum_{n=1}^{k} \\mathbb{E}\\big[d_n \\cdot U(0.8,\\ 1.2)\\big] = T_k \\cdot \\frac{0.8 + 1.2}{2} = T_k \\]",
+    "",
+    "日志里的 $PATH、「每月 $5 到 $10」这种写法不会被当成公式；写错的公式照原文显示，比如 $\\backofff(n)$。"
+  ].join("\n");
+  var MD_MSGS = [
+    { k: "day", text: "今天 16:20" },
+    { k: "me", text: "重连退避现在是怎么算的？顺便把 Duration 的文档发我 https://pkg.go.dev/time" },
+    { k: "tool", verb: "读取", arg: "internal/relay/conn.go", detail: [["输出", "读了 214 行"]] },
+    { k: "ai", text: MD_REPLY },
+    { k: "me", text: "连着失败 k 次一共要等多久？给个公式" },
+    { k: "ai", text: MD_FORMULA },
+    { k: "me", text: "把退避上限改成 60 秒" },
+    { k: "tool", verb: "编辑", arg: "internal/relay/conn.go", patch: [{ os: 41, ns: 41, lines: ["\td := time.Second << n", "-\tif d > 30*time.Second || d <= 0 {", "+\tif d > 60*time.Second || d <= 0 {"] }] },
+    { k: "ai", text: "改好了，`backoff` 的上限从 30 秒改成 60 秒，溢出时也取 60 秒。" },
+    { k: "me", text: "跑一下测试" },
+    { k: "tool", verb: "运行", arg: "go test ./internal/relay/...", detail: [["输出", "ok  \tclauderc/internal/relay\t0.41s"]] },
+    { k: "ai", text: "`go test ./internal/relay/...` 通过了。" }
+  ];
   function sess(id, title, dir, state, time, extra) {
     return Object.assign({ id: id, title: title, dir: dir, state: state, time: time, model: "Opus 5.5", mode: "默认询问", msgs: null, pending: null, l3: "", timers: null, queue: [] }, extra || {});
   }
@@ -1960,6 +2300,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       m1: [
         { id: "default", name: "默认", def: "默认", host: "", rename: true, create: true, folded: false, models: M_ROUTER, sessions: [
           sess("s1", "clauderc 协议", "clauderc-app", "need", "2 分钟前", { pending: "permission", ctx: 25, l3: "go vet ./... && go test ./internal/protocol/...", msgs: clone(PROTO_MSGS), branch: "dev" }),
+          // 第八轮：回复里有标题、列表、代码块、表格和链接
+          sess("s20", "退避说明", "relay-svc", "idle", "1 分钟前", { ctx: 14, msgs: clone(MD_MSGS), branch: "main" }),
           sess("s2", "修复重连", "relay-svc", "work", "刚刚", Object.assign({ ctx: 62, turnAt: Date.now() - 95000, branch: "fix-reconnect" }, relayAgents())),
           // 第五轮：在 worktree 里的会话，归在原目录下，行里带 worktree 标记和它的分支
           sess("s12", "工具视图重写", "clauderc-app", "idle", "6 分钟前", { ctx: 47, branch: "worktree-tools-view", wt: "tools-view" }),
@@ -3383,8 +3725,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   function itemEl(it) {
     var n;
     if (it.k === "day") n = make('<span class="day">' + esc(it.text) + "</span>");
-    else if (it.k === "me") n = make('<div class="bubble me' + (it.sending ? " sending" : "") + (it.queued ? " queued" : "") + '">' + esc(it.text) + "</div>");
-    else if (it.k === "ai") n = make('<div class="bubble ai">' + (fmt(typeText(it)) || "&#8203;") + "</div>");
+    else if (it.k === "me") n = make(meRowHtml(it));
+    else if (it.k === "ai") n = make('<div class="bubble ai md' + (it.typing ? " typing" : "") + '">' + aiHtml(it) + "</div>");
     else if (it.k === "cap") n = make('<span class="cap-c">' + (it.spin ? '<span class="spin" style="width:12px;height:12px"></span>' : "") + esc(it.text) + "</span>");
     else if (it.k === "capr") n = make('<span class="cap-r">' + esc(it.text) + "</span>");
     else if (it.k === "peer") n = make('<div class="peer"><span class="peer-t">' + esc(it.title) + '</span><div class="peer-b">' + esc(it.text) + "</div></div>");
@@ -3396,6 +3738,12 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     return n;
   }
   function updateItem(it) { var old = it.el; if (old && old.parentNode) old.replaceWith(itemEl(it)); }
+  // 第九轮：你发的消息占一整行，左滑露出回溯钮；排队和发送中的消息没有
+  function meRowHtml(it) {
+    var b = '<div class="bubble me' + (it.sending ? " sending" : "") + (it.queued ? " queued" : "") + '">' + meHtml(it.text) + "</div>";
+    var act = it.queued || it.sending ? "" : '<button type="button" class="rw-act" data-act="rw-open" tabindex="-1" aria-label="回溯"><span class="ms">history</span></button>';
+    return '<div class="mrow">' + b + act + "</div>";
+  }
   // 工具跑完：现状直接换掉；待选「转圈淡出收起」让转圈 durS 淡出并收起它占的宽度，再换成结果
   function finishTool(tool, detail) {
     tool.spin = false;
@@ -3468,21 +3816,23 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   // 速度 = max(40 字/秒, 剩余字数 ÷ 0.8 秒)，落后越多追得越快，快追上时放慢到打字的速度。
   // 半截回复（chat.state 的 partial）也走这里：目标随推送变长，整条回复到了就把目标换成它，接着打完
   var TYPE_MIN = 40, TYPE_CATCH = 0.8;
-  function typeText(it) { return it.typing ? it.text.slice(0, Math.floor(it.shown)) : it.text; }
+  // 第八轮：字数按分块后显示出来的字算，Markdown 记号不占时间
   function typeOn(it, page) {
     if (it.typer) return;
     var lastT = performance.now();
     function step(now) {
-      var dt = Math.min(0.1, (now - lastT) / 1000) / slowK(), left = it.text.length - it.shown;
+      var total = mdLen(it.text), dt = Math.min(0.1, (now - lastT) / 1000) / slowK(), left = total - it.shown;
       lastT = now;
       if (left > 0) {
         var stick = page.scroll.scrollTop + page.scroll.clientHeight >= page.scroll.scrollHeight - 48;
-        it.shown = Math.min(it.text.length, it.shown + Math.max(TYPE_MIN * dt, left * dt / TYPE_CATCH));
-        if (it.el) it.el.innerHTML = fmt(typeText(it));
+        it.shown = Math.min(total, it.shown + Math.max(TYPE_MIN * dt, left * dt / TYPE_CATCH));
+        if (it.el) it.el.innerHTML = aiHtml(it);
         if (stick) page.scroll.scrollTop = page.scroll.scrollHeight;
       } else if (!it.live) {
         it.typer = 0;
         it.typing = false;
+        // 打完才能长按选字，代码块的复制入口也是这时才出来
+        if (it.el) { it.el.classList.remove("typing"); it.el.innerHTML = aiHtml(it); }
         return;
       }
       it.typer = requestAnimationFrame(step);
@@ -4945,7 +5295,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   function bindPick() {
     renderDirDesk();
     bindDirDesk();
-    bindR7();
+    bindR9();
   }
 
   // ---------- 第六轮：git 入口、Fork、Worktree ----------
@@ -5117,59 +5467,380 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     }
   });
 
-  // ---------- 第七轮：侧栏 ----------
+  // ---------- 第八轮：链接、代码块复制、长按选字 ----------
   function toSessions() {
     goHome();
     S.machineId = "m1";
     renderSessions();
     if (S.tab !== "sessions") switchTab("sessions", false);
   }
-  // 打开新建页（已经开着就用它），等转场走完再 then
-  function inCreate(then) {
-    var p = top();
-    if (p.route.name === "create") { then(p); return; }
-    toSessions();
-    push({ name: "create" });
-    setTimeout(function () { var q = top(); if (q.route.name === "create") then(q); }, dur("durM") + 80);
+  function hostOf(u) { try { return new URL(u).host || u; } catch (err) { return u; } }
+  // 复制：写进剪贴板，再弹 APP 自己的提示条，各个系统版本都弹；代码块不传 tip，只靠按钮变对勾
+  var lastCopy = "";
+  function copyText(s, tip) {
+    try { if (navigator.clipboard) navigator.clipboard.writeText(s).catch(noop); } catch (err) { /* 浏览器不让写就算了 */ }
+    lastCopy = s;
+    if (tip) toast(tip);
+    note("复制了 " + s.length + " 个字" + (tip ? " · 提示条「" + tip + "」" : ""));
   }
-  function typeIn(input, v) { input.value = v; input.dispatchEvent(new Event("input", { bubbles: true })); }
-  var R7 = {
-    open: function () { inCreate(function () {}); },
-    custom: function () { inCreate(function (p) { pickPreset(p, p.preset === "custom" ? "official" : "custom"); }); },
-    models: function () { inCreate(function (p) { setModelsOpen(p, !$(".mfield", p.el).classList.contains("open")); }); },
-    preset: function () {
-      inCreate(function (p) {
-        pickPreset(p, "anyrouter");
-        setModelsOpen(p, true);
-        setTimeout(function () { typeIn($('.m-in[data-tier="haiku"]', p.el), "hy-4-flash[1M]"); }, dur("durM"));
-        setTimeout(function () { if (top() === p) submitCreate($('[data-act="submit"]', p.el)); }, dur("durM") + 600);
+  // 点链接：小菜单贴在点到的那一段链接下面，放不下就翻到上面；第一行是完整网址
+  function openLink(url, anchor, at) {
+    var ok = /^(https?:|mailto:)/i.test(url), mail = /^mailto:/i.test(url);
+    var acts = (ok ? mi({ act: "lk-open", icon: mail ? "mail" : "open_in_browser", text: mail ? "写邮件" : "在浏览器中打开", v: url }) : "") + mi({ act: "lk-copy", icon: "content_copy", text: "复制链接", v: url });
+    hideSelTb(true);
+    var o = openOverlay('<div class="pmenu lkm" role="menu"><p class="lk-url">' + esc(url) + "</p>" + acts + "</div>", "menu");
+    var rs = Array.prototype.slice.call(anchor.getClientRects()), r = rs[0];
+    if (at) rs.forEach(function (x) { if (at.y >= x.top - 2 && at.y <= x.bottom + 2) r = x; });
+    var box = o.el.offsetParent.getBoundingClientRect(), w = o.el.offsetWidth, h = o.el.offsetHeight;
+    var left = Math.max(12, Math.min(box.width - w - 12, r.left - box.left)), top = r.bottom - box.top + 6, up = top + h > box.height - 16;
+    if (up) top = r.top - box.top - h - 6;
+    o.el.style.left = left + "px";
+    o.el.style.top = top + "px";
+    o.el.style.transformOrigin = (up ? "bottom " : "top ") + Math.round(r.left - box.left - left + 12) + "px";
+  }
+  // 复制代码块：复制图标缩小淡出，对勾从左往右一笔画出来、轻轻弹一下；1.5 秒后对勾缩小淡出，复制图标放大回来。
+  // 再点一次就从头再来
+  function copyCode(cb) {
+    copyText(cb.dataset.code);
+    var btn = $(".cb-copy", cb);
+    if (!btn) return;
+    var a = $(".cb-i1", btn), c = $(".cb-i2", btn), path = $("path", c), len = path.getTotalLength(), s = dur("durS"), m = dur("durM");
+    [a, c, path].forEach(function (n) { n.getAnimations().forEach(function (x) { x.cancel(); }); });
+    clearTimeout(btn._t);
+    path.style.strokeDasharray = len;
+    btn.classList.add("done");
+    a.animate([{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(0.4)" }], { duration: s, easing: ez("emphIn"), fill: "forwards" });
+    path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: m, delay: s * 0.6, easing: ez("emph"), fill: "both" });
+    c.animate([{ opacity: 0, transform: "scale(0.7)" }, { opacity: 1, transform: "scale(1)" }], { duration: m, delay: s * 0.6, easing: ez("spring"), fill: "both" });
+    note("复制图标缩小淡出，对勾一笔画出来", m, ez("emph"));
+    btn._t = setTimeout(function () {
+      btn.classList.remove("done");
+      c.animate([{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(0.6)" }], { duration: s, easing: ez("emphIn"), fill: "forwards" });
+      a.animate([{ opacity: 0, transform: "scale(0.6)" }, { opacity: 1, transform: "scale(1)" }], { duration: m, delay: s * 0.5, easing: ez("emph"), fill: "both" });
+      note("对勾淡出，复制图标放大回来", m, ez("emph"));
+    }, 1500 * slowK());
+  }
+  Object.assign(ACT, {
+    link: function (t, e) { openLink(t.dataset.v, t, e ? { x: e.clientX, y: e.clientY } : null); },
+    "lk-open": function (t) { var u = t.dataset.v; closeOverlay(); toast(/^mailto:/i.test(u) ? "已交给邮件 App" : "已在浏览器中打开 " + hostOf(u)); },
+    "lk-copy": function (t) { closeOverlay(); copyText(t.dataset.v, "已复制链接"); },
+    "cb-copy": function (t) { copyCode(t.closest(".cb")); }
+  });
+
+  // 长按选字：按住 480 毫秒不动，选中手指下的那个词，弹出系统的选字工具栏；松手后不再算点击
+  var LP = null, lpUntil = 0, selTb = null;
+  function wordRangeAt(x, y, b) {
+    var c = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
+    if (!c || c.startContainer.nodeType !== 3 || !b.contains(c.startContainer) || c.startContainer.parentElement.closest(".cb-h")) return null;
+    var node = c.startContainer, s = node.data, at = Math.min(c.startOffset, s.length - 1), from = at, to = at + 1;
+    if (window.Intl && Intl.Segmenter) {
+      Array.prototype.some.call(new Intl.Segmenter("zh", { granularity: "word" }).segment(s), function (g) {
+        if (at >= g.index && at < g.index + g.segment.length) { from = g.index; to = g.index + g.segment.length; return true; }
+        return false;
+      });
+    }
+    var r = document.createRange();
+    r.setStart(node, from);
+    r.setEnd(node, to);
+    return r;
+  }
+  function selectWord(b, x, y) {
+    if (b.classList.contains("typing")) { note("逐字出现中，长按不选字"); return false; }
+    var r = wordRangeAt(x, y, b);
+    if (!r) return false;
+    var sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+    showSelTb();
+    note("长按选中「" + r.toString() + "」，弹出系统选字工具栏");
+    return true;
+  }
+  function showSelTb() {
+    var sel = getSelection();
+    if (!sel.rangeCount || sel.isCollapsed) { hideSelTb(); return; }
+    if (!selTb) {
+      selTb = make('<div class="seltb" role="toolbar" aria-label="选字"><button type="button" data-sel="copy">复制</button><button type="button" data-sel="all">全选</button><button type="button" data-sel="share">分享</button></div>');
+      app.appendChild(selTb);
+      // 点工具栏不能把选区点没
+      selTb.addEventListener("pointerdown", function (e) { e.preventDefault(); e.stopPropagation(); });
+      selTb.addEventListener("click", function (e) {
+        var k = e.target.closest("[data-sel]");
+        if (!k) return;
+        var s = getSelection();
+        if (k.dataset.sel === "copy") { copyText(selText(s), "已复制"); hideSelTb(true); }
+        else if (k.dataset.sel === "share") { toast("系统分享面板"); hideSelTb(true); }
+        else {
+          var b = s.anchorNode && (s.anchorNode.nodeType === 3 ? s.anchorNode.parentElement : s.anchorNode).closest(".bubble");
+          if (b) { var r = document.createRange(); r.selectNodeContents(b); s.removeAllRanges(); s.addRange(r); showSelTb(); }
+        }
+      });
+    }
+    var r = sel.getRangeAt(0).getBoundingClientRect(), box = app.getBoundingClientRect();
+    selTb.hidden = false;
+    var w = selTb.offsetWidth, h = selTb.offsetHeight, top = r.top - box.top - h - 12;
+    if (top < 44) top = r.bottom - box.top + 12;
+    selTb.style.left = Math.max(8, Math.min(box.width - w - 8, r.left - box.left + r.width / 2 - w / 2)) + "px";
+    selTb.style.top = top + "px";
+  }
+  // 第九轮：选中的字里有公式时，公式换成写的时候的 LaTeX；选区只盖住半个公式也按整个算
+  function selText(sel) {
+    var r = sel.getRangeAt(0).cloneRange();
+    function whole(n) { var e = n && (n.nodeType === 3 ? n.parentElement : n); return e && e.closest(".mx, .mxi"); }
+    var a = whole(r.startContainer), z = whole(r.endContainer);
+    if (a) r.setStartBefore(a);
+    if (z) r.setEndAfter(z);
+    var box = document.createElement("div");
+    box.appendChild(r.cloneContents());
+    Array.prototype.forEach.call(box.querySelectorAll(".mx, .mxi"), function (m) { m.replaceWith(document.createTextNode(m.classList.contains("mx") ? "\n" + m.dataset.src + "\n" : m.dataset.src)); });
+    Array.prototype.forEach.call(box.querySelectorAll("br"), function (b) { b.replaceWith("\n"); });
+    Array.prototype.forEach.call(box.querySelectorAll("p, li, h2, h3, h4, blockquote, pre"), function (b) { b.append("\n"); });
+    return box.textContent.replace(/\n{3,}/g, "\n\n").trim();
+  }
+  function hideSelTb(clear) {
+    if (selTb) selTb.hidden = true;
+    if (clear) getSelection().removeAllRanges();
+  }
+  app.addEventListener("pointerdown", function (e) {
+    if (e.target.closest(".seltb")) return;
+    if (selTb && !selTb.hidden) hideSelTb(true);
+    if (e.button !== 0) return;
+    var b = e.target.closest(".bubble.me, .bubble.ai");
+    if (!b || e.target.closest(".cb-copy")) return;
+    LP = { id: e.pointerId, x: e.clientX, y: e.clientY, timer: 0 };
+    LP.timer = setTimeout(function () { var p = LP; LP = null; if (p && selectWord(b, p.x, p.y)) lpUntil = Date.now() + 700; }, 480);
+  }, true);
+  window.addEventListener("pointermove", function (e) {
+    if (LP && e.pointerId === LP.id && Math.hypot(e.clientX - LP.x, e.clientY - LP.y) > 8) { clearTimeout(LP.timer); LP = null; }
+  });
+  window.addEventListener("pointerup", function (e) {
+    if (LP && e.pointerId === LP.id) { clearTimeout(LP.timer); LP = null; }
+    // 拖着选了一段字，松手后同样弹工具栏
+    setTimeout(function () {
+      var s = getSelection(), n = s.anchorNode;
+      if (!s.isCollapsed && n && app.contains(n) && (n.nodeType === 3 ? n.parentElement : n).closest(".bubble")) showSelTb();
+    }, 0);
+  });
+  // 长按松手不再触发链接、复制这些点击
+  app.addEventListener("click", function (e) { if (Date.now() < lpUntil) { e.stopPropagation(); e.preventDefault(); } }, true);
+  app.addEventListener("scroll", function () { if (selTb && !selTb.hidden) showSelTb(); }, true);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") hideSelTb(true); });
+
+  // ---------- 第九轮：用户消息左滑回溯 ----------
+  var RW_W = 60, RW = null, rwOpen = null, rwEndAt = 0, rwFail = false;
+  function rwSet(row, x, anim) {
+    row.classList.toggle("sw-anim", !!anim);
+    row.style.setProperty("--sw", x + "px");
+  }
+  function rwClose() {
+    var r = rwOpen;
+    rwOpen = null;
+    if (r && r.isConnected) { rwSet(r, 0, true); note("左滑收回", dur("durM"), ez("emph")); }
+  }
+  // 会话在工作或等你确认时不能回溯，行不跟手
+  function rwBusy(row) { var p = pageOf(row); return !p || !p.s || p.s.state === "work" || p.s.state === "need"; }
+  app.addEventListener("pointerdown", function (e) {
+    if (e.button !== 0 || G) return;
+    var row = e.target.closest(".mrow");
+    if (!row || !row.querySelector(".rw-act") || e.target.closest(".rw-act")) return;
+    RW = { id: e.pointerId, row: row, x0: e.clientX, y0: e.clientY, base: row === rwOpen ? -RW_W : 0, on: false, x: 0 };
+  });
+  window.addEventListener("pointermove", function (e) {
+    if (!RW || e.pointerId !== RW.id) return;
+    var dx = e.clientX - RW.x0, dy = e.clientY - RW.y0;
+    if (!RW.on) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { RW = null; return; }
+      if (Math.abs(dx) < 10) return;
+      if (rwBusy(RW.row)) { note("会话在工作或等你确认，不能回溯"); RW = null; return; }
+      RW.on = true;
+      cancelPress();
+      // 横着拖就不是长按选字了
+      if (LP) { clearTimeout(LP.timer); LP = null; }
+      if (rwOpen && rwOpen !== RW.row) rwClose();
+    }
+    var x = Math.min(0, RW.base + dx);
+    if (x < -RW_W) x = -RW_W + (x + RW_W) / 3;
+    RW.x = x;
+    rwSet(RW.row, x, false);
+  });
+  function rwEnd(e) {
+    if (!RW || e.pointerId !== RW.id) return;
+    var g = RW;
+    RW = null;
+    if (!g.on) return;
+    swallowUntil = rwEndAt = Date.now() + 400;
+    var open = g.x < -RW_W / 2;
+    rwSet(g.row, open ? -RW_W : 0, true);
+    rwOpen = open ? g.row : null;
+    note(open ? "左滑松手：停在打开的位置" : "左滑松手：弹回", dur("durM"), ez("emph"));
+  }
+  window.addEventListener("pointerup", rwEnd);
+  window.addEventListener("pointercancel", rwEnd);
+  app.addEventListener("click", function (e) {
+    if (rwOpen && !rwOpen.isConnected) rwOpen = null;
+    if (!rwOpen || e.target.closest(".rw-act") || Date.now() < rwEndAt) return;
+    rwClose();
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+  // 这条消息之后、下一条消息之前，改过哪些文件
+  function rwEdits(s, it) {
+    var i = s.msgs.indexOf(it), files = [];
+    for (var j = i + 1; j < s.msgs.length && s.msgs[j].k !== "me"; j++) {
+      var m = s.msgs[j];
+      if (m.k === "tool" && (m.patch || m.write)) {
+        var p = 0, d = 0;
+        (m.patch || []).forEach(function (h) { h.lines.forEach(function (l) { if (l.charAt(0) === "+") p++; else if (l.charAt(0) === "-") d++; }); });
+        if (m.write) p += m.write.length;
+        files.push(baseName(m.arg) + " +" + p + " −" + d);
+      }
+    }
+    return files;
+  }
+  function rwSheet(s, it) {
+    var files = rwEdits(s, it), f = '<span class="rw-files">' + esc(files.join("，")) + "</span>";
+    var opts = files.length ? [
+      mi({ act: "rw-pick", v: "both", html: "<span>对话和代码都回去</span><small>" + f + " 改回去</small>", radio: true, tick: true }),
+      mi({ act: "rw-pick", v: "conv", html: "<span>只回对话</span><small>代码不动</small>", radio: true }),
+      mi({ act: "rw-pick", v: "code", html: "<span>只回代码</span><small>对话不动，" + f + " 改回去</small>", radio: true })
+    ].join("") + '<p class="sheet-foot">文件整份恢复，之后别人的改动也会丢；Bash 改的文件不恢复</p>' : "";
+    var o = openOverlay(sheet("<h2>回溯到这条消息之前</h2><p>" + (files.length ? "选一种回去的方式。" : "这一轮没改文件，只回对话。") + "对话回去后，这条消息填回输入框。</p>",
+      '<div class="rw-quote">' + esc(it.text) + "</div>" + opts +
+      '<div class="btns"><button type="button" class="tbtn quiet" data-act="dlg-cancel">取消</button><button type="button" class="tbtn" data-act="rw-ok">回溯</button></div>'));
+    o.page = top();
+    o.rw = it;
+  }
+  function rwRun(p, it, mode) {
+    var s = p.s, k = slowK(), cap = { k: "cap", spin: true, text: "正在回溯…" };
+    addMsg(s, cap);
+    p.scroll.scrollTop = p.scroll.scrollHeight;
+    note("目标机敲 /rewind，核对光标那一行，选好方式再回车");
+    setTimeout(function () {
+      removeMsg(s, cap);
+      if (rwFail) {
+        rwFail = false;
+        toast("没能回溯：Claude Code 里对不上这条消息，已退出面板");
+        push({ name: "term", id: s.id });
+        return;
+      }
+      if (mode === "code") { toast("代码已回到这条消息之前"); return; }
+      // 这条和之后的消息收起；收完原文填回输入框
+      var gone = s.msgs.slice(s.msgs.indexOf(it)), d = dur("durM");
+      gone.forEach(function (m) {
+        var el = m.el;
+        if (!el || !el.isConnected) return;
+        var cs = getComputedStyle(el);
+        el.style.overflow = "hidden";
+        el.animate([{ height: el.offsetHeight + "px", marginTop: cs.marginTop, opacity: 1 }, { height: "0px", marginTop: "-8px", opacity: 0 }], { duration: d, easing: ez("emph"), fill: "forwards" });
+      });
+      note("回溯完成：这条和之后的消息收起", d, ez("emph"));
+      setTimeout(function () {
+        gone.forEach(function (m) { removeMsg(s, m); });
+        p.ta.value = it.text;
+        autosize(p.ta);
+        syncSend(p);
+        p.ta.animate([{ color: "transparent" }, { color: getComputedStyle(p.ta).color }], { duration: dur("durM"), easing: ez("emph") });
+        note("原文填回输入框", dur("durM"), ez("emph"));
+      }, d);
+    }, 1400 * k);
+  }
+  Object.assign(ACT, {
+    "rw-open": function (t) {
+      var row = t.closest(".mrow"), p = pageOf(row), it = p && p.s.msgs.filter(function (m) { return m.el === row; })[0];
+      if (!it) return;
+      rwSheet(p.s, it);
+    },
+    "rw-pick": function (t) {
+      $$('[data-act="rw-pick"]', ov.el).forEach(function (b) {
+        var on = b === t;
+        b.setAttribute("aria-checked", String(on));
+        var tick = b.querySelector(".tick");
+        if (on && !tick) b.insertAdjacentHTML("beforeend", '<span class="ms tick">check</span>');
+        if (!on && tick) tick.remove();
       });
     },
-    half: function () {
-      inCreate(function (p) {
-        pickPreset(p, "custom");
-        typeIn(p.urlIn, "https://anyrouter.example");
-        typeIn(p.keyIn, "");
-        setTimeout(function () { if (top() === p) submitCreate($('[data-act="submit"]', p.el)); }, dur("durM") + 300);
+    "rw-ok": function () {
+      var o = ov, sel = $('[data-act="rw-pick"][aria-checked="true"]', o.el), mode = sel ? sel.dataset.v : "conv";
+      closeOverlay();
+      rwClose();
+      rwRun(o.page, o.rw, mode);
+    }
+  });
+  // 侧栏：先打开示例会话，再找「把退避上限改成 60 秒」那一行
+  function rwRow(p) { var it = p.s.msgs.filter(function (m) { return m.k === "me" && m.text === "把退避上限改成 60 秒"; })[0]; return it && it.el; }
+  function rwSlide(p, then) {
+    var row = rwRow(p);
+    if (!row) return;
+    row.scrollIntoView({ block: "center" });
+    if (rwBusy(row)) { note("会话在工作或等你确认，不能回溯"); return; }
+    if (rwOpen && rwOpen !== row) rwClose();
+    rwSet(row, -RW_W, true);
+    rwOpen = row;
+    rwEndAt = Date.now() + 400;
+    note("左滑：停在打开的位置", dur("durM"), ez("emph"));
+    if (then) setTimeout(function () { then(row); }, dur("durM") + 250 * slowK());
+  }
+  function rwSheetFor(p, then) { rwSlide(p, function (row) { ACT["rw-open"](row.querySelector(".rw-act")); if (then) setTimeout(then, dur("durM") + 500 * slowK()); }); }
+  function rwConfirm(mode) {
+    return function () {
+      if (!ov || !ov.rw) return;
+      var b = $('[data-act="rw-pick"][data-v="' + mode + '"]', ov.el);
+      if (b) ACT["rw-pick"](b);
+      setTimeout(function () { ACT["rw-ok"](); }, 300 * slowK());
+    };
+  }
+  var R9A = {
+    formula: function () { inMd(function (p) { var m = $(".bubble.ai .mx", p.el); if (m) m.scrollIntoView({ block: "center" }); }); },
+    ftype: function () {
+      inMd(function (p) {
+        if (p.s.state === "work") return;
+        addMsg(p.s, { k: "me", text: "重试的期望次数呢？" });
+        turn(p.s, "每次成功的概率是 $p$ 时，第一次成功前的失败次数服从几何分布：\n\n$$\nP(X = k) = (1-p)^k\\, p,\\qquad \\mathbb{E}[X] = \\frac{1-p}{p}\n$$\n\n比如 $p = 0.8$ 时平均失败 \\(0.25\\) 次，差不多一次就连上。", "go test -run TestBackoff ./internal/relay/...");
       });
     },
-    endpoint: function () {
-      inCreate(function (p) {
-        pickPreset(p, "custom");
-        typeIn(p.urlIn, "https://anyrouter.example");
-        typeIn(p.keyIn, "sk-demo-0123456789");
-        setModelsOpen(p, true);
-        typeIn($('.m-in[data-tier="main"]', p.el), "claude-opus-5-5[1M]");
-        typeIn($('.m-in[data-tier="haiku"]', p.el), "hy-4-flash[1M]");
-        setTimeout(function () { if (top() === p) submitCreate($('[data-act="submit"]', p.el)); }, dur("durM") + 600);
+    fsel: function () {
+      inMd(function (p) {
+        var b = $$(".bubble.ai.md:not(.typing)", p.el).filter(function (x) { return x.querySelector(".mxi"); })[0];
+        if (!b) return;
+        // 从第一段选到块级公式下面那一段，行内和块级公式都在里面
+        var first = b.querySelector("p"), mx = b.querySelector(".mx"), last = (mx && mx.nextElementSibling) || first;
+        first.scrollIntoView({ block: "center" });
+        var r = document.createRange();
+        r.setStart(first, 0);
+        r.setEnd(last, last.childNodes.length);
+        var sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+        showSelTb();
+        note("选中前三块；点「复制」得到的是原来的 LaTeX：" + selText(sel).slice(0, 40) + "…");
+      });
+    },
+    swipe: function () { inMd(function (p) { rwSlide(p); }); },
+    sheet: function () { inMd(function (p) { rwSheetFor(p); }); },
+    ok: function () { inMd(function (p) { rwSheetFor(p, rwConfirm("both")); }); },
+    code: function () { inMd(function (p) { rwSheetFor(p, rwConfirm("code")); }); },
+    fail: function () { inMd(function (p) { rwFail = true; rwSheetFor(p, rwConfirm("both")); }); },
+    busy: function () {
+      inMd(function (p) {
+        if (p.s.state !== "work") { addMsg(p.s, { k: "me", text: "再跑一遍全部测试" }); turn(p.s, "全部通过。", "go test ./..."); }
+        setTimeout(function () { rwSlide(p); }, 400);
       });
     }
   };
-  function bindR7() {
+  function bindR9() {
     $(".desk").addEventListener("click", function (e) {
-      var b = e.target.closest("[data-r7]");
-      if (b) R7[b.dataset.r7]();
+      var b = e.target.closest("[data-r9]");
+      if (b) R9A[b.dataset.r9]();
     });
+  }
+
+  // ---------- 第八轮：侧栏 ----------
+  // 打开示例会话（已经开着就用它），等转场走完再 then
+  function inMd(then) {
+    var p = top();
+    if (p.route.name === "chat" && p.route.id === "s20") { then(p); return; }
+    toSessions();
+    push({ name: "chat", id: "s20" });
+    setTimeout(function () { var q = top(); if (q.route.name === "chat" && q.route.id === "s20") then(q); }, dur("durM") + 80);
   }
 
   // ---------- 主题 ----------
@@ -5221,6 +5892,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     ids: function () { return allSessions().map(function (x) { return x.id; }); },
     dirGit: function () { return JSON.parse(JSON.stringify(S.dirGit)); },
     panels: function () { return allCommands().filter(function (c) { return c[2] === "panel"; }).map(function (c) { return c[0]; }); },
+    copied: function () { return lastCopy; },
     back: back
   };
 })();

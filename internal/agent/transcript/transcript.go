@@ -64,6 +64,16 @@ type Transcript struct {
 	unpaired []unpairedNotice
 	// line counts the lines fed so far.
 	line int
+	// parents maps the uuid of each record seen to its parent's, leaf is
+	// the latest record's, and prompts marks the user's messages among
+	// them; see branch.
+	parents map[string]string
+	prompts map[string]bool
+	leaf    string
+	// src holds, for each item, the uuid of the record that added it, and
+	// cur the uuid of the record being fed.
+	src  []string
+	cur  string
 	info Info
 	// agents follows the subagents of the Agent calls.
 	agents agentLog
@@ -99,7 +109,7 @@ func Parse(r io.Reader) (*Transcript, error) {
 }
 
 func newTranscript() *Transcript {
-	return &Transcript{tools: map[string]int{}, command: -1, lastTool: -1}
+	return &Transcript{tools: map[string]int{}, command: -1, lastTool: -1, parents: map[string]string{}, prompts: map[string]bool{}}
 }
 
 // Items returns all items, oldest first.
@@ -109,12 +119,19 @@ func (t *Transcript) Items() []Item {
 
 // record is the part of a transcript line this package reads.
 type record struct {
-	Type      string          `json:"type"`
-	Subtype   string          `json:"subtype"`
-	IsMeta    bool            `json:"isMeta"`
-	Message   *message        `json:"message"`
-	Content   json.RawMessage `json:"content"`
-	Operation string          `json:"operation"`
+	Type string `json:"type"`
+	// UUID and ParentUUID place the record in the conversation tree; a
+	// compact boundary has no parent but names the record it follows in
+	// LogicalParentUUID. Sidechain records belong to a subagent.
+	UUID              string          `json:"uuid"`
+	ParentUUID        string          `json:"parentUuid"`
+	LogicalParentUUID string          `json:"logicalParentUuid"`
+	IsSidechain       bool            `json:"isSidechain"`
+	Subtype           string          `json:"subtype"`
+	IsMeta            bool            `json:"isMeta"`
+	Message           *message        `json:"message"`
+	Content           json.RawMessage `json:"content"`
+	Operation         string          `json:"operation"`
 	// Reason is why a queue-operation removed a message.
 	Reason string `json:"reason"`
 	// IsCompactSummary marks the record Claude Code writes in place of
@@ -194,7 +211,14 @@ func (t *Transcript) feed(line []byte) []int {
 	if json.Unmarshal(line, &r) != nil {
 		return nil
 	}
-	changed := t.record(&r)
+	changed := t.branch(&r)
+	t.cur = ""
+	if !r.IsSidechain {
+		t.cur = r.UUID
+	}
+	added := t.record(&r)
+	t.stamp(added)
+	changed = append(changed, added...)
 	return append(changed, t.syncAgents(t.agents.feed(&r))...)
 }
 
@@ -335,6 +359,7 @@ func isInterruptMarker(text string) bool {
 func (t *Transcript) add(it Item) int {
 	it.Seq = int64(len(t.items) + 1)
 	t.items = append(t.items, it)
+	t.src = append(t.src, t.cur)
 	return len(t.items) - 1
 }
 

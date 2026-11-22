@@ -69,6 +69,8 @@ data class ChatItem(
     val tool: ToolCall? = null,
     /** True for a user message still waiting in Claude Code's queue. */
     val queued: Boolean? = null,
+    /** A user message's uuid in the transcript, which chat.rewind names; absent while it is queued. */
+    val uuid: String? = null,
 )
 
 @Serializable
@@ -227,6 +229,17 @@ data class ChatAutoResumeRequest(val sessionId: String, val on: Boolean, val tex
 /** The limit as it is after chat.autoResume; null when the session no longer waits on one. */
 @Serializable
 data class ChatAutoResumeResponse(val limit: Limit? = null)
+
+/** What chat.rewind takes back, as Claude Code's /rewind panel offers it. */
+object RewindRestore {
+    const val BOTH = "both"
+    const val CONVERSATION = "conversation"
+    const val CODE = "code"
+}
+
+/** chat.rewind: back to before the user message [uuid], taking back what [restore] names; the response is empty. */
+@Serializable
+data class ChatRewindRequest(val sessionId: String, val uuid: String, val restore: String)
 
 @Serializable
 data class ChatSendRequest(

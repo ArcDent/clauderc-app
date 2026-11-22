@@ -201,3 +201,15 @@ func (f *Follower) Info() Info {
 	defer f.mu.Unlock()
 	return f.t.Info()
 }
+
+// Rewind is Transcript.Rewind on the current state; it returns the items
+// it removed.
+func (f *Follower) Rewind(uuid string) []Item {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var items []Item
+	for _, i := range f.t.Rewind(uuid) {
+		items = append(items, f.t.items[i])
+	}
+	return items
+}

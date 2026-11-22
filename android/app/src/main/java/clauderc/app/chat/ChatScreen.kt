@@ -56,6 +56,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -68,6 +69,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -150,6 +152,7 @@ import clauderc.app.ui.components.MenuItem
 import clauderc.app.ui.components.SheetHead
 import clauderc.app.ui.components.SnackHost
 import clauderc.app.ui.components.SnackState
+import clauderc.app.ui.components.LocalSnack
 import clauderc.app.ui.components.Spinner
 import clauderc.app.ui.components.StatusGlyph
 import clauderc.app.ui.components.SymbolButton
@@ -163,6 +166,8 @@ import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
 import clauderc.app.ui.theme.stillLayer
+import com.hrm.latex.renderer.measure.rememberLatexMeasurer
+import com.hrm.latex.renderer.model.LatexConfig
 import java.util.Base64
 import kotlinx.coroutines.delay
 
@@ -201,6 +206,8 @@ class ChatActions(
     val onAutoResume: (Boolean) -> Unit = {},
     /** The text sent once the usage limit is lifted was edited. */
     val onResumeText: (String) -> Unit = {},
+    /** Rewinds to before the user's message, taking back one of RewindRestore. */
+    val onRewind: (ChatItem, String) -> Unit = { _, _ -> },
 )
 
 /** The sheets and dialogs the chat page opens, one at a time. */
@@ -213,7 +220,12 @@ private fun HapticFeedback.tap() = performHapticFeedback(HapticFeedbackType.Virt
 fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = remember { SnackState() }) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
+    // The KaTeX fonts load in the background; starting with the page, a formula that turns up is
+    // measured in them from the first frame instead of once more when they arrive.
+    rememberLatexMeasurer(remember { LatexConfig() })
     var sheet by remember { mutableStateOf<ChatSheet?>(null) }
+    // The user's message whose rewind sheet is open.
+    var rewinding by remember { mutableStateOf<ChatItem?>(null) }
     var viewing by remember { mutableStateOf<Viewing?>(null) }
     val openImage: OpenImage = { img, from ->
         viewing = Viewing(img, from)
@@ -309,6 +321,8 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
                             Modifier.fillMaxSize().then(if (glass != null) Modifier.hazeSource(glass) else Modifier),
                             padTop = with(density) { barHeight.toDp() },
                             padBottom = with(density) { dockHeight.toDp() },
+                            snack = snack,
+                            onRewind = { rewinding = it },
                         )
                         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().onSizeChanged { dockHeight = it.height }) {
                             CompositionLocalProvider(LocalGlassSource provides glass) { dock() }
@@ -322,7 +336,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
                 bar()
                 LoadingCover(state.loading, LoadingArt.Skeleton, Modifier.weight(1f)) {
                     Column(Modifier.fillMaxSize()) {
-                        MessageList(state, actions, openImage, Modifier.weight(1f))
+                        MessageList(state, actions, openImage, Modifier.weight(1f), snack = snack, onRewind = { rewinding = it })
                         dock()
                     }
                 }
@@ -334,6 +348,13 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
         }
     }
 
+    rewinding?.let { item ->
+        val files = remember(item, state.items) { turnFiles(state.items, item) }
+        RewindSheet(item, files, onDismiss = { rewinding = null }) { mode ->
+            rewinding = null
+            actions.onRewind(item, mode)
+        }
+    }
     when (sheet) {
         ChatSheet.Attach -> ClaudercSheet(onDismiss = { sheet = null }) {
             SheetHead("添加图片", "单张不超过 10 MB，压缩后合计不超过 ${ChatLimits.MAX_IMAGES_TOTAL_BYTES shr 20} MB")
@@ -496,7 +517,17 @@ private fun WorktreeDialog(
 }
 
 @Composable
-internal fun MessageList(state: ChatUiState, actions: ChatActions, openImage: OpenImage, modifier: Modifier, padTop: Dp = 0.dp, padBottom: Dp = 0.dp) {
+internal fun MessageList(
+    state: ChatUiState,
+    actions: ChatActions,
+    openImage: OpenImage,
+    modifier: Modifier,
+    padTop: Dp = 0.dp,
+    padBottom: Dp = 0.dp,
+    snack: SnackState? = null,
+    /** Opens the rewind sheet for a user message slid open; null where nothing rewinds. */
+    onRewind: ((ChatItem) -> Unit)? = null,
+) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val list = rememberLazyListState()
@@ -520,8 +551,12 @@ internal fun MessageList(state: ChatUiState, actions: ChatActions, openImage: Op
     }
     val note = when {
         state.waking -> "正在唤醒会话"
+        state.rewinding -> "正在回溯…"
         else -> state.notice
     }
+    // A session at work or waiting on the user does not rewind, so its messages do not slide.
+    val rewind = onRewind?.let { ask -> remember(ask) { RewindHub(ask) } }
+    rewind?.enabled = state.state == SessionState.Idle && state.pending == null && !state.rewinding
     // A new bottom item that arrives while the list sits at the bottom is pinned there in the same
     // frame. Left alone, the list keeps the item that was at the bottom in place, so the new one lands
     // below the edge and a scroll has to catch up: the jump of plans.md 1. Away from the bottom
@@ -551,7 +586,8 @@ internal fun MessageList(state: ChatUiState, actions: ChatActions, openImage: Op
         }
     }
     val tools = ToolOutputs(state.fullResults, state.fetchingResults, actions.onToolOutput, openImage, actions.onOpenAgent, live = state.state != SessionState.Stopped)
-    CompositionLocalProvider(LocalChatScroll provides scroll) {
+    // The snackbar is where a copied link says so.
+    CompositionLocalProvider(LocalChatScroll provides scroll, LocalSnack provides snack, LocalRewind provides rewind) {
     LazyColumn(
         // Bars floating over the list (清玻) take [padTop] and [padBottom] off what counts as in view.
         modifier.fillMaxWidth().stillLayer(list).testTag("chatList").onPlaced {
@@ -565,7 +601,7 @@ internal fun MessageList(state: ChatUiState, actions: ChatActions, openImage: Op
         verticalArrangement = Arrangement.spacedBy(sp.sp2, Alignment.Bottom),
     ) {
         if (note != null) {
-            item(key = "notice") { Note(note, spinner = state.waking) }
+            item(key = "notice") { Note(note, spinner = state.waking || state.rewinding) }
         }
         // contentType lets the list reuse a bubble's composition for the next bubble of the same kind.
         // No placement animation: with a reply growing in, the items above would trail behind its
@@ -720,9 +756,12 @@ private fun AssistantItem(text: String, typed: Boolean = false) {
 @Composable
 private fun UserBubble(item: ChatItem) {
     val images = item.images.orEmpty()
-    UserBubbleLayout(item.text.orEmpty(), images.size, faded = false, queued = item.queued == true) { i ->
-        val data = images[i].data
-        ChatPicture(rememberChatImage(data) { Base64.getDecoder().decode(data) })
+    // The whole row slides left to lay bare the rewind button (ChatRewind.kt).
+    RewindRow(item) { slid ->
+        UserBubbleLayout(item.text.orEmpty(), images.size, faded = false, queued = item.queued == true, modifier = slid) { i ->
+            val data = images[i].data
+            ChatPicture(rememberChatImage(data) { Base64.getDecoder().decode(data) })
+        }
     }
 }
 
@@ -739,23 +778,21 @@ private fun OutgoingBubble(out: Outgoing) {
 }
 
 @Composable
-private fun UserBubbleLayout(text: String, pictures: Int, faded: Boolean, queued: Boolean = false, picture: @Composable (Int) -> Unit) {
+private fun UserBubbleLayout(text: String, pictures: Int, faded: Boolean, queued: Boolean = false, modifier: Modifier = Modifier, picture: @Composable (Int) -> Unit) {
     val c = Clauderc.colors
     // 贴纸 speaks in its accent; the other two in black on white.
     val sticker = Clauderc.style == UiStyle.Sticker
-    Box(Modifier.fillMaxWidth().padding(top = Clauderc.spacing.sp2).alpha(if (faded) 0.5f else 1f), contentAlignment = Alignment.CenterEnd) {
+    Box(modifier.fillMaxWidth().padding(top = Clauderc.spacing.sp2).alpha(if (faded) 0.5f else 1f), contentAlignment = Alignment.CenterEnd) {
         Column(Modifier.fillMaxWidth(0.82f), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (pictures > 0) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { repeat(pictures) { picture(it) } }
             }
             if (text.isNotEmpty()) {
-                Text(
-                    text,
-                    modifier = Modifier.bubble(mine = true).padding(horizontal = 16.dp, vertical = 10.dp),
-                    color = if (sticker) c.onAccent else c.bg,
-                    fontSize = 15.sp,
-                    lineHeight = 1.55.em,
-                )
+                // Its links show and open as a reply's do; nothing else in it is read as Markdown.
+                val runs = remember(text) { linkRuns(text) }
+                BubbleSelection(enabled = true, mine = true) {
+                    RunsText(runs, Int.MAX_VALUE, if (sticker) c.onAccent else c.bg, Modifier.bubble(mine = true).padding(horizontal = 16.dp, vertical = 10.dp))
+                }
             }
             if (queued) {
                 Text("排队中", Modifier.padding(end = Clauderc.spacing.sp2), fontSize = Clauderc.fontSizes.caption, color = c.fg3)
@@ -793,31 +830,35 @@ private fun ChatPicture(bitmap: ImageBitmap?) {
 }
 
 /**
- * A reply's bubble. One that came in while the page is open, [typed], types out its formatted text from
- * the first character; any reply whose text grows, as the screen's preview does, types out what is new.
+ * A reply's bubble, its text cut into blocks (ReplyBlocks). One that came in while the page is open,
+ * [typed], types out from the first character; any reply whose text grows, as the screen's preview
+ * does, types out what is new. It is as wide as its widest line, up to 82%; code and tables wider than
+ * that scroll inside it.
  */
 @Composable
 private fun AssistantBubble(text: String, typed: Boolean = false) {
-    val c = Clauderc.colors
     // Parsed once per text, not on every recomposition as the reply scrolls in.
-    val rich = remember(text, c.fg) { richText(text, c.fg) }
+    val blocks = remember(text) { mdBlocks(text) }
+    val total = remember(blocks) { blocks.sumOf { it.shownLength() } }
     // Kept across text changes: the written reply carries on from where its screen preview got to.
-    val typer = remember { Typer(if (typed) 0f else rich.length.toFloat()) }
-    val target by rememberUpdatedState(rich.length)
-    if (typer.shown < rich.length) LaunchedEffect(typer) { typer.typeOut { target } }
-    val n = typer.shown.toInt()
+    val typer = remember { Typer(if (typed) 0f else total.toFloat()) }
+    val target by rememberUpdatedState(total)
+    if (typer.shown < total) LaunchedEffect(typer) { typer.typeOut { target } }
     Box(Modifier.fillMaxWidth(0.82f)) {
-        Text(
-            if (n >= rich.length) rich else rich.subSequence(0, n),
-            modifier = Modifier.bubble(mine = false).padding(start = if (Clauderc.style == UiStyle.Grid) 14.dp else 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp).testTag("reply"),
-            color = c.fg,
-            fontSize = 15.sp,
-            lineHeight = 1.55.em,
-        )
+        // While it types out, nothing in it can be selected.
+        BubbleSelection(enabled = typer.shown >= total, mine = false) {
+            ReplyBlocks(
+                blocks,
+                typer.shown.toInt(),
+                Clauderc.colors.fg,
+                Modifier.width(IntrinsicSize.Max).bubble(mine = false)
+                    .padding(start = if (Clauderc.style == UiStyle.Grid) 14.dp else 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp).testTag("reply"),
+            )
+        }
     }
 }
 
-/** How much of a reply shows while it types out, in characters of its formatted text. */
+/** How much of a reply shows while it types out, in characters of its blocks as shown. */
 @Stable
 private class Typer(start: Float) {
     var shown by mutableFloatStateOf(start)
@@ -1080,7 +1121,8 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
     var field by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
     val text = field.text
     // A failed send hands its text back, unless something new was typed meanwhile.
-    LaunchedEffect(state.restore) { state.restore?.let { if (field.text.isBlank()) field = TextFieldValue(it.text, TextRange(it.text.length)) } }
+    // A rewind puts its message back whatever was typed: that message is what the conversation goes on from.
+    LaunchedEffect(state.restore) { state.restore?.let { if (field.text.isBlank() || it.replace) field = TextFieldValue(it.text, TextRange(it.text.length)) } }
     // With the keyboard put away there is nothing to type into, so the field lets go and its cursor stops
     // blinking: two frames a second that the phone draws slowly while it idles. A tap takes it back. Only
     // once the keyboard was up: clearing focus as the page opens would stir the input method mid-slide.
