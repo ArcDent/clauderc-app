@@ -1,0 +1,57 @@
+# Checks: the pre-commit checks from AGENTS.md, Go and Android in parallel.
+# Runs on every push to main, which is also what fills the caches: GitHub
+# only lets a tag run restore caches written on the default branch, and
+# setup-gradle only writes on the default branch. release.yml calls this
+# workflow before it publishes, so both run the same checks.
+name: 检查
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go 检查和测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt、go vet 和 go test
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::这些文件没有 gofmt：$unformatted"
+            exit 1
+          fi
+          go vet ./...
+          go test ./...
+
+  android:
+    name: Android 单元测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/android-setup
+
+      # Robolectric fetches its android-all-instrumented jar (about 160 MB)
+      # from Maven Central at test time, into ~/.m2 rather than Gradle User
+      # Home, so setup-gradle does not cover it.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ hashFiles('android/gradle/libs.versions.toml', 'android/app/src/test/resources/robolectric.properties') }}
+          restore-keys: robolectric-
+
+      - name: Android 单元测试
+        working-directory: android
+        run: ../scripts/ci-retry.sh ./gradlew testDebugUnitTest
