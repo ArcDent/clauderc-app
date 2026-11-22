@@ -1,0 +1,23 @@
+# Shared by check.yml and release.yml: JDK 21, the Android SDK packages the
+# build expects (gradle.properties turns off AGP's own SDK downloads), and
+# setup-gradle, which restores Gradle User Home from the cache that runs on
+# the default branch write. Runs on tags only read that cache.
+name: 准备 Android 构建环境
+description: 安装 JDK 21、Android SDK 平台和构建工具，恢复 Gradle 缓存
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        java-version: '21'
+
+    - name: 安装 Android SDK 平台和构建工具
+      shell: bash
+      run: |
+        sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+        yes | "$sdkmanager" --licenses >/dev/null
+        "$sdkmanager" --install 'platforms;android-37.0' 'build-tools;37.0.0' >/dev/null
+
+    - uses: gradle/actions/setup-gradle@v6

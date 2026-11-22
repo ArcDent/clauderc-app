@@ -1,9 +1,10 @@
 # Release: pushing a tag like v1.2.3 or v1.2.3-beta.1 runs the pre-commit
-# checks, then builds everything each machine needs:
+# checks (check.yml) and, in parallel, builds everything each machine needs:
 #   relay server   multi-arch image on ghcr.io, plus relay binaries
 #   target machine npm packages @arcdent/clauderc*, plus agent binaries
 #   phone          APK, signed when the signing secrets are set
-# and attaches the files to a GitHub Release.
+# and once both pass, publishes them and attaches the files to a GitHub
+# Release. Caches come from check.yml runs on main; tag runs only read them.
 #
 # Repository secrets, all optional:
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
@@ -23,8 +24,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  check:
+    name: 检查
+    uses: ./.github/workflows/check.yml
+
   build:
-    name: 检查并构建
+    name: 构建
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -63,36 +68,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '21'
+      - uses: ./.github/actions/android-setup
 
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
-
-      - name: 安装 Android SDK 平台和构建工具
-        run: |
-          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$sdkmanager" --licenses >/dev/null
-          "$sdkmanager" --install 'platforms;android-37.0' 'build-tools;37.0.0' >/dev/null
-
-      - uses: gradle/actions/setup-gradle@v6
-
-      - name: Go 检查和测试
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "::error::这些文件没有 gofmt：$unformatted"
-            exit 1
-          fi
-          go vet ./...
-          go test ./...
-
-      - name: Android 单元测试
-        working-directory: android
-        run: ./gradlew testDebugUnitTest
 
       - name: 准备 APK 签名
         id: signing
@@ -128,7 +108,7 @@ jobs:
           APK: ${{ steps.signing.outputs.apk }}
           ORG_GRADLE_PROJECT_versionName: ${{ steps.version.outputs.version }}
           ORG_GRADLE_PROJECT_versionCode: ${{ steps.version.outputs.code }}
-        run: scripts/build.sh "$VERSION"
+        run: scripts/ci-retry.sh scripts/build.sh "$VERSION"
 
       - name: 打 npm 包
         env:
@@ -147,7 +127,7 @@ jobs:
 
   image:
     name: 中转服务器镜像
-    needs: build
+    needs: [check, build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
