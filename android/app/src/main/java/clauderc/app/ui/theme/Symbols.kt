@@ -26,6 +26,8 @@ object Symbols {
     val CloudOff by lazy { symbol("cloud_off", SymbolPaths.cloudOff) }
     val Computer by lazy { symbol("computer", SymbolPaths.computer) }
     val ComputerFilled by lazy { symbol("computer_filled", SymbolPaths.computerFilled) }
+    val ContentCopy by lazy { symbol("content_copy", SymbolPaths.contentCopy) }
+    val History by lazy { symbol("history", SymbolPaths.history) }
     val Contrast by lazy { symbol("contrast", SymbolPaths.contrast) }
     val Delete by lazy { symbol("delete", SymbolPaths.delete) }
     val Description by lazy { symbol("description", SymbolPaths.description) }
@@ -44,7 +46,9 @@ object Symbols {
     val KeyboardArrowRight by lazy { symbol("keyboard_arrow_right", SymbolPaths.keyboardArrowRight) }
     val KeyboardArrowUp by lazy { symbol("keyboard_arrow_up", SymbolPaths.keyboardArrowUp) }
     val KeyboardReturn by lazy { symbol("keyboard_return", SymbolPaths.keyboardReturn) }
+    val Mail by lazy { symbol("mail", SymbolPaths.mail) }
     val MoreVert by lazy { symbol("more_vert", SymbolPaths.moreVert) }
+    val OpenInBrowser by lazy { symbol("open_in_browser", SymbolPaths.openInBrowser) }
     val Palette by lazy { symbol("palette", SymbolPaths.palette) }
     val PhotoCamera by lazy { symbol("photo_camera", SymbolPaths.photoCamera) }
     val PowerSettingsNew by lazy { symbol("power_settings_new", SymbolPaths.powerSettingsNew) }

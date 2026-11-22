@@ -95,6 +95,10 @@ const (
 	CodeGitFailed ErrorCode = "gitFailed"
 	// CodeGitCredentialsMissing: git needed interactive credentials.
 	CodeGitCredentialsMissing ErrorCode = "gitCredentialsMissing"
+	// CodeRewindFailed: chat.rewind could not match the message or the way
+	// back in Claude Code's /rewind panel, or the session was not ready for
+	// it; any panel opened was left with Esc. Message says which step.
+	CodeRewindFailed ErrorCode = "rewindFailed"
 	// CodeTimeout: the operation did not finish in time.
 	CodeTimeout ErrorCode = "timeout"
 	// CodeInternal: an unexpected failure on the receiver.

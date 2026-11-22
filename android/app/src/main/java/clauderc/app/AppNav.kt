@@ -497,6 +497,7 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
             onClearWorktreeError = vm::clearWorktreeError,
             onAutoResume = vm::setAutoResume,
             onResumeText = vm::typedResume,
+            onRewind = { item, restore -> vm.rewind(item, restore) { nav.navigateFrom(entry, TermRoute(r.machineId, r.sessionId)) } },
         ),
     )
 }

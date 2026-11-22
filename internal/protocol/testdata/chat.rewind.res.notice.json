@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-062",
+  "method": "chat.rewind",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"notice": "已经回溯，但没能清空电脑上的输入框，原消息还留在那里"}
+}

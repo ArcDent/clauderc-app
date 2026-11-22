@@ -88,10 +88,18 @@ var bodyCases = []bodyCase{
 		`{"sessionId":"a1","on":true,"text":"继续"}`},
 	{protocol.MethodChatAutoResume, "chat.autoResume", protocol.KindResponse, func() any { return &protocol.ChatAutoResumeResponse{} },
 		`{"limit":{"window":"fiveHour","text":"You've hit your 5-hour limit · resets 10:40pm (America/Denver)","resetsAt":"2026-11-19T05:40:00Z","autoResume":{"text":"继续","at":"2026-11-19T05:41:00Z"}}}`},
+	{protocol.MethodChatRewind, "chat.rewind", protocol.KindRequest, func() any { return &protocol.ChatRewindRequest{} },
+		`{"sessionId":"a1","uuid":"6cbceb2c-343c-432b-b686-a0cbb8482651","restore":"both"}`},
+	{protocol.MethodChatRewind, "chat.rewind", protocol.KindResponse, func() any { return &protocol.ChatRewindResponse{} }, `{}`},
+	{protocol.MethodChatRewind, "chat.rewind", protocol.KindResponse, func() any { return &protocol.ChatRewindResponse{} },
+		`{"notice":"已经回溯，但没能清空电脑上的输入框，原消息还留在那里"}`},
 	{protocol.EventChatItems, "chat.items", protocol.KindEvent, func() any { return &protocol.ChatItemsEvent{} },
 		`{"sessionId":"a1","items":[{"seq":54,"kind":"tool","tool":{"toolUseId":"toolu_2","toolName":"Bash","summary":"运行 touch marker.txt","input":{"command":"touch marker.txt"}}}]}`},
 	{protocol.EventChatItems, "chat.items", protocol.KindEvent, func() any { return &protocol.ChatItemsEvent{} },
 		`{"sessionId":"a1","items":[{"seq":55,"kind":"user","text":"排队的消息","queued":true}]}`},
+	{protocol.EventChatTasks, "chat.tasks", protocol.KindEvent, func() any { return &protocol.ChatTasksEvent{} },
+		`{"sessionId":"a1","tasks":[{"id":"1","subject":"读懂回溯面板的长列表","status":"completed"},{"id":"2","subject":"按位置核对光标","activeForm":"正在按位置核对光标","status":"in_progress"},{"id":"3","subject":"补长列表的测试","status":"pending"}]}`},
+	{protocol.EventChatTasks, "chat.tasks", protocol.KindEvent, func() any { return &protocol.ChatTasksEvent{} }, `{"sessionId":"a1","tasks":[]}`},
 	{protocol.EventChatPending, "chat.pending", protocol.KindEvent, func() any { return &protocol.ChatPendingEvent{} },
 		`{"sessionId":"a1","pending":{"toolUseId":"toolu_3","kind":"question","questions":[{"question":"你喜欢哪种颜色","header":"颜色","multiSelect":false,"options":[{"label":"红","description":""},{"label":"绿","description":""}]}]}}`},
 	{protocol.EventChatPending, "chat.pending", protocol.KindEvent, func() any { return &protocol.ChatPendingEvent{} },
@@ -193,14 +201,14 @@ func TestEveryMethodHasBodyTypes(t *testing.T) {
 		"sessions.subscribe", "sessions.unsubscribe",
 		"chat.open", "chat.close", "chat.send", "chat.answer", "chat.interrupt",
 		"chat.models", "chat.setModel", "chat.setPermissionMode", "chat.commands", "chat.toolOutput", "chat.image",
-		"chat.autoResume", "session.create", "session.stop", "session.remove", "dirs.recent", "usage.get",
+		"chat.autoResume", "chat.rewind", "session.create", "session.stop", "session.remove", "dirs.recent", "usage.get",
 		"git.status", "git.log", "git.show", "git.diff", "git.branches", "git.stage",
 		"git.unstage", "git.commit", "git.pull", "git.push", "git.switch", "dir.busy",
 		"term.open", "term.key", "term.close",
 	}
 	events := []string{
 		"machine.status", "client.gone",
-		"sessions.changed", "chat.items", "chat.pending", "chat.state", "term.screen",
+		"sessions.changed", "chat.items", "chat.pending", "chat.state", "chat.tasks", "term.screen",
 	}
 	have := map[string]bool{}
 	for _, tc := range bodyCases {
@@ -278,6 +286,7 @@ var errorCodes = map[protocol.ErrorCode]string{
 	protocol.CodeNeedsConfirmation:     "needsConfirmation",
 	protocol.CodeGitFailed:             "gitFailed",
 	protocol.CodeGitCredentialsMissing: "gitCredentialsMissing",
+	protocol.CodeRewindFailed:          "rewindFailed",
 	protocol.CodeTimeout:               "timeout",
 	protocol.CodeInternal:              "internal",
 	protocol.CodePairCodeExpired:       "pairCodeExpired",

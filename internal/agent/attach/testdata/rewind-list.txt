@@ -1,0 +1,36 @@
+
+  ⎿  Added 1 line, removed 1 line
+      1 -v1
+      1 +v2
+
+⏺ TWO
+
+✻ Churned for 10s · done 12:01 AM
+
+❯ 只回复 THREE
+
+⏺ THREE
+
+✻ Brewed for 3s · done 12:01 AM
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  Rewind
+
+  Restore the code and/or conversation to the point before…
+
+    只回复 OK
+    No code changes
+
+    只回复 ONE
+    No code changes
+
+    请用 Edit 工具把 note.txt 里的 v1 改成 v2，然后只回复 TWO
+    note.txt +1 -1
+
+    只回复 THREE
+    No code changes
+
+  ❯ (current)
+
+
+
+  Enter to continue · Esc to cancel

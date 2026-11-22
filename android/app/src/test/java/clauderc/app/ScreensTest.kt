@@ -563,6 +563,141 @@ class ScreensTest {
         }
     }
 
+    /** Round 8 as in the demo's 「退避说明」 session: a reply cut into a heading, a list, a quote, code and a table. */
+    @Test fun markdownReplies() {
+        compose.mainClock.autoAdvance = false
+        val reply = listOf(
+            "## 重连退避",
+            "",
+            "逻辑在 `internal/relay/conn.go` 的 `redial` 里，分三步：",
+            "",
+            "1. 第一次断开后等 **1 秒**",
+            "2. 之后每次翻倍，最多等 30 秒",
+            "3. 连上并收到第一个心跳后清零",
+            "",
+            "> 读失败和心跳超时走的是同一条路径，两种断开都会退避。",
+            "",
+            "```go",
+            "func backoff(n int) time.Duration {",
+            "\td := time.Second << n",
+            "\tif d > 30*time.Second || d <= 0 { // 移位溢出成负数时也取上限",
+            "\t\treturn 30 * time.Second",
+            "\t}",
+            "\treturn d",
+            "}",
+            "```",
+            "",
+            "| 第几次 | 等待 | 累计 | 说明 |",
+            "|---|---|---|---|",
+            "| 1 | 1s | 1s | 断开后立刻安排 |",
+            "| 2 | 2s | 3s | 翻倍 |",
+            "| 5 | 16s | 31s | 还在翻倍 |",
+            "| 6 | 30s | 61s | 到上限，之后一直是 30s |",
+            "",
+            "写法参考了 [gRPC 的连接退避说明](https://github.com/grpc/grpc/blob/master/doc/connection-backoff.md)。Duration 的文档：https://pkg.go.dev/time#Duration。",
+        ).joinToString("\n")
+        val chat = ChatUiState(
+            session = session("s20", "退避说明", SessionState.Idle, "default", context = SessionContext(28_000, 200_000)), loading = false,
+            model = "claude-opus-5-5", permissionMode = "default",
+            items = listOf(
+                ChatItem(1, ItemKind.USER, text = "重连退避现在是怎么算的？顺便把 Duration 的文档发我 https://pkg.go.dev/time"),
+                ChatItem(2, ItemKind.TOOL, tool = ToolCall("r1", "Read", "读取 internal/relay/conn.go", buildJsonObject { put("file_path", "internal/relay/conn.go") }, ToolResult("package relay"))),
+                ChatItem(3, ItemKind.ASSISTANT, text = reply),
+            ),
+        )
+        for (s in UiStyle.entries) for (isDark in listOf(false, true)) {
+            shot("23-chat-markdown-${s.name.lowercase()}${if (isDark) "-dark" else ""}", isDark, look = s, fresh = true) { ChatScreen(chat, ChatActions()) }
+        }
+    }
+
+    /** Round 9: a reply with inline formulas, a block one, one wider than the bubble and one that cannot be drawn. */
+    @Test fun formulaReplies() {
+        compose.mainClock.autoAdvance = false
+        val reply = listOf(
+            "可以直接算。第 \$n\$ 次断开后等 \$d_n = \\min(2^{n-1},\\ 30)\$ 秒，没到上限前，前 \$k\$ 次一共等",
+            "\$\$",
+            "T_k = \\sum_{n=1}^{k} 2^{n-1} = 2^k - 1",
+            "\$\$",
+            "到上限以后每次多等 30 秒，所以 \$k > 5\$ 时是 \\(T_k = 31 + 30(k-5)\\)。",
+            "",
+            "加上抖动，每次等待乘一个 0.8 到 1.2 之间均匀分布的系数，平均下来总时间不变：",
+            "",
+            "\\[ \\mathbb{E}\\big[\\tilde T_k\\big] = \\sum_{n=1}^{k} \\mathbb{E}\\big[d_n \\cdot U(0.8,\\ 1.2)\\big] = T_k \\cdot \\frac{0.8 + 1.2}{2} = T_k \\]",
+            "",
+            "日志里的 \$PATH、「每月 \$5 到 \$10」这种写法不会被当成公式；写错的公式照原文显示，比如 \$\\backofff(n)\$。",
+        ).joinToString("\n")
+        val chat = ChatUiState(
+            session = session("s20", "退避说明", SessionState.Idle, "default", context = SessionContext(28_000, 200_000)), loading = false,
+            model = "claude-opus-5-5", permissionMode = "default",
+            items = listOf(
+                ChatItem(1, ItemKind.USER, text = "连着失败 k 次一共要等多久？给个公式"),
+                ChatItem(2, ItemKind.ASSISTANT, text = reply),
+            ),
+        )
+        for (s in UiStyle.entries) for (isDark in listOf(false, true)) {
+            shot("24-chat-math-${s.name.lowercase()}${if (isDark) "-dark" else ""}", isDark, look = s, fresh = true) { ChatScreen(chat, ChatActions()) }
+        }
+    }
+
+    /** Round 9: a user message slid left to lay bare the rewind button, and the rewind sheet it opens. */
+    @Test fun rewindSwipeAndSheet() {
+        compose.mainClock.autoAdvance = false
+        val chat = ChatUiState(
+            session = session("s20", "退避说明", SessionState.Idle, "default", context = SessionContext(28_000, 200_000)), loading = false,
+            model = "claude-opus-5-5", permissionMode = "default", state = SessionState.Idle, hasMore = false,
+            items = listOf(
+                ChatItem(1, ItemKind.USER, text = "连着失败 k 次一共要等多久？", uuid = "u-1"),
+                ChatItem(2, ItemKind.ASSISTANT, text = "前 k 次一共等 2^k − 1 秒，到上限以后每次再加 30 秒。"),
+                ChatItem(3, ItemKind.USER, text = "把退避上限改成 60 秒", uuid = "u-3"),
+                ChatItem(
+                    4, ItemKind.TOOL,
+                    tool = ToolCall(
+                        "t1", "Edit", "修改 conn.go", buildJsonObject { put("file_path", "internal/relay/conn.go") },
+                        ToolResult(patch = listOf(Hunk(41, 1, 41, 1, listOf("-\tif d > 30*time.Second || d <= 0 {", "+\tif d > 60*time.Second || d <= 0 {")))),
+                    ),
+                ),
+                ChatItem(5, ItemKind.ASSISTANT, text = "改好了，`backoff` 的上限从 30 秒改成 60 秒。"),
+                ChatItem(6, ItemKind.USER, text = "跑一下测试", uuid = "u-6"),
+                ChatItem(7, ItemKind.ASSISTANT, text = "`go test ./internal/relay/...` 通过了。"),
+            ),
+        )
+        val slide: () -> Unit = { compose.onNodeWithTag("userRow:3").performTouchInput { swipeLeft() } }
+        for (s in UiStyle.entries) for (isDark in listOf(false, true)) {
+            val tail = "${s.name.lowercase()}${if (isDark) "-dark" else ""}"
+            shot("25-chat-rewind-swipe-$tail", isDark, look = s, fresh = true, open = slide) { ChatScreen(chat, ChatActions()) }
+            shot("25-chat-rewind-sheet-$tail", isDark, look = s, fresh = true, open = {
+                slide()
+                repeat(10) { compose.mainClock.advanceTimeBy(50) }
+                compose.onNodeWithTag("rewindAction").performClick()
+            }) { ChatScreen(chat, ChatActions()) }
+        }
+    }
+
+    /** Round 10: the task list over the input, folded and unfolded, while the session works. */
+    @Test fun taskBar() {
+        compose.mainClock.autoAdvance = false
+        val chat = ChatUiState(
+            session = session("s20", "退避说明", SessionState.Working, "default", context = SessionContext(28_000, 200_000)), loading = false,
+            model = "claude-opus-5-5", permissionMode = "default", state = SessionState.Working, hasMore = false,
+            workingSinceMillis = System.currentTimeMillis() - 42_000, activity = "正在按位置核对光标… (42s · ↓ 3.1k tokens)",
+            items = listOf(
+                ChatItem(1, ItemKind.USER, text = "把回溯面板的长列表也处理好", uuid = "u-1"),
+                ChatItem(2, ItemKind.ASSISTANT, text = "好，先列个清单。"),
+            ),
+            tasks = listOf(
+                clauderc.app.protocol.ChatTask("1", "读懂回溯面板的长列表", status = "completed"),
+                clauderc.app.protocol.ChatTask("2", "按位置核对光标", activeForm = "正在按位置核对光标", status = "in_progress"),
+                clauderc.app.protocol.ChatTask("3", "补长列表的测试", status = "pending"),
+                clauderc.app.protocol.ChatTask("4", "跑真实回归", status = "pending"),
+            ),
+        )
+        for (s in UiStyle.entries) for (isDark in listOf(false, true)) {
+            val tail = "${s.name.lowercase()}${if (isDark) "-dark" else ""}"
+            shot("26-chat-tasks-folded-$tail", isDark, look = s, fresh = true) { ChatScreen(chat, ChatActions()) }
+            shot("26-chat-tasks-open-$tail", isDark, look = s, fresh = true, open = { compose.onNodeWithTag("taskHead").performClick() }) { ChatScreen(chat, ChatActions()) }
+        }
+    }
+
     /** Round 5 item 13: git's 「最近的目录」 with eight directories, its outline only along the sheet's edge. */
     @Test fun recentDirsSheet() {
         compose.mainClock.autoAdvance = false

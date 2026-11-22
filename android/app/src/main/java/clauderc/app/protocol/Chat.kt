@@ -69,6 +69,8 @@ data class ChatItem(
     val tool: ToolCall? = null,
     /** True for a user message still waiting in Claude Code's queue. */
     val queued: Boolean? = null,
+    /** A user message's uuid in the transcript, which chat.rewind names; absent while it is queued. */
+    val uuid: String? = null,
 )
 
 @Serializable
@@ -199,7 +201,24 @@ data class ChatOpenResponse(
     val partial: String? = null,
     /** Set while the session waits out a plan usage limit whose reset time is known. */
     val limit: Limit? = null,
+    /** The session's Claude Code task list, oldest task first; absent when it has none. */
+    val tasks: List<ChatTask>? = null,
 )
+
+/** Where a task of Claude Code's task list stands. */
+object TaskStatus {
+    const val PENDING = "pending"
+    const val IN_PROGRESS = "in_progress"
+    const val COMPLETED = "completed"
+}
+
+/** One task of the session's task list; [activeForm] is what the status line says while it is in progress. */
+@Serializable
+data class ChatTask(val id: String, val subject: String, val activeForm: String? = null, val status: String)
+
+/** chat.tasks: the session's task list whenever it changed, whole; empty once Claude Code cleared it. */
+@Serializable
+data class ChatTasksEvent(val sessionId: String, val tasks: List<ChatTask>)
 
 /** The plan usage limit a session ran into, as in Claude Code's 「You've hit your 5-hour limit · resets 10:40pm」. */
 @Serializable
@@ -227,6 +246,21 @@ data class ChatAutoResumeRequest(val sessionId: String, val on: Boolean, val tex
 /** The limit as it is after chat.autoResume; null when the session no longer waits on one. */
 @Serializable
 data class ChatAutoResumeResponse(val limit: Limit? = null)
+
+/** What chat.rewind takes back, as Claude Code's /rewind panel offers it. */
+object RewindRestore {
+    const val BOTH = "both"
+    const val CONVERSATION = "conversation"
+    const val CODE = "code"
+}
+
+/** chat.rewind: back to before the user message [uuid], taking back what [restore] names. */
+@Serializable
+data class ChatRewindRequest(val sessionId: String, val uuid: String, val restore: String)
+
+/** Answers a rewind that happened; [notice] says what went wrong after it, such as the computer's input box left holding the message. */
+@Serializable
+data class ChatRewindResponse(val notice: String? = null)
 
 @Serializable
 data class ChatSendRequest(

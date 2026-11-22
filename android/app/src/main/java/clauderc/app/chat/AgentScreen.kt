@@ -91,6 +91,7 @@ fun AgentScreen(state: ChatUiState, header: AgentHeader, actions: ChatActions, s
                         actions,
                         openImage,
                         Modifier.weight(1f),
+                        snack = snack,
                     )
                     Lift(visible = working) {
                         // Drawn whole as its room opens, over the messages: it paints the page behind it.

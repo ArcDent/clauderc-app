@@ -7,7 +7,7 @@
   "client": "c-12",
   "body": {
     "items": [
-      {"seq": 251, "kind": "user", "text": "这是什么错误\n帮我看看", "images": [{"mediaType": "image/png", "data": "iVBORw0KGgo="}]},
+      {"seq": 251, "kind": "user", "text": "这是什么错误\n帮我看看", "images": [{"mediaType": "image/png", "data": "iVBORw0KGgo="}], "uuid": "6cbceb2c-343c-432b-b686-a0cbb8482651"},
       {"seq": 252, "kind": "assistant", "text": "截图里是连接被拒绝的错误。"},
       {"seq": 253, "kind": "tool", "tool": {"toolUseId": "toolu_01A", "toolName": "Read", "summary": "读取 README.md", "input": {"file_path": "/Users/me/code/clauderc/README.md"}, "result": {"content": "# clauderc", "isError": false}}},
       {"seq": 254, "kind": "tool", "tool": {"toolUseId": "toolu_01B", "toolName": "Bash", "summary": "运行 touch marker.txt", "input": {"command": "touch marker.txt", "description": "Create marker"}}}

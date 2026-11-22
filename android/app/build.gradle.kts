@@ -102,6 +102,12 @@ dependencies {
     implementation(libs.zxing.android.embedded)
     implementation(libs.haze)
     implementation(libs.haze.blur)
+    // Replies are cut into blocks by a CommonMark parser; the chat draws the blocks itself.
+    implementation(libs.commonmark)
+    implementation(libs.commonmark.ext.gfm.tables)
+    // Formulas in replies: a Compose LaTeX renderer with the KaTeX fonts, no native code (TODOLIST PoC).
+    implementation(libs.latex.renderer)
+    implementation(libs.latex.fonts.katex)
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
 

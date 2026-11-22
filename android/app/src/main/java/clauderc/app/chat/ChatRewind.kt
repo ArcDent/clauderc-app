@@ -1,0 +1,243 @@
+package clauderc.app.chat
+
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
+import clauderc.app.data.UiStyle
+import clauderc.app.protocol.ChatItem
+import clauderc.app.protocol.ItemKind
+import clauderc.app.protocol.RewindRestore
+import clauderc.app.ui.components.ClaudercSheet
+import clauderc.app.ui.components.MenuItem
+import clauderc.app.ui.components.SheetHead
+import clauderc.app.ui.components.TextAction
+import clauderc.app.ui.components.TextTone
+import clauderc.app.ui.components.sticker
+import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.MonoFamily
+import clauderc.app.ui.theme.Motion
+import clauderc.app.ui.theme.Symbols
+import clauderc.app.ui.theme.pressShrink
+import clauderc.app.ui.theme.styled
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
+
+// Rewinding from a message (round 9): the user's message slides left as a whole row and lays bare a
+// round rewind button; the button opens a sheet that quotes the message and offers the ways back.
+
+/** How far a message slides open: the room of the rewind button. */
+private val RewindWidth = 60.dp
+
+/**
+ * The message slid open, by seq, which sliding another closes; whether a message can slide now; and
+ * what opening the sheet for one does. Null where nothing rewinds, as on a subagent's page.
+ */
+@Stable
+internal class RewindHub(val ask: (ChatItem) -> Unit) {
+    var open by mutableStateOf<Long?>(null)
+    var enabled by mutableStateOf(true)
+}
+
+internal val LocalRewind = staticCompositionLocalOf<RewindHub?> { null }
+
+/**
+ * The user's message [item] as a row that slides left when [LocalRewind] lets it and the message is in
+ * the transcript, its button coming in from the right edge. Only the sideways overflow is clipped, so
+ * 贴纸's hard shadow under the bubble stays.
+ */
+@Composable
+internal fun RewindRow(item: ChatItem, content: @Composable BoxScope.(Modifier) -> Unit) {
+    val hub = LocalRewind.current
+    if (hub == null || item.uuid == null) return Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { content(Modifier) }
+    val width = with(LocalDensity.current) { RewindWidth.toPx() }
+    val slide = remember { Animatable(0f) }
+    var pulled by remember { mutableFloatStateOf(0f) }
+    val scope = rememberCoroutineScope()
+    val enter = Motion.enter<Float>()
+    LaunchedEffect(hub.open) { if (hub.open != item.seq && slide.value != 0f) slide.animateTo(0f, enter) }
+    LaunchedEffect(hub.enabled) { if (!hub.enabled && slide.value != 0f) slide.animateTo(0f, enter) }
+    val drag = rememberDraggableState { d ->
+        pulled = (pulled + d).coerceAtMost(0f)
+        // Past the button's width the row drags with a third of the finger's travel.
+        val x = if (pulled < -width) -width + (pulled + width) / 3 else pulled
+        // At once, not queued: a snap left waiting would stop the settle that letting go starts.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { slide.snapTo(x) }
+    }
+    val ask = {
+        hub.open = null
+        hub.ask(item)
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .drawWithContent { clipRect(top = -size.height, bottom = size.height * 2) { this@drawWithContent.drawContent() } }
+            .draggable(
+                drag,
+                Orientation.Horizontal,
+                enabled = hub.enabled,
+                onDragStarted = {
+                    pulled = slide.value
+                    hub.open = item.seq
+                },
+                onDragStopped = { v ->
+                    val open = slide.value < -width / 2 || v < -1000f
+                    if (!open && hub.open == item.seq) hub.open = null
+                    slide.animateTo(if (open) -width else 0f, enter)
+                },
+            )
+            .semantics { if (hub.enabled) customActions = listOf(CustomAccessibilityAction("回溯") { ask(); true }) }
+            .testTag("userRow:${item.seq}"),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        content(Modifier.graphicsLayer { translationX = slide.value })
+        val out by remember { derivedStateOf { slide.value < 0f } }
+        if (out) {
+            // Below the 8dp the row keeps above its bubble, so the button centres on the bubble.
+            Box(Modifier.matchParentSize().padding(top = Clauderc.spacing.sp2)) {
+                RewindButton(ask, Modifier.align(Alignment.CenterEnd).width(RewindWidth).graphicsLayer { translationX = width + slide.value })
+            }
+        }
+    }
+}
+
+/**
+ * The round rewind button, no word under it: as tall as a one-line bubble so its edges line up with
+ * one, in the bubble's own black (清玻), a square (格栅), or the accent outlined in ink (贴纸).
+ */
+@Composable
+private fun RewindButton(onClick: () -> Unit, modifier: Modifier) {
+    val c = Clauderc.colors
+    val press = remember { MutableInteractionSource() }
+    // A one-line bubble: its line at 15sp × 1.55 and 10dp above and below.
+    val side = with(LocalDensity.current) { (15 * 1.55f).sp.toDp() } + 20.dp
+    val knob = when (Clauderc.style) {
+        UiStyle.Clear -> Modifier.size(side).clip(CircleShape).background(c.fg)
+        UiStyle.Grid -> Modifier.size(side).background(c.fg)
+        UiStyle.Sticker -> Modifier.size(side).sticker(c.accent, c.ink, side / 2, drop = 3.dp, source = press)
+    }
+    val tint = if (Clauderc.style == UiStyle.Sticker) c.onAccent else c.bg
+    Box(
+        modifier.clickable(press, null, onClick = onClick).semantics { contentDescription = "回溯" }.testTag("rewindAction"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.pressShrink(press).then(knob), contentAlignment = Alignment.Center) {
+            Icon(Symbols.History.styled, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/**
+ * The files changed since [item], in its turn or any later one, as 「conn.go +1 −1」 in the order they
+ * were changed: what restoring the code to before [item] takes back, as Claude Code's panel counts it.
+ */
+internal fun filesChangedSince(items: List<ChatItem>, item: ChatItem): List<String> {
+    val after = items.dropWhile { it.seq != item.seq }.drop(1)
+    val files = linkedMapOf<String, IntArray>()
+    for (it in after) {
+        val tool = it.tool ?: continue
+        val hunks = tool.result?.patch ?: continue
+        val path = tool.input.stringField("file_path") ?: tool.input.stringField("notebook_path") ?: continue
+        val n = files.getOrPut(path.substringAfterLast('/')) { IntArray(2) }
+        for (h in hunks) for (l in h.lines) {
+            if (l.startsWith("+")) n[0]++ else if (l.startsWith("-")) n[1]++
+        }
+    }
+    return files.map { (name, n) -> "$name +${n[0]} −${n[1]}" }
+}
+
+/**
+ * The rewind sheet for [item]: what happens, the message quoted to three lines, and when [files] were
+ * changed since it the three ways back with both taken by default, else the conversation alone.
+ */
+@Composable
+internal fun RewindSheet(item: ChatItem, files: List<String>, onDismiss: () -> Unit, onRewind: (String) -> Unit) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    var mode by remember { mutableStateOf(if (files.isEmpty()) RewindRestore.CONVERSATION else RewindRestore.BOTH) }
+    val grid = Clauderc.style == UiStyle.Grid
+    val (rule, ruleWidth) = when (Clauderc.style) {
+        UiStyle.Clear -> c.surface2 to 2.dp
+        UiStyle.Grid -> c.fg3 to 2.dp
+        UiStyle.Sticker -> c.accent to 3.dp
+    }
+    ClaudercSheet(onDismiss = onDismiss) {
+        SheetHead(
+            "回溯到这条消息之前",
+            (if (files.isEmpty()) "这条消息之后没改过文件，只回对话。" else "选一种回去的方式。") + "对话回去后，这条消息填回输入框。",
+        )
+        Text(
+            item.text.orEmpty(),
+            Modifier
+                .padding(start = sp.page, end = sp.page, bottom = sp.sp2)
+                .drawBehind { drawRect(rule, size = Size(ruleWidth.toPx(), size.height)) }
+                .padding(start = 12.dp)
+                .testTag("rewindQuote"),
+            color = c.fg2,
+            fontSize = if (grid) 13.sp else 14.sp,
+            fontFamily = if (grid) MonoFamily else null,
+            lineHeight = 1.55.em,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (files.isNotEmpty()) {
+            val names = files.joinToString("，")
+            MenuItem("对话和代码都回去", onClick = { mode = RewindRestore.BOTH }, supporting = "$names 改回去", checked = mode == RewindRestore.BOTH)
+            MenuItem("只回对话", onClick = { mode = RewindRestore.CONVERSATION }, supporting = "代码不动", checked = mode == RewindRestore.CONVERSATION)
+            MenuItem("只回代码", onClick = { mode = RewindRestore.CODE }, supporting = "对话不动，$names 改回去", checked = mode == RewindRestore.CODE)
+            Text(
+                "文件整份恢复，之后别人的改动也会丢；Bash 改的文件不恢复",
+                Modifier.padding(start = sp.page, end = sp.page, top = sp.sp3),
+                fontSize = Clauderc.fontSizes.caption,
+                color = c.fg3,
+            )
+        }
+        Row(Modifier.fillMaxWidth().padding(start = sp.sp3, end = sp.sp3, top = sp.sp3), horizontalArrangement = Arrangement.End) {
+            TextAction("取消", onClick = onDismiss, tone = TextTone.Quiet)
+            TextAction("回溯", onClick = { onRewind(mode) })
+        }
+    }
+}

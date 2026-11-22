@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-061",
+  "method": "chat.rewind",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"sessionId": "a1b2c3", "uuid": "6cbceb2c-343c-432b-b686-a0cbb8482651", "restore": "both"}
+}

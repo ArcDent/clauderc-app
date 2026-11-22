@@ -173,6 +173,7 @@ func (h *Handler) Methods() []protocol.Method {
 		protocol.MethodChatToolOutput,
 		protocol.MethodChatImage,
 		protocol.MethodChatAutoResume,
+		protocol.MethodChatRewind,
 		protocol.MethodTermOpen,
 		protocol.MethodTermKey,
 		protocol.MethodTermClose,
@@ -215,6 +216,8 @@ func (h *Handler) Handle(ctx context.Context, req protocol.Envelope) protocol.En
 		return h.image(ctx, req)
 	case protocol.MethodChatAutoResume:
 		return h.autoResume(ctx, req)
+	case protocol.MethodChatRewind:
+		return h.rewind(ctx, req)
 	case protocol.MethodTermOpen:
 		return h.termOpen(ctx, req)
 	case protocol.MethodTermKey:
@@ -386,6 +389,14 @@ func openFollower(claudeDir, sessionID string) *transcript.Follower {
 	if err != nil {
 		return nil
 	}
+	key := rewindKey(claudeDir, sessionID)
+	if v, ok := rewinds.Load(key); ok {
+		if m := v.(rewindMark); m.last == f.Last() {
+			f.Rewind(m.uuid)
+		} else {
+			rewinds.CompareAndDelete(key, v)
+		}
+	}
 	return f
 }
 
@@ -465,6 +476,10 @@ type session struct {
 	// last status and pending prompt sent to the phones
 	status  protocol.ChatStatus
 	pending *protocol.Pending
+	// rw follows the /rewind panel on the screen; only pollScreen uses it.
+	rw rewindWatch
+	// tasks reads the session's task list (see tasks.go).
+	tasks taskList
 }
 
 // screenInterval is how often an open chat reads the status line and the
@@ -481,6 +496,7 @@ func (h *Handler) newSession(t discovery.Target) *session {
 		target:   t,
 	}
 	s.status, s.pending = s.compute()
+	s.tasks.read(h.taskDir(t.SessionID))
 	go s.run(ctx)
 	return s
 }
@@ -529,7 +545,7 @@ func (s *session) snapshot() protocol.ChatOpenResponse {
 	if s.follower != nil {
 		items, more = s.follower.Page(0, protocol.ChatPageSize)
 	}
-	return protocol.ChatOpenResponse{Items: toProtocol(items), HasMore: more, ChatStatus: s.status, Pending: s.pending}
+	return protocol.ChatOpenResponse{Items: toProtocol(items), HasMore: more, ChatStatus: s.status, Pending: s.pending, Tasks: s.tasks.current()}
 }
 
 func (s *session) stop() {
@@ -559,6 +575,7 @@ func (s *session) run(ctx context.Context) {
 			return
 		case <-poll.C:
 			s.pollTranscript()
+			s.pollTasks()
 		case <-state.C:
 			s.pollState(ctx)
 			s.ensureAttach(ctx)
@@ -583,6 +600,7 @@ func (s *session) pollScreen() {
 		return
 	}
 	lines := conn.View().Lines
+	s.watchRewind(strings.Join(lines, "\n"))
 	// A mode changed on the session itself, such as by /plan, shows in
 	// its status line.
 	if mode, ok := attach.ParseMode(strings.Join(lines, "\n")); ok {
@@ -627,6 +645,17 @@ func (s *session) pollTranscript() {
 	}
 	if len(items) > 0 {
 		s.pushAll(protocol.EventChatItems, protocol.ChatItemsEvent{SessionID: s.id, Items: toProtocol(items)})
+	}
+}
+
+// pollTasks pushes the session's task list when it changed. The list goes
+// by the Claude Code session, which /clear replaces.
+func (s *session) pollTasks() {
+	s.mu.Lock()
+	id := s.target.SessionID
+	s.mu.Unlock()
+	if tasks, changed := s.tasks.read(s.h.taskDir(id)); changed {
+		s.pushAll(protocol.EventChatTasks, protocol.ChatTasksEvent{SessionID: s.id, Tasks: tasks})
 	}
 }
 

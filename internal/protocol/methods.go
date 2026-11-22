@@ -35,9 +35,11 @@ const (
 	MethodChatToolOutput        Method = "chat.toolOutput"
 	MethodChatImage             Method = "chat.image"
 	MethodChatAutoResume        Method = "chat.autoResume"
+	MethodChatRewind            Method = "chat.rewind" // through Claude Code's own /rewind panel
 	EventChatItems              Method = "chat.items"
 	EventChatPending            Method = "chat.pending"
 	EventChatState              Method = "chat.state"
+	EventChatTasks              Method = "chat.tasks"
 )
 
 // Session management methods (design D3).

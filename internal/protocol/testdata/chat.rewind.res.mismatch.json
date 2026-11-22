@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-061",
+  "method": "chat.rewind",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "error": {"code": "rewindFailed", "message": "回溯面板里光标那一行是「只回复 THREE」，不是要回溯的那条消息，已按 Esc 退出"}
+}

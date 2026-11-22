@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -16,15 +17,28 @@ import (
 )
 
 // Page returns up to n items with Seq below before, oldest first, and
-// whether older items remain. before <= 0 asks for the latest page.
+// whether older items remain. before <= 0 asks for the latest page. Items
+// a rewind took away are left out and do not count.
 func (t *Transcript) Page(before int64, n int) ([]Item, bool) {
 	end := len(t.items)
 	if before > 0 {
 		// Seqs are 1..len, so the items below before end at index before-1.
 		end = min(int(before-1), end)
 	}
-	start := max(end-n, 0)
-	return append([]Item{}, t.items[start:end]...), start > 0
+	var page []Item
+	i := end - 1
+	for ; i >= 0 && len(page) < n; i-- {
+		if t.items[i].Kind != protocol.ItemRemoved {
+			page = append(page, t.items[i])
+		}
+	}
+	slices.Reverse(page)
+	for ; i >= 0; i-- {
+		if t.items[i].Kind != protocol.ItemRemoved {
+			return page, true
+		}
+	}
+	return page, false
 }
 
 // tail reads a growing file a whole line at a time.
@@ -200,4 +214,24 @@ func (f *Follower) Info() Info {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.t.Info()
+}
+
+// Last is the uuid of the latest record of the conversation read so far,
+// which Rewind leaves as it is.
+func (f *Follower) Last() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.t.last
+}
+
+// Rewind is Transcript.Rewind on the current state; it returns the items
+// it removed.
+func (f *Follower) Rewind(uuid string) []Item {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var items []Item
+	for _, i := range f.t.Rewind(uuid) {
+		items = append(items, f.t.items[i])
+	}
+	return items
 }

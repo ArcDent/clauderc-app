@@ -48,7 +48,7 @@ func (t *Transcript) attachment(a *attachment) []int {
 	case "skill_listing":
 		// Content holds "- <name>: <description>" lines; names may contain
 		// colons, so they come from Names.
-		lines := strings.Split(a.Content, "\n")
+		lines := strings.Split(textOf(a.Content), "\n")
 		for _, name := range a.Names {
 			desc := ""
 			for _, l := range lines {

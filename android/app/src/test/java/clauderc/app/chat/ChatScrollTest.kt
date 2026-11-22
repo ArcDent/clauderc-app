@@ -1,6 +1,10 @@
 package clauderc.app.chat
 
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.semantics.SemanticsProperties
 import clauderc.app.data.UiStyle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +75,26 @@ class ChatScrollTest {
     private fun bounds(text: String) = compose.onNodeWithText(text).fetchSemanticsNode().boundsInRoot
 
     private fun px(dp: Dp) = with(compose.density) { dp.toPx() }
+
+    @Test fun wideCodeAndTablesScrollInsideTheReplyNotTheList() {
+        val code = "func backoff(n int) time.Duration { return min(time.Second<<n, 30*time.Second) } // 移位溢出成负数时也取上限"
+        val reply = "看这段：\n\n```go\n$code\n```\n\n| 第几次 | 等待 | 累计 | 说明 |\n|---|---|---|---|\n| 1 | 1s | 1s | 断开后立刻安排，之后每次翻倍直到上限 |"
+        state = state.copy(items = state.items + ChatItem(101, ItemKind.ASSISTANT, text = reply))
+        show()
+        val reply101 = compose.onAllNodesWithTag("reply", useUnmergedTree = true).fetchSemanticsNodes().maxBy { it.boundsInRoot.bottom }.boundsInRoot
+        val list = compose.onNodeWithTag("chatList").fetchSemanticsNode().boundsInRoot
+        assertTrue("the bubble ${reply101.width} is at most 82% of ${list.width}", reply101.width <= 0.82f * (list.width - 2 * px(16.dp)) + 1f)
+        for (tag in listOf("code", "table")) {
+            val node = compose.onNodeWithTag(tag, useUnmergedTree = true)
+            fun range() = node.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
+            assertTrue("$tag is wider than the bubble", range().maxValue() > 0f && range().value() == 0f)
+            val top = compose.onNodeWithText("看这段：", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top
+            node.performTouchInput { swipeLeft() }
+            compose.mainClock.advanceTimeBy(1_000)
+            assertTrue("$tag scrolled: ${range().value()}", range().value() > 0f)
+            assertEquals("the list stays put", top, compose.onNodeWithText("看这段：", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top, 0.5f)
+        }
+    }
 
     @Test fun atTheBottomANewReplyPushesTheOthersUpWithoutBouncing() {
         show()
