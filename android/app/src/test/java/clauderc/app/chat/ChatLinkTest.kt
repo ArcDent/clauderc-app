@@ -71,7 +71,7 @@ class ChatLinkTest {
 
     @Test fun onlyWebAndMailCanBeOpened() {
         assertTrue(isOpenable("https://a.b") && isOpenable("HTTP://a.b") && isOpenable("mailto:a@b.c"))
-        for (u in listOf("javascript:alert(1)", "file:///etc/hosts", "intent://x#Intent;end", "ftp://a.b")) assertTrue(u, !isOpenable(u))
+        for (u in listOf("javascript:alert(1)", "file:///etc/hosts", "intent://x#Intent;end", "ftp://a.b", "https:foo", "http:/a.b", "https://", "mailto:")) assertTrue(u, !isOpenable(u))
     }
 
     @Test fun theMenuHangsUnderTheLinkAndFlipsAboveNearTheFoot() {

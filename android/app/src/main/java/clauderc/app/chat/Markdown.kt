@@ -83,7 +83,7 @@ private fun paragraph(text: String): List<MdBlock> {
     }
     var at = 0
     for (m in blockMath.findAll(text)) {
-        prose(text.substring(at, m.range.first).trimEnd('\n'))
+        prose(text.substring(at, m.range.first).trim('\n'))
         val tex = (m.groups[2] ?: m.groups[3])!!.value
         out += MdBlock.Math(tex.trim(), m.groups[1]!!.value)
         at = m.range.last + 1

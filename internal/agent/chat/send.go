@@ -182,18 +182,44 @@ func inInput(screen, cmd string) bool {
 // above also start with ❯, but not under a rule. The prompt is ❯, or ! for
 // a shell command, and is followed by a no-break space.
 func inputLine(screen string) (string, bool) {
+	box, ok := inputBox(screen)
+	if !ok {
+		return "", false
+	}
+	return box[0], true
+}
+
+// inputText returns what Claude Code's input box holds over all its
+// lines, which a long or multi-line message wraps onto.
+func inputText(screen string) (string, bool) {
+	box, ok := inputBox(screen)
+	return strings.Join(box, "\n"), ok
+}
+
+// inputBox returns the lines of Claude Code's input box: the prompt line
+// under a rule and the lines under it down to the box's lower rule.
+func inputBox(screen string) ([]string, bool) {
 	lines := strings.Split(screen, "\n")
 	for i := len(lines) - 1; i > 0; i-- {
 		if !strings.HasPrefix(strings.TrimSpace(lines[i-1]), "─") {
 			continue
 		}
 		for _, prompt := range []string{"❯", "!"} {
-			if rest, ok := strings.CutPrefix(lines[i], prompt); ok {
-				return strings.TrimSpace(strings.ReplaceAll(rest, "\u00a0", " ")), true
+			rest, ok := strings.CutPrefix(lines[i], prompt)
+			if !ok {
+				continue
 			}
+			box := []string{strings.TrimSpace(strings.ReplaceAll(rest, "\u00a0", " "))}
+			for _, l := range lines[i+1:] {
+				if strings.HasPrefix(strings.TrimSpace(l), "─") {
+					break
+				}
+				box = append(box, strings.TrimSpace(l))
+			}
+			return box, true
 		}
 	}
-	return "", false
+	return nil, false
 }
 
 var errOffInput = &opError{protocol.CodeInvalidParams, "会话停在面板或对话框上，先在终端里关掉再发"}

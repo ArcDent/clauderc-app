@@ -84,11 +84,11 @@ fun RowScope.BarTitle(
 
 /** A .bar-sub button: small grey text with a chevron, e.g. the model switch. */
 @Composable
-fun BarSubButton(text: String, onClick: () -> Unit, enabled: Boolean = true, mono: Boolean = false) {
+fun BarSubButton(text: String, onClick: () -> Unit, enabled: Boolean = true, mono: Boolean = false, modifier: Modifier = Modifier) {
     val c = Clauderc.colors
     val press = remember { MutableInteractionSource() }
     Row(
-        Modifier
+        modifier
             .pressShrink(press)
             .clickable(press, PressIndication(c.fg2), enabled = enabled, role = Role.Button, onClick = onClick)
             .then(if (enabled) Modifier else Modifier),

@@ -19,6 +19,7 @@ import clauderc.app.protocol.ChatImageRequest
 import clauderc.app.protocol.ChatImageResponse
 import clauderc.app.protocol.ChatItem
 import clauderc.app.protocol.ChatRewindRequest
+import clauderc.app.protocol.ChatRewindResponse
 import clauderc.app.protocol.RewindRestore
 import clauderc.app.protocol.ChatItemsEvent
 import clauderc.app.protocol.ChatLimits
@@ -26,6 +27,8 @@ import clauderc.app.protocol.ChatModelsResponse
 import clauderc.app.protocol.ChatOpenRequest
 import clauderc.app.protocol.ChatOpenResponse
 import clauderc.app.protocol.ChatPendingEvent
+import clauderc.app.protocol.ChatTask
+import clauderc.app.protocol.ChatTasksEvent
 import clauderc.app.protocol.ChatSendRequest
 import clauderc.app.protocol.ChatSendResponse
 import clauderc.app.protocol.ChatSetModelRequest
@@ -242,6 +245,8 @@ data class ChatUiState(
     val opened: Boolean = true,
     /** The plan usage limit the session waits out, with what the agent is to send once it is lifted. */
     val limit: Limit? = null,
+    /** The session's Claude Code task list, shown over the input; empty when it has none. */
+    val tasks: List<ChatTask> = emptyList(),
     /** The text to send once the limit is lifted, as typed; it follows the agent's setting when that changes. */
     val resumeText: String = RESUME_TEXT,
     /** True while session.create starts a session in a new worktree of this session's directory. */
@@ -419,6 +424,7 @@ class ChatViewModel(
                             }
                         }
                         is ChatPendingEvent -> onPending(e.pending)
+                        is ChatTasksEvent -> _state.update { it.copy(tasks = e.tasks) }
                         is ChatStateEvent -> _state.update {
                             applyStatus(it, e.state, e.model, e.permissionMode).copy(unknownDialog = e.unknownDialog == true).withScreen(e.state, e.activity, e.partial).withLimit(e.limit)
                         }
@@ -433,6 +439,7 @@ class ChatViewModel(
         return when (env.method) {
             Method.CHAT_ITEMS -> decode(body, ChatItemsEvent.serializer())?.takeIf { it.sessionId == sessionId && it.agentId == agentId }
             Method.CHAT_PENDING -> decode(body, ChatPendingEvent.serializer())?.takeIf { it.sessionId == sessionId && agentId == null }
+            Method.CHAT_TASKS -> decode(body, ChatTasksEvent.serializer())?.takeIf { it.sessionId == sessionId && agentId == null }
             Method.CHAT_STATE -> decode(body, ChatStateEvent.serializer())?.takeIf { it.sessionId == sessionId && it.agentId == agentId }
             else -> null
         }
@@ -488,6 +495,7 @@ class ChatViewModel(
                         items = mergeItems(emptyList(), res.items),
                         hasMore = res.hasMore,
                         pending = res.pending,
+                        tasks = if (agentId == null) res.tasks.orEmpty() else emptyList(),
                         unknownDialog = res.unknownDialog == true,
                         outgoing = outbox.outgoing.value,
                         keys = it.keys + deliveredKeys(before, res.items),
@@ -733,26 +741,32 @@ class ChatViewModel(
     /**
      * Rewinds the session to before the user's message [item] through Claude Code's /rewind panel,
      * taking back what [restore] names. Taking the conversation back puts the message into the composer
-     * in place of what is there; the agent takes the messages away itself. When the agent could not
-     * match the panel, the snackbar says so and [onFailed] opens the terminal view to do it by hand.
+     * in place of what is there; the agent takes the messages away itself. The snackbar shows what the
+     * agent says went wrong after a rewind, and why one failed, when [onFailed] also opens the terminal
+     * view to look or do it by hand.
      */
     fun rewind(item: ChatItem, restore: String, onFailed: () -> Unit) {
         val uuid = item.uuid ?: return
-        if (_state.value.rewinding) return
+        if (_state.value.rewinding || !_state.value.online) return
         _state.update { it.copy(rewinding = true) }
         viewModelScope.launch {
             try {
-                relay.call(Method.CHAT_REWIND, machineId, ChatRewindRequest(sessionId, uuid, restore), ChatRewindRequest.serializer(), Empty.serializer())
+                val res = relay.call(
+                    Method.CHAT_REWIND, machineId, ChatRewindRequest(sessionId, uuid, restore),
+                    ChatRewindRequest.serializer(), ChatRewindResponse.serializer(), timeoutMillis = CHAT_REWIND_TIMEOUT_MILLIS,
+                )
                 _state.update {
                     if (restore == RewindRestore.CODE) it.copy(rewinding = false)
                     else it.copy(rewinding = false, restore = Restore(cache.nextId(), item.text.orEmpty(), replace = true))
                 }
-                if (restore == RewindRestore.CODE) _messages.send("代码已回到这条消息之前")
+                when {
+                    res.notice != null -> _messages.send(res.notice)
+                    restore == RewindRestore.CODE -> _messages.send("代码已回到这条消息之前")
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(rewinding = false) }
-                val failed = e is RemoteException && e.code == ErrorCode.REWIND_FAILED
-                _messages.send(if (failed) "没能回溯：Claude Code 里对不上这条消息，已退出面板" else "没能回溯：${e.message}")
-                if (failed) onFailed()
+                _messages.send("没能回溯：${e.message}")
+                if (e is RemoteException && e.code == ErrorCode.REWIND_FAILED) onFailed()
             }
         }
     }
@@ -911,6 +925,9 @@ private const val RESUME_DELAY_SECONDS = 60L
 
 /** A message with pictures waits longer: up to 11 MB to upload, and the agent pastes each picture with a pause. */
 const val SEND_IMAGES_TIMEOUT_MILLIS = 120_000L
+
+/** How long chat.rewind may take: the agent gives a rewind 90 s up to its last Enter, then clears the input box. */
+const val CHAT_REWIND_TIMEOUT_MILLIS = 120_000L
 
 /** A worktree name session.create takes, as the agent checks it. */
 val WORKTREE_NAME = Regex("^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$")

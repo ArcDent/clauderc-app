@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -44,6 +45,126 @@ func TestRewind(t *testing.T) {
 		t.Run(m.name, func(t *testing.T) { rewind(t, m.name, m.label) })
 	}
 	t.Run("phone", rewindFromPhone)
+	t.Run("long", rewindLong)
+	t.Run("nocode", rewindNoCode)
+}
+
+// rewindLong has fifteen turns, one message on two lines and one wider than
+// the screen, opens the panel and moves its cursor up to the second
+// message, which is more than a screen up, keeping the screens on the way.
+func rewindLong(t *testing.T) {
+	s := launchAt(t, "rewind_long", plain, workspace(t, "rewind_long"), false)
+	var msgs []string
+	for i := 1; i <= 15; i++ {
+		msg := fmt.Sprintf("只回复 L%d", i)
+		switch i {
+		case 5:
+			msg += "\n第二行不用管"
+		case 9:
+			msg += "，" + strings.Repeat("这一句只是为了让消息比屏幕还宽，", 12)
+		}
+		s.turn(msg)
+		msgs = append(msgs, msg)
+	}
+	screens := map[string]string{}
+	s.term(t, 3*time.Minute, func(term *attach.Term) {
+		if err := term.Send([]attach.Step{{Keys: []byte("/rewind"), Wait: time.Second}, {Keys: []byte("\r"), Wait: 0}}); err != nil {
+			t.Fatal(err)
+		}
+		if !term.WaitFor(func(sc string) bool { return strings.Contains(sc, "Enter to continue") }, 10*time.Second) {
+			t.Fatalf("没有出现回溯面板：\n%s", term.Screen())
+		}
+		term.WaitQuiet(time.Second, 5*time.Second)
+		screens["long-list"] = term.Screen()
+		t.Logf("面板刚打开：%q", panelRows(term.Screen()))
+		for k := range len(msgs) - 1 {
+			press(t, term, "\x1b[A", panelCursor)
+			sc := term.Screen()
+			cur, _ := panelCursor(sc)
+			_, parsed := attach.ParseRewindList(sc)
+			t.Logf("上移 %d 次：光标 %q，屏上条目 %q，ParseRewindList %v", k+1, cur, panelRows(sc), parsed)
+			if _, ok := screens["long-scrolled"]; !ok && !strings.Contains(sc, "(current)") {
+				screens["long-scrolled"] = sc
+			}
+		}
+		screens["long-top"] = term.Screen()
+		if cur, _ := panelCursor(term.Screen()); !strings.HasPrefix(msgs[1], strings.TrimSuffix(cur, "…")) {
+			t.Errorf("上移 14 次后光标在 %q，want %q", cur, msgs[1])
+		}
+		closePanel(t, term)
+	})
+	saveRewindScreens(t, s, screens)
+
+	// The phone rewinds to the third message, more than a screen up.
+	users := s.users()
+	if len(users) != 16 {
+		t.Fatalf("聊天里有 %d 条用户消息，want 16", len(users))
+	}
+	s.x.must(t, protocol.MethodChatRewind, protocol.ChatRewindRequest{SessionID: s.id, UUID: users[2].UUID, Restore: protocol.RewindConversation}, nil)
+	if texts := s.userTexts(); texts != "只回复 OK|只回复 L1" {
+		t.Errorf("经 chat.rewind 回溯到 L2 之前，聊天里的用户消息 %q", texts)
+	}
+}
+
+// closePanel presses Esc until the rewind panel is gone, one press at a
+// time: the list a press goes back to takes no keys for about a second.
+func closePanel(t *testing.T, term *attach.Term) {
+	t.Helper()
+	for range 6 {
+		screen := term.Screen()
+		if !attach.RewindShown(screen) {
+			return
+		}
+		_ = term.Send(attach.CancelKeys())
+		if term.WaitFor(func(sc string) bool { return sc != screen }, 2*time.Second) {
+			term.WaitQuiet(time.Second, 5*time.Second)
+		}
+	}
+	t.Errorf("按了 6 次 Esc 面板还开着：\n%s", tail(term.Screen(), 12))
+}
+
+// rewindNoCode opens the ways back for the first turn's message, which
+// changed no code while the second turn did.
+func rewindNoCode(t *testing.T) {
+	s, _ := threeTurns(t, "rewind_nocode")
+	screens := map[string]string{}
+	s.term(t, 2*time.Minute, func(term *attach.Term) {
+		if err := term.Send([]attach.Step{{Keys: []byte("/rewind"), Wait: time.Second}, {Keys: []byte("\r"), Wait: 0}}); err != nil {
+			t.Fatal(err)
+		}
+		if !term.WaitFor(func(sc string) bool { return strings.Contains(sc, "Enter to continue") }, 10*time.Second) {
+			t.Fatalf("没有出现回溯面板：\n%s", term.Screen())
+		}
+		term.WaitQuiet(time.Second, 5*time.Second)
+		for range 3 {
+			press(t, term, "\x1b[A", panelCursor)
+		}
+		if cur, _ := panelCursor(term.Screen()); cur != "只回复 ONE" {
+			t.Fatalf("按三次上键后光标在 %q，want 只回复 ONE", cur)
+		}
+		_ = term.Send([]attach.Step{{Keys: []byte("\r"), Wait: 0}})
+		if !term.WaitFor(func(sc string) bool { return strings.Contains(sc, "Never mind") }, 10*time.Second) {
+			t.Fatalf("没有出现恢复方式：\n%s", term.Screen())
+		}
+		term.WaitQuiet(time.Second, 5*time.Second)
+		screens["options-later-code"] = term.Screen()
+		t.Logf("没改文件、之后一轮改过文件的消息，恢复方式 %q", panelOptions(term.Screen()))
+		closePanel(t, term)
+	})
+	saveRewindScreens(t, s, screens)
+}
+
+// saveRewindScreens writes the screens, scrubbed, to the attach testdata
+// with CLAUDERC_E2E_SAVE_SAMPLES=1.
+func saveRewindScreens(t *testing.T, s *session, screens map[string]string) {
+	if os.Getenv("CLAUDERC_E2E_SAVE_SAMPLES") != "1" {
+		return
+	}
+	home, _ := os.UserHomeDir()
+	scrub := scrubber(home, s.ws, s.sessionID)
+	for name, sc := range screens {
+		writeSample(t, filepath.Join(s.x.root, "internal", "agent", "attach", "testdata", "rewind-"+name+".txt"), []byte(scrub(sc)))
+	}
 }
 
 // turn sends msg and waits for the reply to it.

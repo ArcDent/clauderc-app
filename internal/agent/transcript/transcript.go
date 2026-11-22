@@ -65,11 +65,13 @@ type Transcript struct {
 	// line counts the lines fed so far.
 	line int
 	// parents maps the uuid of each record seen to its parent's, leaf is
-	// the latest record's, and prompts marks the user's messages among
-	// them; see branch.
+	// the latest record's, which Rewind moves back, last stays the latest
+	// record's, and prompts marks the user's messages among them; see
+	// branch.
 	parents map[string]string
 	prompts map[string]bool
 	leaf    string
+	last    string
 	// src holds, for each item, the uuid of the record that added it, and
 	// cur the uuid of the record being fed.
 	src  []string
@@ -171,8 +173,10 @@ type attachment struct {
 	Identity struct {
 		ModelID string `json:"modelId"`
 	} `json:"identity"`
-	Content string   `json:"content"`
-	Names   []string `json:"names"`
+	// Content is text for a skill listing; other kinds, such as a task
+	// reminder or a file, hold an array or an object.
+	Content json.RawMessage `json:"content"`
+	Names   []string        `json:"names"`
 	// Prompt is the queued command's text, a string; the notification
 	// itself when CommandMode is task-notification.
 	Prompt json.RawMessage `json:"prompt"`
@@ -200,7 +204,7 @@ type block struct {
 }
 
 // feed applies one line and returns the indexes of items it added or
-// changed. Malformed lines change nothing.
+// changed. A line that is not JSON changes nothing.
 func (t *Transcript) feed(line []byte) []int {
 	line = bytes.TrimSpace(line)
 	if len(line) == 0 {
@@ -209,7 +213,21 @@ func (t *Transcript) feed(line []byte) []int {
 	t.line++
 	var r record
 	if json.Unmarshal(line, &r) != nil {
-		return nil
+		// A record of a shape this does not know, such as a system
+		// api_error whose error is an object, still keeps its place in
+		// the tree: the records after it hang from it.
+		var link struct {
+			Type              string `json:"type"`
+			UUID              string `json:"uuid"`
+			ParentUUID        string `json:"parentUuid"`
+			LogicalParentUUID string `json:"logicalParentUuid"`
+			IsSidechain       bool   `json:"isSidechain"`
+		}
+		if json.Unmarshal(line, &link) != nil {
+			return nil
+		}
+		t.cur = ""
+		return t.branch(&record{Type: link.Type, UUID: link.UUID, ParentUUID: link.ParentUUID, LogicalParentUUID: link.LogicalParentUUID, IsSidechain: link.IsSidechain})
 	}
 	changed := t.branch(&r)
 	t.cur = ""

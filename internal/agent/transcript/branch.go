@@ -15,9 +15,10 @@ import (
 
 // branch notes r in the tree and, when r leaves the branch of the latest
 // record, removes the items of the records left behind and returns their
-// indexes. A record hung from a parent never seen, or one that leaves no
-// user message behind, such as a hook's progress beside a tool call,
-// changes nothing.
+// indexes. A user message with no parent leaves the whole branch behind.
+// A record hung from a parent never seen, or one that leaves no user
+// message behind, such as a hook's progress beside a tool call, changes
+// nothing.
 func (t *Transcript) branch(r *record) []int {
 	if r.UUID == "" || r.IsSidechain {
 		return nil
@@ -29,14 +30,20 @@ func (t *Transcript) branch(r *record) []int {
 	}
 	leaf := t.leaf
 	t.parents[r.UUID] = parent
-	t.leaf = r.UUID
+	t.leaf, t.last = r.UUID, r.UUID
 	if isPrompt(r) {
 		t.prompts[r.UUID] = true
 	}
-	if parent == "" || leaf == "" || parent == leaf {
+	if leaf == "" || parent == leaf {
 		return nil
 	}
-	if _, seen := t.parents[parent]; !seen {
+	if parent == "" {
+		// A message of the user's with no parent after other records starts
+		// the conversation afresh: a rewind to before the first message.
+		if !isPrompt(r) {
+			return nil
+		}
+	} else if _, seen := t.parents[parent]; !seen {
 		return nil
 	}
 	kept := map[string]bool{}

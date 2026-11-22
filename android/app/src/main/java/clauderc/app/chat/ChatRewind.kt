@@ -170,9 +170,12 @@ private fun RewindButton(onClick: () -> Unit, modifier: Modifier) {
     }
 }
 
-/** The files the turn after [item] changed, as 「conn.go +1 −1」, in the order they were changed. */
-internal fun turnFiles(items: List<ChatItem>, item: ChatItem): List<String> {
-    val after = items.dropWhile { it.seq != item.seq }.drop(1).takeWhile { it.kind != ItemKind.USER }
+/**
+ * The files changed since [item], in its turn or any later one, as 「conn.go +1 −1」 in the order they
+ * were changed: what restoring the code to before [item] takes back, as Claude Code's panel counts it.
+ */
+internal fun filesChangedSince(items: List<ChatItem>, item: ChatItem): List<String> {
+    val after = items.dropWhile { it.seq != item.seq }.drop(1)
     val files = linkedMapOf<String, IntArray>()
     for (it in after) {
         val tool = it.tool ?: continue
@@ -187,8 +190,8 @@ internal fun turnFiles(items: List<ChatItem>, item: ChatItem): List<String> {
 }
 
 /**
- * The rewind sheet for [item]: what happens, the message quoted to three lines, and when the turn
- * changed [files] the three ways back with both taken by default, else the conversation alone.
+ * The rewind sheet for [item]: what happens, the message quoted to three lines, and when [files] were
+ * changed since it the three ways back with both taken by default, else the conversation alone.
  */
 @Composable
 internal fun RewindSheet(item: ChatItem, files: List<String>, onDismiss: () -> Unit, onRewind: (String) -> Unit) {
@@ -204,7 +207,7 @@ internal fun RewindSheet(item: ChatItem, files: List<String>, onDismiss: () -> U
     ClaudercSheet(onDismiss = onDismiss) {
         SheetHead(
             "回溯到这条消息之前",
-            (if (files.isEmpty()) "这一轮没改文件，只回对话。" else "选一种回去的方式。") + "对话回去后，这条消息填回输入框。",
+            (if (files.isEmpty()) "这条消息之后没改过文件，只回对话。" else "选一种回去的方式。") + "对话回去后，这条消息填回输入框。",
         )
         Text(
             item.text.orEmpty(),

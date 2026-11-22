@@ -115,6 +115,7 @@ object Method {
     const val CHAT_ITEMS = "chat.items"
     const val CHAT_PENDING = "chat.pending"
     const val CHAT_STATE = "chat.state"
+    const val CHAT_TASKS = "chat.tasks"
 
     const val TERM_OPEN = "term.open"
     const val TERM_KEY = "term.key"

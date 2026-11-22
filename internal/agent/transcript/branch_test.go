@@ -1,6 +1,7 @@
 package transcript_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -193,5 +194,156 @@ func TestUserItemsCarryTheirUUID(t *testing.T) {
 	tr, _ = transcript.Parse(strings.NewReader(first + "\n" + queued + "\n" + delivered + "\n"))
 	if items := tr.Items(); len(items) != 2 || items[1].Queued || items[1].UUID != "u-2" {
 		t.Errorf("after delivery %+v", items)
+	}
+}
+
+// Records whose content is not text, such as a task reminder (an array),
+// a file attachment or an api_error (objects), keep their place in the
+// tree, so a rewind across them takes back everything after the point.
+func TestRecordsOfAnyShapeKeepTheirPlace(t *testing.T) {
+	lines := []string{
+		`{"type":"user","uuid":"a","parentUuid":null,"message":{"content":"第一条"}}`,
+		`{"type":"assistant","uuid":"b","parentUuid":"a","message":{"content":[{"type":"text","text":"回复一"}]}}`,
+		`{"type":"user","uuid":"c","parentUuid":"b","message":{"content":"第二条"}}`,
+		`{"type":"attachment","uuid":"r","parentUuid":"c","attachment":{"type":"task_reminder","content":[{"id":"1","subject":"甲","status":"pending"}],"itemCount":1}}`,
+		`{"type":"assistant","uuid":"d","parentUuid":"r","message":{"content":[{"type":"text","text":"回复二"}]}}`,
+		`{"type":"attachment","uuid":"f","parentUuid":"d","attachment":{"type":"file","filename":"a.txt","content":{"type":"text","file":{"filePath":"a.txt","content":"x"}}}}`,
+		`{"type":"user","uuid":"g","parentUuid":"f","message":{"content":"第三条"}}`,
+		`{"type":"system","subtype":"api_error","uuid":"e","parentUuid":"g","error":{"message":"Connection error."},"retryAttempt":1}`,
+		`{"type":"assistant","uuid":"h","parentUuid":"e","message":{"content":[{"type":"text","text":"回复三"}]}}`,
+		`{"type":"attachment","uuid":"s","parentUuid":"h","attachment":{"type":"skill_listing","content":"- matt-tdd: Test-driven development.","names":["matt-tdd"]}}`,
+	}
+	parse := func(lines ...string) *transcript.Transcript {
+		tr, err := transcript.Parse(strings.NewReader(strings.Join(lines, "\n") + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tr
+	}
+	tr := parse(lines...)
+	if got := strings.Join(shown(tr.Items()), "|"); got != "user 第一条|assistant 回复一|user 第二条|assistant 回复二|user 第三条|assistant 回复三" {
+		t.Fatalf("items %q", got)
+	}
+	if s := tr.Info().Skills; len(s) != 1 || s[0].Name != "matt-tdd" || s[0].Description != "Test-driven development." {
+		t.Errorf("skills %+v", s)
+	}
+
+	// Rewound in Claude Code to before the second message, then sent one more.
+	next := `{"type":"user","uuid":"n","parentUuid":"b","message":{"content":"新的第二条"}}`
+	if got := strings.Join(shown(parse(append(lines, next)...).Items()), "|"); got != "user 第一条|assistant 回复一|user 新的第二条" {
+		t.Errorf("after a rewind %q", got)
+	}
+
+	// Rewound from the phone, before anything is written.
+	if removed := tr.Rewind("c"); len(removed) != 4 {
+		t.Errorf("rewind removed %v", removed)
+	}
+	if got := strings.Join(shown(tr.Items()), "|"); got != "user 第一条|assistant 回复一" {
+		t.Errorf("after chat.rewind %q", got)
+	}
+}
+
+// Paging leaves out the items a rewind took away: the first page holds the
+// latest items still shown, and paging back from it reaches the first item
+// with no page empty or seen twice.
+func TestPagesLeaveRewoundItemsOut(t *testing.T) {
+	var lines []string
+	parent := "null"
+	for i := 1; i <= 80; i++ {
+		lines = append(lines,
+			fmt.Sprintf(`{"type":"user","uuid":"u%d","parentUuid":%s,"message":{"content":"第 %d 条"}}`, i, parent, i),
+			fmt.Sprintf(`{"type":"assistant","uuid":"a%d","parentUuid":"u%d","message":{"content":[{"type":"text","text":"回复 %d"}]}}`, i, i, i))
+		parent = fmt.Sprintf(`"a%d"`, i)
+	}
+	// Back to before the 51st message: 30 turns, 60 items, go.
+	next := `{"type":"user","uuid":"n1","parentUuid":"a50","message":{"content":"新的第 51 条"}}`
+	rewound := func(t *testing.T) *transcript.Transcript {
+		tr, err := transcript.Parse(strings.NewReader(strings.Join(lines, "\n") + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if removed := tr.Rewind("u51"); len(removed) != 60 {
+			t.Fatalf("rewind removed %d items", len(removed))
+		}
+		return tr
+	}
+	// pages pages back from the newest as the phone does, from the oldest
+	// item of the page before.
+	pages := func(tr interface {
+		Page(int64, int) ([]transcript.Item, bool)
+	}) [][]transcript.Item {
+		var out [][]transcript.Item
+		for before := int64(0); len(out) < 10; {
+			page, more := tr.Page(before, 50)
+			out = append(out, page)
+			if !more || len(page) == 0 {
+				break
+			}
+			before = page[0].Seq
+		}
+		return out
+	}
+
+	got := pages(rewound(t))
+	if len(got) != 2 || len(got[0]) != 50 || len(got[1]) != 50 {
+		t.Fatalf("pages of %v items", lens(got))
+	}
+	if first, last := got[0][0].Text, got[0][49].Text; first != "第 26 条" || last != "回复 50" {
+		t.Errorf("first page runs from %q to %q", first, last)
+	}
+
+	tr, err := transcript.Parse(strings.NewReader(strings.Join(append(lines, next), "\n") + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = pages(tr)
+	seen := map[int64]bool{}
+	var all []transcript.Item
+	for _, page := range got {
+		if len(page) == 0 {
+			t.Errorf("an empty page among %v", lens(got))
+		}
+		for _, it := range page {
+			if it.Kind == protocol.ItemRemoved || seen[it.Seq] {
+				t.Errorf("page item %d %s", it.Seq, it.Kind)
+			}
+			seen[it.Seq] = true
+		}
+		all = append(page, all...)
+	}
+	if len(all) != 101 || all[0].Text != "第 1 条" || all[100].Text != "新的第 51 条" {
+		t.Errorf("paged %d items, from %q to %q", len(all), all[0].Text, all[len(all)-1].Text)
+	}
+}
+
+func lens(pages [][]transcript.Item) []int {
+	var n []int
+	for _, p := range pages {
+		n = append(n, len(p))
+	}
+	return n
+}
+
+// Rewound to before the first message, whose record has no parent, the
+// next message has none either: the old first turn goes too.
+func TestRewoundToBeforeTheFirstMessage(t *testing.T) {
+	lines := []string{
+		`{"type":"user","uuid":"a","parentUuid":null,"message":{"content":"第一条"}}`,
+		`{"type":"assistant","uuid":"b","parentUuid":"a","message":{"content":[{"type":"text","text":"回复一"}]}}`,
+		`{"type":"user","uuid":"c","parentUuid":"b","message":{"content":"第二条"}}`,
+		`{"type":"assistant","uuid":"d","parentUuid":"c","message":{"content":[{"type":"text","text":"回复二"}]}}`,
+		`{"type":"user","uuid":"n","parentUuid":null,"message":{"content":"新的第一条"}}`,
+	}
+	tr, err := transcript.Parse(strings.NewReader(strings.Join(lines, "\n") + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(shown(tr.Items()), "|"); got != "user 新的第一条" {
+		t.Errorf("items %q", got)
+	}
+	// Rewound from the phone first, as chat.rewind does before anything is written.
+	tr, _ = transcript.Parse(strings.NewReader(strings.Join(lines[:4], "\n") + "\n"))
+	if removed := tr.Rewind("a"); len(removed) != 4 {
+		t.Errorf("rewind removed %v", removed)
 	}
 }

@@ -57,10 +57,11 @@ class ProtocolSamplesTest {
         "chat.autoResume.req" to ChatAutoResumeRequest.serializer(),
         "chat.autoResume.res" to ChatAutoResumeResponse.serializer(),
         "chat.rewind.req" to ChatRewindRequest.serializer(),
-        "chat.rewind.res" to Empty.serializer(),
+        "chat.rewind.res" to ChatRewindResponse.serializer(),
         "chat.items.evt" to ChatItemsEvent.serializer(),
         "chat.pending.evt" to ChatPendingEvent.serializer(),
         "chat.state.evt" to ChatStateEvent.serializer(),
+        "chat.tasks.evt" to ChatTasksEvent.serializer(),
         "session.create.req" to SessionCreateRequest.serializer(),
         "session.create.res" to SessionCreateResponse.serializer(),
         "session.stop.req" to SessionIdRequest.serializer(),
@@ -129,6 +130,12 @@ class ProtocolSamplesTest {
         val reencodedBody = if (env.error == null && env.body != null) reencode(serializer, env.body) else env.body
         val out = env.copy(body = reencodedBody).encode()
         assertSameFields(ProtocolJson.parseToJsonElement(raw), ProtocolJson.parseToJsonElement(out))
+    }
+
+    @Test fun aChatOpenWithoutTasksHasNone() {
+        fun tasks(name: String) = ProtocolJson.decodeFromJsonElement(ChatOpenResponse.serializer(), Envelope.decode(File(testdata, name).readText()).body!!).tasks.orEmpty()
+        assertEquals(emptyList<ChatTask>(), tasks("chat.open.res.json"))
+        assertEquals(listOf("1:completed:", "2:in_progress:正在建 marker.txt"), tasks("chat.open.res.tasks.json").map { "${it.id}:${it.status}:${it.activeForm.orEmpty()}" })
     }
 
     @Test fun phoneHttpSamplesRoundTrip() {

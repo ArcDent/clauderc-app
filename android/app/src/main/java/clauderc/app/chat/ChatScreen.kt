@@ -244,7 +244,11 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
             navigation = { SymbolButton(Symbols.ArrowBack, "返回", onClick = actions.onBack) },
             title = {
                 BarTitle(title) {
-                    BarSubButton(modelLabel(state.model).ifEmpty { "模型" }, onClick = openModels, enabled = state.online)
+                    // Short of room, the model's name gives way: the mode and the context show whole.
+                    BarSubButton(
+                        modelLabel(state.model).ifEmpty { "模型" }, onClick = openModels, enabled = state.online,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
                     BarSubButton(permissionModeLabel(state.permissionMode), onClick = { sheet = ChatSheet.Mode }, enabled = state.online)
                     contextPercent(state.session?.context)?.let {
                         Text("上下文 $it%", fontSize = Clauderc.fontSizes.caption, color = c.fg2, maxLines = 1)
@@ -349,7 +353,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
     }
 
     rewinding?.let { item ->
-        val files = remember(item, state.items) { turnFiles(state.items, item) }
+        val files = remember(item, state.items) { filesChangedSince(state.items, item) }
         RewindSheet(item, files, onDismiss = { rewinding = null }) { mode ->
             rewinding = null
             actions.onRewind(item, mode)
@@ -556,7 +560,7 @@ internal fun MessageList(
     }
     // A session at work or waiting on the user does not rewind, so its messages do not slide.
     val rewind = onRewind?.let { ask -> remember(ask) { RewindHub(ask) } }
-    rewind?.enabled = state.state == SessionState.Idle && state.pending == null && !state.rewinding
+    rewind?.enabled = state.online && state.state == SessionState.Idle && state.pending == null && !state.rewinding
     // A new bottom item that arrives while the list sits at the bottom is pinned there in the same
     // frame. Left alone, the list keeps the item that was at the bottom in place, so the new one lands
     // below the edge and a scroll has to catch up: the jump of plans.md 1. Away from the bottom
@@ -1122,7 +1126,15 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
     val text = field.text
     // A failed send hands its text back, unless something new was typed meanwhile.
     // A rewind puts its message back whatever was typed: that message is what the conversation goes on from.
-    LaunchedEffect(state.restore) { state.restore?.let { if (field.text.isBlank() || it.replace) field = TextFieldValue(it.text, TextRange(it.text.length)) } }
+    // What comes back into the composer is saved as the draft too, as if typed.
+    LaunchedEffect(state.restore) {
+        state.restore?.let {
+            if (field.text.isBlank() || it.replace) {
+                field = TextFieldValue(it.text, TextRange(it.text.length))
+                actions.onDraft(it.text)
+            }
+        }
+    }
     // With the keyboard put away there is nothing to type into, so the field lets go and its cursor stops
     // blinking: two frames a second that the phone draws slowly while it idles. A tap takes it back. Only
     // once the keyboard was up: clearing focus as the page opens would stir the input method mid-slide.
@@ -1169,11 +1181,18 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                 }
             }
         }
+        // Round 10: the task list sits over the status line. Keep the last list while the bar leaves.
+        var tasks by remember { mutableStateOf(state.tasks) }
+        if (state.tasks.isNotEmpty()) tasks = state.tasks
+        Lift(visible = state.tasks.isNotEmpty()) {
+            Box(block) { TaskBar(tasks) }
+        }
         Lift(visible = state.state == SessionState.Working) {
             Box(block) { WorkingRow(state.workingSinceMillis, enabled, actions.onInterrupt, state.activity) }
         }
-        // Where 「工作中」 sits: the session waits on something only the terminal can show.
-        Lift(visible = state.unknownDialog && state.pending == null) {
+        // Where 「工作中」 sits: the session waits on something only the terminal can show. Not while the
+        // agent rewinds: the panel it has open is what reads as a dialog.
+        Lift(visible = state.unknownDialog && state.pending == null && !state.rewinding) {
             Box(block) { BlockedRow(enabled, actions.onOpenTerm) }
         }
         // Keep the last limit while the row leaves.

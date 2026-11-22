@@ -21,6 +21,8 @@ import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.unit.DpRect
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.protocol.ChatItem
@@ -225,6 +227,28 @@ class LiveReplyTest {
         assertEquals("one bubble for the reply", 1, typing)
         compose.mainClock.advanceTimeBy(4_000)
         assertEquals(reply, typing().shown())
+    }
+
+    /** A code block scrolled sideways stays put as the reply grows and types out again, preview to written reply. */
+    @Test fun aScrolledCodeBlockStaysPutAsTheReplyGrows() {
+        val code = "看这段：\n\n```go\nx := " + "veryLongIdentifier".repeat(12) + "\n```\n"
+        show(ChatUiState(loading = false, state = SessionState.Working, items = items(6)))
+        next { it.copy(partial = PartialReply(code, "partial-1", afterSeq = 6)) }
+        compose.mainClock.advanceTimeBy(4_000)
+        compose.onNodeWithTag("code", useUnmergedTree = true).performTouchInput { swipeLeft() }
+        compose.mainClock.advanceTimeBy(1_000)
+        fun offset() = compose.onNodeWithTag("code", useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange].value()
+        val at = offset()
+        assertTrue("scrolled sideways: $at", at > 0f)
+        next { it.copy(partial = PartialReply(code + "\n再补一句。", "partial-1", afterSeq = 6)) }
+        compose.mainClock.advanceTimeBy(300)
+        next { it.copy(partial = PartialReply(code + "\n再补一句。还有一句。", "partial-1", afterSeq = 6)) }
+        compose.mainClock.advanceTimeBy(300)
+        next { it.copy(items = it.items + ChatItem(7, ItemKind.ASSISTANT, text = code + "\n再补一句。还有一句。最后一句。"), keys = mapOf(7L to "partial-1"), partial = null) }
+        compose.mainClock.advanceTimeBy(300)
+        assertEquals("while it types", at, offset(), 0.5f)
+        compose.mainClock.advanceTimeBy(4_000)
+        assertEquals("once typed out", at, offset(), 0.5f)
     }
 
     @Test fun theStatusLineShowsTheScreensWordsAndATurningStar() {

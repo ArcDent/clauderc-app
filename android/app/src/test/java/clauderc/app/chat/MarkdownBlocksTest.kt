@@ -15,6 +15,13 @@ class MarkdownBlocksTest {
     private fun bold(s: String) = MdRun(RunKind.BOLD, s)
     private fun para(vararg runs: MdRun) = Paragraph(runs.toList())
 
+    /** The text between two formulas on lines of their own starts with its words, no line break before them. */
+    @Test fun theTextBetweenTwoFormulasStartsWithItsWords() {
+        val blocks = mdBlocks("\$\$a\$\$\n中间\n\$\$b\$\$")
+        assertEquals(listOf("Math", "Paragraph", "Math"), blocks.map { it::class.simpleName })
+        assertEquals("中间", (blocks[1] as Paragraph).runs.joinToString("") { it.text })
+    }
+
     @Test fun eachKindOfBlockIsCutOut() {
         val reply = """
             ## 重连退避

@@ -201,7 +201,24 @@ data class ChatOpenResponse(
     val partial: String? = null,
     /** Set while the session waits out a plan usage limit whose reset time is known. */
     val limit: Limit? = null,
+    /** The session's Claude Code task list, oldest task first; absent when it has none. */
+    val tasks: List<ChatTask>? = null,
 )
+
+/** Where a task of Claude Code's task list stands. */
+object TaskStatus {
+    const val PENDING = "pending"
+    const val IN_PROGRESS = "in_progress"
+    const val COMPLETED = "completed"
+}
+
+/** One task of the session's task list; [activeForm] is what the status line says while it is in progress. */
+@Serializable
+data class ChatTask(val id: String, val subject: String, val activeForm: String? = null, val status: String)
+
+/** chat.tasks: the session's task list whenever it changed, whole; empty once Claude Code cleared it. */
+@Serializable
+data class ChatTasksEvent(val sessionId: String, val tasks: List<ChatTask>)
 
 /** The plan usage limit a session ran into, as in Claude Code's 「You've hit your 5-hour limit · resets 10:40pm」. */
 @Serializable
@@ -237,9 +254,13 @@ object RewindRestore {
     const val CODE = "code"
 }
 
-/** chat.rewind: back to before the user message [uuid], taking back what [restore] names; the response is empty. */
+/** chat.rewind: back to before the user message [uuid], taking back what [restore] names. */
 @Serializable
 data class ChatRewindRequest(val sessionId: String, val uuid: String, val restore: String)
+
+/** Answers a rewind that happened; [notice] says what went wrong after it, such as the computer's input box left holding the message. */
+@Serializable
+data class ChatRewindResponse(val notice: String? = null)
 
 @Serializable
 data class ChatSendRequest(

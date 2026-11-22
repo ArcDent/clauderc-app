@@ -673,6 +673,31 @@ class ScreensTest {
         }
     }
 
+    /** Round 10: the task list over the input, folded and unfolded, while the session works. */
+    @Test fun taskBar() {
+        compose.mainClock.autoAdvance = false
+        val chat = ChatUiState(
+            session = session("s20", "退避说明", SessionState.Working, "default", context = SessionContext(28_000, 200_000)), loading = false,
+            model = "claude-opus-5-5", permissionMode = "default", state = SessionState.Working, hasMore = false,
+            workingSinceMillis = System.currentTimeMillis() - 42_000, activity = "正在按位置核对光标… (42s · ↓ 3.1k tokens)",
+            items = listOf(
+                ChatItem(1, ItemKind.USER, text = "把回溯面板的长列表也处理好", uuid = "u-1"),
+                ChatItem(2, ItemKind.ASSISTANT, text = "好，先列个清单。"),
+            ),
+            tasks = listOf(
+                clauderc.app.protocol.ChatTask("1", "读懂回溯面板的长列表", status = "completed"),
+                clauderc.app.protocol.ChatTask("2", "按位置核对光标", activeForm = "正在按位置核对光标", status = "in_progress"),
+                clauderc.app.protocol.ChatTask("3", "补长列表的测试", status = "pending"),
+                clauderc.app.protocol.ChatTask("4", "跑真实回归", status = "pending"),
+            ),
+        )
+        for (s in UiStyle.entries) for (isDark in listOf(false, true)) {
+            val tail = "${s.name.lowercase()}${if (isDark) "-dark" else ""}"
+            shot("26-chat-tasks-folded-$tail", isDark, look = s, fresh = true) { ChatScreen(chat, ChatActions()) }
+            shot("26-chat-tasks-open-$tail", isDark, look = s, fresh = true, open = { compose.onNodeWithTag("taskHead").performClick() }) { ChatScreen(chat, ChatActions()) }
+        }
+    }
+
     /** Round 5 item 13: git's 「最近的目录」 with eight directories, its outline only along the sheet's edge. */
     @Test fun recentDirsSheet() {
         compose.mainClock.autoAdvance = false

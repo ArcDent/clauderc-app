@@ -33,6 +33,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -139,14 +140,14 @@ internal val BubbleText = TextStyle(fontSize = 15.sp, lineHeight = 1.55.em)
 /**
  * [runs] styled in [color]: `code` in mono a size down, **bold** at 600, both keeping the colour; a
  * link opens [links]' menu when tapped, its stretch shaded 12% while pressed. A formula is inline
- * content written as its LaTeX (ReplyMath.kt), or that LaTeX in mono and [muted] when it cannot be drawn.
+ * content written as its LaTeX (ReplyMath.kt) when [drawn] has its id, else that LaTeX in mono and [muted].
  */
-private fun styled(runs: List<MdRun>, color: Color, muted: Color, links: TextLinks): AnnotatedString = buildAnnotatedString {
+internal fun styled(runs: List<MdRun>, color: Color, muted: Color, links: TextLinks, drawn: Set<String>): AnnotatedString = buildAnnotatedString {
     for ((i, r) in runs.withIndex()) {
         when (r.kind) {
             RunKind.TEXT -> append(r.text)
             RunKind.MATH ->
-                if (canDraw(r.tex)) appendInlineContent(mathId(i), r.text)
+                if (mathId(i) in drawn) appendInlineContent(mathId(i), r.text)
                 else withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = 0.86.em, color = muted)) { append(r.text) }
             RunKind.CODE -> withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = 0.86.em)) { append(r.text) }
             RunKind.BOLD -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(r.text) }
@@ -167,8 +168,9 @@ private fun styled(runs: List<MdRun>, color: Color, muted: Color, links: TextLin
 internal fun RunsText(runs: List<MdRun>, shown: Int, color: Color, modifier: Modifier = Modifier, style: TextStyle = BubbleText, softWrap: Boolean = true) {
     val links = remember { TextLinks() }
     val muted = Clauderc.colors.fg2
-    val full = remember(runs, color, muted) { styled(runs, color, muted, links) }
     val math = if (runs.any { it.kind == RunKind.MATH }) mathInline(runs, color, style.fontSize.takeIf { it.isSpecified } ?: BubbleText.fontSize) else emptyMap()
+    // A formula the library gave no content for shows as written, not as plain text.
+    val full = remember(runs, color, muted, math.keys) { styled(runs, color, muted, links, math.keys) }
     val cut = visibleLength(runs, shown)
     Box(modifier) {
         Text(
@@ -469,7 +471,10 @@ private class RowTops {
  */
 @Composable
 internal fun BubbleSelection(enabled: Boolean, mine: Boolean, content: @Composable () -> Unit) {
-    if (!enabled) return content()
+    // A reply goes in and out of the selection container as it starts and stops typing; moved, not
+    // composed again, it keeps its code and tables where they were scrolled and its measured formulas.
+    val body = remember { movableContentOf { inner: @Composable () -> Unit -> inner() } }
+    if (!enabled) return body(content)
     val c = Clauderc.colors
     val tint = when {
         !mine -> c.accent.copy(alpha = 0.28f)
@@ -481,7 +486,7 @@ internal fun BubbleSelection(enabled: Boolean, mine: Boolean, content: @Composab
     val telling = remember(plain, snack) { TellingClipboard(plain) { snack?.show("已复制") } }
     CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(c.accent, tint), LocalClipboard provides telling) {
         SelectionContainer {
-            CompositionLocalProvider(LocalClipboard provides plain, content = content)
+            CompositionLocalProvider(LocalClipboard provides plain) { body(content) }
         }
     }
 }

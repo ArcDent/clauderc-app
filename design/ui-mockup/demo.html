@@ -6,6 +6,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;700&display=swap">
 <!-- 第九轮：公式用 KaTeX 画，APP 里的库用的也是 KaTeX 字体 -->
+<!-- 第十轮：任务清单条放在输入框上方（2026-11-22 已批准） -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300..500,0..1,0&icon_names=account_tree,add,alt_route,animation,arrow_back,arrow_upward,backspace,battery_full,call_split,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,content_copy,contrast,delete,description,dns,download,edit,error,expand_more,folder,forum,history,image,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,keyboard_return,keyboard_tab,lock,mail,more_vert,open_in_browser,palette,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,settings,signal_cellular_alt,stop,style,terminal,upload,visibility,visibility_off,wallpaper,warning,wifi&display=block">
@@ -1793,6 +1794,45 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 .rw-files { font-family: var(--font-mono); }
 [data-dir="grid"] .rw-quote { box-shadow: inset 2px 0 0 var(--c-fg-3); font-family: var(--font-mono); font-size: 13px; }
 [data-dir="sticker"] .rw-quote { box-shadow: inset 3px 0 0 var(--c-accent); }
+
+/* ================= 第十轮：任务清单条（2026-11-22 已批准，放输入框上方） ================= */
+/* 收起时一行：状态符号、进行中那条的标题、完成数/总数、展开箭头；点一下展开整张清单，完成的变淡，最多 6 行，多了在里面滚 */
+.tasks { flex: none; display: flex; flex-direction: column; font-size: var(--fs-label); color: var(--c-fg-2); }
+.tk-head { flex: none; display: flex; align-items: center; gap: var(--sp-3); width: 100%; height: 40px; border: 0; background: none; padding: 0 var(--sp-2) 0 var(--sp-4); text-align: left; color: inherit; font: inherit; }
+.tk-g { flex: none; width: 14px; text-align: center; font-size: 12px; line-height: 1; color: var(--c-fg); }
+.tk-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--c-fg); }
+.tk-n { flex: none; font-variant-numeric: tabular-nums; color: var(--c-fg-3); }
+.tk-head .ms { flex: none; font-size: 20px; color: var(--c-fg-3); transition: transform var(--dur-m) var(--ease-emph); }
+.tasks.open .tk-head .ms { transform: rotate(180deg); }
+.tk-list { list-style: none; margin: 0; padding: 0 0 var(--sp-2); max-height: calc(32px * 6 + var(--sp-2)); overflow-y: auto; scrollbar-width: none; }
+.tk-list::-webkit-scrollbar { display: none; }
+.tk-list li { display: flex; align-items: center; gap: var(--sp-3); height: 32px; padding: 0 var(--sp-4); }
+.tk-list .tk-g, .tk-list .tk-t { color: var(--c-fg-2); }
+.tk-list li.on .tk-g, .tk-list li.on .tk-t { color: var(--c-fg); }
+.tk-list li.done .tk-g, .tk-list li.done .tk-t { color: var(--c-fg-3); }
+/* 顶栏版：贴着顶栏下沿，一道细线和消息分开；展开时把消息往下推 */
+.tasks.at-top { position: relative; z-index: 3; background: var(--c-bg); box-shadow: 0 0.5px 0 var(--c-line); }
+/* 输入框版：状态行上面一整条，展开时清单往上长，箭头朝上 */
+.tasks.at-dock { border-radius: 20px; background: var(--c-surface); }
+.tasks.at-dock .tk-list { order: -1; padding: var(--sp-2) 0 0; }
+.tasks.at-dock .tk-head .ms { transform: rotate(180deg); }
+.tasks.at-dock.open .tk-head .ms { transform: none; }
+/* 清玻：顶栏版跟顶栏连成一块玻璃，消息从底下滑过；输入框版和状态行一样是浮着的玻璃条 */
+[data-dir="clear"] .page[data-route="chat"] > .tasks.at-top { position: absolute; left: 0; right: 0; top: 92px; margin-top: 0; z-index: 5; background: var(--k-pane); -webkit-backdrop-filter: blur(22px) saturate(1.8); backdrop-filter: blur(22px) saturate(1.8); box-shadow: 0 0.5px 0 var(--k-edgec); }
+[data-dir="clear"] .page[data-route="chat"] > .appbar { box-shadow: none; }
+[data-dir="clear"] .page[data-route="chat"] > .appbar + .tasks + .content { padding-top: 56px; transition: padding-top var(--dur-m) var(--ease-emph); }
+[data-dir="clear"] .page[data-route="chat"] > .appbar + .tasks.at-top:not([hidden]) + .content { padding-top: 96px; }
+[data-dir="clear"] .tasks.at-dock { background: var(--k-pane); -webkit-backdrop-filter: blur(22px) saturate(1.8); backdrop-filter: blur(22px) saturate(1.8); box-shadow: inset 0 1px 1px var(--k-rimc), 0 0 0 0.5px var(--k-edgec), 0 10px 26px -12px rgba(0, 0, 0, 0.28); }
+/* 格栅：等宽字，顶栏版下面一道粗黑线，输入框版是直角细框 */
+[data-dir="grid"] .tasks { font-family: var(--font-mono); font-size: 12px; }
+[data-dir="grid"] .tk-n { font-size: 12px; }
+[data-dir="grid"] .tasks.at-top { box-shadow: 0 2px 0 var(--c-fg); }
+[data-dir="grid"] .tasks.at-dock { border-radius: 6px; background: var(--c-bg); box-shadow: inset 0 0 0 1px var(--c-fg); }
+/* 贴纸：粗字，输入框版是带墨线和落影的贴纸，进行中的符号用强调色 */
+[data-dir="sticker"] .tasks { font-weight: 700; }
+[data-dir="sticker"] .tasks.at-top { box-shadow: 0 2px 0 var(--k-ink); }
+[data-dir="sticker"] .tasks.at-dock { border-radius: 18px; background: var(--c-card); border: 2px solid var(--k-ink); box-shadow: 0 4px 0 var(--k-ink); }
+[data-dir="sticker"] .tk-head > .tk-g, [data-dir="sticker"] .tk-list li.on .tk-g { color: var(--c-accent); }
 </style>
 
 <!-- 第四轮：卡通图标（24 格，2 像素圆头线，APP 里照这些路径画） -->
@@ -1826,15 +1866,11 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     </div>
     <div class="themes" role="group" aria-label="样式" id="styleSet"></div>
 
-    <section class="knob" id="r9">
-      <h2>第九轮（2026-11-22 已批准）</h2>
-      <h3>回复里的公式</h3>
-      <p class="desk-note" style="margin:0">块级公式 $$…$$、\[…\] 单独占行，比气泡宽时在块里横向滚动；行内公式 \(…\)、$…$ 跟着文字走。公式和正文同色，块级的极简、贴纸居中，格栅靠左。价格「$5 到 $10」、$PATH 这类不算公式。写错或画不了的公式照原文显示成等宽灰字。逐字出现时公式到了整个出来，不出半截；选中复制得到原来的 LaTeX。</p>
-      <div class="knob-btns"><button type="button" class="desk-btn" data-r9="formula">打开公式示例</button><button type="button" class="desk-btn" data-r9="ftype">跑一轮带公式的回复</button><button type="button" class="desk-btn" data-r9="fsel">选中一段带公式的字</button></div>
-      <h3>用户消息左滑回溯</h3>
-      <p class="desk-note" style="margin:0">你发的消息整行左滑，右边让出 60dp，露出一枚回溯圆钮，不带小字，和单行气泡一样高、对着气泡竖直居中，松手过一半停住；会话在工作或等你确认时滑不动。点圆钮从底部升起面板，先引用这条消息；这一轮改过文件时选「对话和代码都回去」「只回对话」「只回代码」，没改文件就只回对话。Claude Code 面板里的两种总结不放进来。</p>
-      <p class="desk-note" style="margin:0">确认后底部出一行「正在回溯…」。回对话时这条和之后的消息收起，原文填回输入框；只回代码时对话不动，弹提示条。目标机在 Claude Code 面板里对不上这条消息时退出面板，手机弹提示条并打开终端视图，让你自己选。</p>
-      <div class="knob-btns"><button type="button" class="desk-btn" data-r9="swipe">左滑一条消息</button><button type="button" class="desk-btn" data-r9="sheet">打开回溯面板</button><button type="button" class="desk-btn" data-r9="ok">回溯成功</button><button type="button" class="desk-btn" data-r9="code">只回代码</button><button type="button" class="desk-btn" data-r9="fail">回溯失败转终端</button><button type="button" class="desk-btn" data-r9="busy">会话在工作时滑一下</button></div>
+    <section class="knob" id="r10">
+      <h2>第十轮：任务清单条（2026-11-22 已批准）</h2>
+      <p class="desk-note" style="margin:0">Claude Code 建了任务清单时，聊天页多一条。收起时一行：状态符号、进行中那条的标题、完成数/总数；点一下展开整张清单，◼ 进行中、◻ 没开始、✔ 做完（变淡），最多 6 行，多了在里面滚。任务状态变了，条跟着变。全部做完先显示「✔ 全部完成」，Claude Code 清掉清单后条退场。条上只写标题，进行中的动词已经在状态行里。</p>
+      <p class="desk-note" style="margin:0">放在输入框上方，挨着状态行，展开时清单往上长。</p>
+      <div class="knob-btns"><button type="button" class="desk-btn" data-r10="show">打开带清单的会话</button><button type="button" class="desk-btn" data-r10="toggle">展开 / 收起</button><button type="button" class="desk-btn" data-r10="step">推进一条</button><button type="button" class="desk-btn" data-r10="long">清单有 9 条</button><button type="button" class="desk-btn" data-r10="finish">全部做完后退场</button></div>
       <label class="check"><input type="checkbox" data-k="slow">慢放 5 倍</label>
     </section>
   </aside>
@@ -4058,8 +4094,10 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       '<div class="bar-title"><h1>' + esc(s.title) + '</h1><span class="bar-sub"><button type="button" data-act="model"><span class="v-model">' + esc(s.model) + '</span><span class="ms">expand_more</span></button><button type="button" data-act="mode"><span class="v-mode">' + esc(s.mode) + '</span><span class="ms">expand_more</span></button>' + (s.ctx != null ? '<span class="v-ctx">' + ctxText(s) + "</span>" : "") + '</span></div>' +
       '<button type="button" class="icon-btn" data-act="open-term" aria-label="打开终端"><span class="ms">terminal</span></button>' +
       '<button type="button" class="icon-btn" data-act="chat-git" aria-label="打开 git"><span class="ms">account_tree</span></button></header>' +
+      '<div class="tasks at-top" hidden></div>' +
       '<div class="content"><div class="msgs"></div></div>' +
       '<div class="dock"><div class="composer-wrap"><div class="slash" hidden><ul></ul></div>' +
+      '<div class="tasks at-dock whole" hidden></div>' +
       '<div class="working whole" hidden><span class="cli-spin">·</span><span class="w-text"><span class="w-verb"></span><span class="w-det"></span></span><button type="button" class="tbtn" data-act="interrupt">中断</button></div>' +
       '<div class="working blocked whole" hidden><span class="glyph g-need"></span><span>会话停在一个对话框上</span><span class="grow"></span><button type="button" class="tbtn" data-act="open-term">打开终端</button></div>' +
       '<div class="limit whole" hidden></div>' +
@@ -4075,6 +4113,9 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     page.attach = $(".attach", page.el);
     page.limit = $(".limit", page.el);
     paintLimit(page, false);
+    page.tasksTop = $(".tasks.at-top", page.el);
+    page.tasksDock = $(".tasks.at-dock", page.el);
+    paintTasks(page, false);
     page.slash = $(".slash", page.el);
     page.sendBtn = $(".send", page.el);
     s.msgs.forEach(function (it) { page.msgs.appendChild(itemEl(it)); });
@@ -5296,6 +5337,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     renderDirDesk();
     bindDirDesk();
     bindR9();
+    bindR10();
   }
 
   // ---------- 第六轮：git 入口、Fork、Worktree ----------
@@ -5826,6 +5868,105 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       });
     }
   };
+  // ---------- 第十轮：任务清单条 ----------
+  // 已批准：条放在输入框上方（顶栏下方那版没选）
+  var TK = { at: "dock" };
+  var TK_G = { pending: "◻", in_progress: "◼", completed: "✔" };
+  function tkDone(ts) { return ts.filter(function (t) { return t.status === "completed"; }).length; }
+  function tkHead(ts) {
+    var done = tkDone(ts), all = done === ts.length;
+    var on = ts.filter(function (t) { return t.status === "in_progress"; })[0] || ts.filter(function (t) { return t.status === "pending"; })[0];
+    return '<button type="button" class="tk-head" data-act="tk-toggle" aria-expanded="false"><span class="tk-g">' + (all ? "✔" : TK_G[on.status]) + '</span>' +
+      '<span class="tk-t">' + (all ? "全部完成" : esc(on.subject)) + '</span><span class="tk-n">' + done + "/" + ts.length + '</span>' +
+      '<span class="ms">expand_more</span></button>';
+  }
+  function tkList(ts) {
+    return '<ul class="tk-list">' + ts.map(function (t) {
+      return '<li class="' + (t.status === "completed" ? "done" : t.status === "in_progress" ? "on" : "") + '"><span class="tk-g">' + TK_G[t.status] + '</span><span class="tk-t">' + esc(t.subject) + "</span></li>";
+    }).join("") + "</ul>";
+  }
+  // 画出当前位置那一条，另一条收起；清单没了就退场
+  function paintTasks(page, animate) {
+    if (!page.tasksTop) return;
+    var ts = page.s.tasks || [], n = TK.at === "top" ? page.tasksTop : page.tasksDock, other = n === page.tasksTop ? page.tasksDock : page.tasksTop;
+    lift(other, false, 8, other === page.tasksTop, false);
+    if (!ts.length) { page.tkOpen = false; lift(n, false, 8, n === page.tasksTop, animate); n.classList.remove("open"); return; }
+    var list = $(".tk-list", n), keep = list ? list.scrollTop : 0;
+    n.innerHTML = tkHead(ts) + (page.tkOpen ? tkList(ts) : "");
+    n.classList.toggle("open", !!page.tkOpen);
+    $(".tk-head", n).setAttribute("aria-expanded", String(!!page.tkOpen));
+    if (page.tkOpen) $(".tk-list", n).scrollTop = keep;
+    lift(n, true, 8, n === page.tasksTop, animate);
+  }
+  // 展开：清单从 0 高长出来，行淡入；收起倒过来
+  function tkToggle(page) {
+    var n = TK.at === "top" ? page.tasksTop : page.tasksDock;
+    if (!n || n.hidden || !(page.s.tasks || []).length) return;
+    page.tkOpen = !page.tkOpen;
+    n.classList.toggle("open", page.tkOpen);
+    $(".tk-head", n).setAttribute("aria-expanded", String(page.tkOpen));
+    if (page.tkOpen) {
+      n.insertAdjacentHTML("beforeend", tkList(page.s.tasks));
+      var l = $(".tk-list", n), h = l.offsetHeight, cs = getComputedStyle(l);
+      l.animate([{ height: "0px", paddingTop: "0px", paddingBottom: "0px", opacity: 0 }, { height: h + "px", paddingTop: cs.paddingTop, paddingBottom: cs.paddingBottom, opacity: 1 }], { duration: dur("durM"), easing: ez("emph") });
+      note("展开任务清单", dur("durM"), ez("emph"));
+    } else {
+      var l2 = $(".tk-list", n);
+      if (!l2) return;
+      var h2 = l2.offsetHeight, cs2 = getComputedStyle(l2);
+      var a = l2.animate([{ height: h2 + "px", paddingTop: cs2.paddingTop, paddingBottom: cs2.paddingBottom, opacity: 1 }, { height: "0px", paddingTop: "0px", paddingBottom: "0px", opacity: 0 }], { duration: dur("durS"), easing: ez("emphIn"), fill: "forwards" });
+      a.finished.then(function () { if (!page.tkOpen) l2.remove(); }, noop);
+      note("收起任务清单", dur("durS"), ez("emphIn"));
+    }
+  }
+  Object.assign(ACT, { "tk-toggle": function (t) { var p = pageOf(t); if (p) tkToggle(p); } });
+  function setTasks(s, ts) { s.tasks = ts; var p = chatPageOf(s); if (p) paintTasks(p, true); }
+  var TK_DEMO = [
+    { subject: "读懂回溯面板的长列表", status: "completed" },
+    { subject: "按位置核对光标", status: "in_progress" },
+    { subject: "补长列表的测试", status: "pending" },
+    { subject: "跑真实回归", status: "pending" }
+  ];
+  function tkClone(ts) { return ts.map(function (t) { return Object.assign({}, t); }); }
+  var R10A = {
+    show: function () { inMd(function (p) { if (!(p.s.tasks || []).length) setTasks(p.s, tkClone(TK_DEMO)); note("Claude Code 建了 4 条任务", dur("durM"), ez("emph")); }); },
+    toggle: function () { inMd(function (p) { if (!(p.s.tasks || []).length) setTasks(p.s, tkClone(TK_DEMO)); setTimeout(function () { tkToggle(p); }, 60); }); },
+    // 进行中的做完，下一条开始
+    step: function () {
+      inMd(function (p) {
+        var ts = tkClone(p.s.tasks && p.s.tasks.length ? p.s.tasks : TK_DEMO);
+        var i = ts.findIndex(function (t) { return t.status === "in_progress"; });
+        if (i >= 0) ts[i].status = "completed";
+        var j = ts.findIndex(function (t) { return t.status === "pending"; });
+        if (j >= 0) ts[j].status = "in_progress";
+        setTasks(p.s, ts);
+        note(j >= 0 ? "推进一条：" + ts[j].subject : "全部做完");
+      });
+    },
+    long: function () {
+      inMd(function (p) {
+        var ts = tkClone(TK_DEMO).concat(["分页跳过撤掉的条目", "认不出面板也按 Esc", "等回填最多 5 秒", "手机显示目标机给的原因", "派人审查一次"].map(function (x) { return { subject: x, status: "pending" }; }));
+        setTasks(p.s, ts);
+        if (!p.tkOpen) setTimeout(function () { tkToggle(p); }, 60);
+      });
+    },
+    // 全部做完：先显示「全部完成」，约 1.6 秒后 Claude Code 删掉任务文件，条退场
+    finish: function () {
+      inMd(function (p) {
+        var ts = tkClone(p.s.tasks && p.s.tasks.length ? p.s.tasks : TK_DEMO);
+        ts.forEach(function (t) { t.status = "completed"; });
+        setTasks(p.s, ts);
+        note("全部做完，约 1.6 秒后清单清空");
+        setTimeout(function () { setTasks(p.s, []); note("清单清空：条退场", dur("durS"), ez("emphIn")); }, 1600 * slowK());
+      });
+    }
+  };
+  function bindR10() {
+    $(".desk").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-r10]");
+      if (b) R10A[b.dataset.r10]();
+    });
+  }
   function bindR9() {
     $(".desk").addEventListener("click", function (e) {
       var b = e.target.closest("[data-r9]");

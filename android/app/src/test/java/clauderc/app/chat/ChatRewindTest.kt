@@ -16,6 +16,7 @@ import clauderc.app.data.Fleet
 import clauderc.app.protocol.ChatItem
 import clauderc.app.protocol.ChatOpenResponse
 import clauderc.app.protocol.ChatRewindRequest
+import clauderc.app.protocol.ChatRewindResponse
 import clauderc.app.protocol.ErrorCode
 import clauderc.app.protocol.Hunk
 import clauderc.app.protocol.ItemKind
@@ -101,6 +102,19 @@ class ChatRewindTest {
         compose.onNodeWithTag("rewindAction").assertDoesNotExist()
     }
 
+    /** Offline the page is read only: no rewind either. While the agent rewinds, its panel is no dialog to open the terminal for. */
+    @Test fun noRewindOfflineAndNoDialogRowWhileRewinding() {
+        var s by mutableStateOf(state().copy(online = false))
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(s, ChatActions()) } }
+        compose.waitForIdle()
+        compose.onNodeWithTag("userRow:2").performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        compose.onNodeWithTag("rewindAction").assertDoesNotExist()
+        compose.runOnUiThread { s = state().copy(unknownDialog = true, rewinding = true) }
+        compose.waitForIdle()
+        compose.onNodeWithText("会话停在一个对话框上").assertDoesNotExist()
+    }
+
     @Test fun theSheetQuotesTheMessageAndSendsTheWayBackPicked() {
         val asked = mutableListOf<Pair<ChatItem, String>>()
         compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state(), ChatActions(onRewind = { item, mode -> asked += item to mode })) } }
@@ -129,16 +143,33 @@ class ChatRewindTest {
         compose.waitForIdle()
         compose.onNodeWithTag("rewindAction").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("这一轮没改文件，只回对话。对话回去后，这条消息填回输入框。").assertIsDisplayed()
+        compose.onNodeWithText("这条消息之后没改过文件，只回对话。对话回去后，这条消息填回输入框。").assertIsDisplayed()
         compose.onNodeWithText("只回代码").assertDoesNotExist()
         compose.onNodeWithText("回溯").performClick()
         compose.waitForIdle()
         assertEquals(listOf(RewindRestore.CONVERSATION), asked)
     }
 
+    /** Claude Code offers the code back for a message whose own turn changed nothing when a later one did. */
+    @Test fun aMessageBeforeATurnThatChangedFilesOffersTheCodeToo() {
+        val first = ChatItem(1, ItemKind.USER, text = "先讲讲退避", uuid = "u-1")
+        val earlier = listOf(first) + items.drop(1)
+        assertEquals(listOf("conn.go +1 −1"), filesChangedSince(earlier, first))
+        assertEquals(emptyList<String>(), filesChangedSince(items, items[4]))
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state().copy(items = earlier), ChatActions()) } }
+        compose.waitForIdle()
+        compose.onNodeWithTag("userRow:1").performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        compose.onNodeWithTag("rewindAction").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("conn.go +1 −1 改回去").assertIsDisplayed()
+        compose.onNodeWithText("只回代码").assertIsDisplayed()
+    }
+
     @Test fun aRewoundMessageTakesTheComposersPlace() {
         var s by mutableStateOf(state())
-        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(s, ChatActions()) } }
+        val drafts = mutableListOf<String>()
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(s, ChatActions(onDraft = { drafts += it })) } }
         compose.waitForIdle()
         compose.runOnUiThread { s = s.copy(restore = Restore(1, "先写一半的草稿")) }
         compose.waitForIdle()
@@ -147,6 +178,8 @@ class ChatRewindTest {
         compose.waitForIdle()
         compose.onNodeWithText("先写一半的草稿").assertDoesNotExist()
         compose.onNodeWithText("把退避上限改成 60 秒").assertIsDisplayed()
+        // Saved as the draft, so leaving the page keeps it.
+        assertEquals("把退避上限改成 60 秒", drafts.last())
     }
 
     private fun hasTestTagQuote() = androidx.compose.ui.test.hasTestTag("rewindQuote")
@@ -175,8 +208,9 @@ class ChatRewindTest {
         val vm = viewModel()
         var failed = false
         vm.rewind(target, RewindRestore.BOTH) { failed = true }
-        val sent = relay.sent(Method.CHAT_REWIND).single().decode(ChatRewindRequest.serializer())
-        assertEquals(ChatRewindRequest("s-need", "u-2", RewindRestore.BOTH), sent)
+        val sent = relay.sent(Method.CHAT_REWIND).single()
+        assertEquals(ChatRewindRequest("s-need", "u-2", RewindRestore.BOTH), sent.decode(ChatRewindRequest.serializer()))
+        assertEquals(120_000L, sent.timeoutMillis)
         val s = vm.state.value
         assertFalse(s.rewinding)
         assertEquals("把退避上限改成 60 秒", s.restore?.text)
@@ -192,14 +226,30 @@ class ChatRewindTest {
         assertEquals("代码已回到这条消息之前", vm.messages.first())
     }
 
-    @Test fun aPanelThatDidNotMatchOpensTheTerminalView() = runTest(dispatcher) {
-        relay.fail(Method.CHAT_REWIND, ErrorCode.REWIND_FAILED, "回溯面板里光标那一行是「只回复 THREE」")
+    @Test fun aFailedRewindSaysWhyAndOpensTheTerminalView() = runTest(dispatcher) {
+        for (why in listOf(
+            "会话正在工作或等你确认，停下来以后再回溯",
+            "电脑上的输入框里有还没发出去的字，清空以后再回溯",
+            "回溯面板上没有「Restore code」这一项，这条消息之后没改过文件，已按 Esc 退出",
+        )) {
+            relay.fail(Method.CHAT_REWIND, ErrorCode.REWIND_FAILED, why)
+            val vm = viewModel()
+            var failed = false
+            vm.rewind(target, RewindRestore.BOTH) { failed = true }
+            assertTrue("the terminal view opens", failed)
+            assertFalse(vm.state.value.rewinding)
+            assertNull(vm.state.value.restore?.takeIf { it.replace })
+            assertEquals("没能回溯：$why", vm.messages.first())
+        }
+    }
+
+    @Test fun aRewindThatHappenedShowsWhatWentWrongAfter() = runTest(dispatcher) {
+        relay.respond(Method.CHAT_REWIND, ChatRewindResponse.serializer(), ChatRewindResponse("已经回溯，但没能清空电脑上的输入框，原消息还留在那里"))
         val vm = viewModel()
         var failed = false
         vm.rewind(target, RewindRestore.BOTH) { failed = true }
-        assertTrue("the terminal view opens", failed)
-        assertFalse(vm.state.value.rewinding)
-        assertNull(vm.state.value.restore?.takeIf { it.replace })
-        assertEquals("没能回溯：Claude Code 里对不上这条消息，已退出面板", vm.messages.first())
+        assertFalse(failed)
+        assertEquals("把退避上限改成 60 秒", vm.state.value.restore?.text)
+        assertEquals("已经回溯，但没能清空电脑上的输入框，原消息还留在那里", vm.messages.first())
     }
 }

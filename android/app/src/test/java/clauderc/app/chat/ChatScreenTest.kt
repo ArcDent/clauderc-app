@@ -258,6 +258,65 @@ class ChatScreenTest {
         compose.onNode(hasText("0.412s", substring = true)).assertIsDisplayed()
     }
 
+    /** Short of room in the bar, the model's name gives way and 「上下文 N%」 shows whole. */
+    @Test fun theContextShowsWholeBesideALongModelName() {
+        show(baseState().copy(
+            session = session("s-long", "chat-link-actions-latex", SessionState.Idle, "default", context = clauderc.app.protocol.SessionContext(84_000, 200_000)),
+            model = "deepseek-v4.1-flash[1M]", permissionMode = "auto",
+        ))
+        fun layout(text: String): androidx.compose.ui.text.TextLayoutResult {
+            val results = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action!!.invoke(results)
+            return results.first()
+        }
+        // Whole on its one line: nothing left for a second line, nothing cut off its end.
+        for (text in listOf("上下文 42%", "自动模式")) layout(text).let {
+            assertFalse("「$text」 is cut", it.multiParagraph.didExceedMaxLines || it.isLineEllipsized(0) || it.getLineEnd(0, visibleEnd = true) < text.length)
+        }
+        assertTrue("the model's name gives way", layout("deepseek-v4.1-flash[1M]").isLineEllipsized(0))
+    }
+
+    /** Round 10: the task list folds to one row over the input, unfolds on a tap and leaves once cleared. */
+    @Test fun theTaskBarFoldsUnfoldsAndLeaves() {
+        val tasks = listOf(
+            clauderc.app.protocol.ChatTask("1", "按位置核对光标", activeForm = "正在按位置核对光标", status = "in_progress"),
+            clauderc.app.protocol.ChatTask("2", "补长列表的测试", status = "pending"),
+            clauderc.app.protocol.ChatTask("3", "跑真实回归", status = "pending"),
+        )
+        var state by mutableStateOf(baseState())
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, ChatActions()) } }
+        compose.waitForIdle()
+        compose.onNodeWithTag("taskBar").assertDoesNotExist()
+
+        compose.runOnUiThread { state = state.copy(tasks = tasks) }
+        compose.waitForIdle()
+        compose.onNode(hasText("按位置核对光标") and hasAnyAncestor(hasTestTag("taskHead")), useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("taskCount", useUnmergedTree = true).assert(hasText("0/3"))
+        compose.onNodeWithTag("taskList").assertDoesNotExist()
+
+        compose.onNodeWithTag("taskHead").performClick()
+        compose.waitForIdle()
+        val glyphs = compose.onAllNodes(hasAnyAncestor(hasTestTag("taskList")) and hasTestTag("taskGlyph:in_progress").or(hasTestTag("taskGlyph:pending")).or(hasTestTag("taskGlyph:completed")), useUnmergedTree = true)
+            .fetchSemanticsNodes().sortedBy { it.boundsInRoot.top }.map { it.config[SemanticsProperties.TestTag].removePrefix("taskGlyph:") }
+        assertEquals(listOf("in_progress", "pending", "pending"), glyphs)
+
+        compose.runOnUiThread { state = state.copy(tasks = emptyList()) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("taskBar").assertDoesNotExist()
+    }
+
+    /** A formula the library gave no content for shows as written, in mono and the second grey, not as plain text. */
+    @Test fun aFormulaWithoutContentShowsAsWritten() {
+        val runs = (mdBlocks("面积是 \$x^2\$。").single() as MdBlock.Paragraph).runs
+        val i = runs.indexOfFirst { it.kind == RunKind.MATH }
+        val plain = styled(runs, androidx.compose.ui.graphics.Color.Black, androidx.compose.ui.graphics.Color.Gray, TextLinks(), emptySet())
+        val span = plain.spanStyles.single { plain.text.substring(it.start, it.end) == runs[i].text }
+        assertEquals(clauderc.app.ui.theme.MonoFamily, span.item.fontFamily)
+        assertEquals(androidx.compose.ui.graphics.Color.Gray, span.item.color)
+        val drawn = styled(runs, androidx.compose.ui.graphics.Color.Black, androidx.compose.ui.graphics.Color.Gray, TextLinks(), setOf(mathId(i)))
+        assertTrue(drawn.spanStyles.none { it.item.fontFamily == clauderc.app.ui.theme.MonoFamily })
+    }
+
     @Test fun thinkingItemsAreNotRendered() {
         val items = mergeItems(emptyList(), listOf(ChatItem(1, "thinking", text = "内心独白"), ChatItem(2, ItemKind.ASSISTANT, text = "你好")))
         show(baseState().copy(items = items, hasMore = false))

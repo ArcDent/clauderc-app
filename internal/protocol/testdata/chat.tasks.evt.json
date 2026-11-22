@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.tasks",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"sessionId": "a1b2c3", "tasks": [
+    {"id": "1", "subject": "读懂回溯面板的长列表", "status": "completed"},
+    {"id": "2", "subject": "按位置核对光标", "activeForm": "正在按位置核对光标", "status": "in_progress"},
+    {"id": "3", "subject": "补长列表的测试", "status": "pending"}
+  ]}
+}

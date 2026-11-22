@@ -264,11 +264,19 @@ const (
 // UUID it names. The agent goes through Claude Code's /rewind panel and
 // presses Enter only when the line under the cursor matches the message
 // and Restore is among the panel's choices. Taking the conversation back
-// puts the message into the phone's input box; the response is empty.
+// puts the message into the phone's input box. A failure is
+// CodeRewindFailed, its message saying why for the phone to show.
 type ChatRewindRequest struct {
 	SessionID string        `json:"sessionId"`
 	UUID      string        `json:"uuid"`
 	Restore   RewindRestore `json:"restore"`
+}
+
+// ChatRewindResponse answers a rewind that happened. Notice, when set,
+// says what went wrong after it, such as the computer's input box left
+// holding the message, for the phone to show.
+type ChatRewindResponse struct {
+	Notice string `json:"notice,omitempty"`
 }
 
 // PendingKind tells a permission request from a question (design D6).
@@ -332,6 +340,38 @@ type ChatOpenResponse struct {
 	ChatStatus
 	// Pending is null when nothing is pending.
 	Pending *Pending `json:"pending"`
+	// Tasks is the session's task list, left out when it has none, as
+	// for a subagent's chat.
+	Tasks []ChatTask `json:"tasks,omitempty"`
+}
+
+// TaskStatus is where a task of Claude Code's task list stands.
+type TaskStatus string
+
+const (
+	TaskPending    TaskStatus = "pending"
+	TaskInProgress TaskStatus = "in_progress"
+	TaskCompleted  TaskStatus = "completed"
+)
+
+// MaxChatTasks bounds the tasks of a list sent to the phone.
+const MaxChatTasks = 50
+
+// ChatTask is one task of the session's Claude Code task list, as the
+// terminal shows it above the input box. ActiveForm is what the status
+// line says while it is in progress.
+type ChatTask struct {
+	ID         string     `json:"id"`
+	Subject    string     `json:"subject"`
+	ActiveForm string     `json:"activeForm,omitempty"`
+	Status     TaskStatus `json:"status"`
+}
+
+// ChatTasksEvent carries the session's task list whenever it changed,
+// whole, oldest task first; an empty list means Claude Code cleared it.
+type ChatTasksEvent struct {
+	SessionID string     `json:"sessionId"`
+	Tasks     []ChatTask `json:"tasks"`
 }
 
 // ChatCloseRequest closes a chat, a subagent's when AgentID is set.

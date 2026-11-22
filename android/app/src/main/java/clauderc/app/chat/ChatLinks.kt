@@ -47,8 +47,8 @@ import kotlin.math.min
 // Links in chat bubbles (round 8): a thin underline in the text's own colour, and a tap opens a small
 // menu under the stretch of link that was tapped, the whole address on its first line.
 
-/** Whether the menu offers to open [url]: only web and mail addresses; anything else can only be copied. */
-fun isOpenable(url: String): Boolean = Regex("^(https?|mailto):", RegexOption.IGNORE_CASE).containsMatchIn(url)
+/** Whether the menu offers to open [url]: only web addresses with a host and mail addresses; anything else can only be copied. */
+fun isOpenable(url: String): Boolean = Regex("^(https?://[^/?#\\s]|mailto:[^\\s])", RegexOption.IGNORE_CASE).containsMatchIn(url)
 
 /**
  * The links of one text: where each runs, a box per line, from its last layout; where the last
