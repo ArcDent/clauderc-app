@@ -7,6 +7,7 @@ import (
 
 	"clauderc/internal/agent"
 	"clauderc/internal/agent/picture"
+	"clauderc/internal/agent/transcript"
 	"clauderc/internal/protocol"
 )
 
@@ -44,11 +45,30 @@ func (h *Handler) image(ctx context.Context, req protocol.Envelope) protocol.Env
 		}
 		return agent.Reply(req, protocol.ChatImageResponse{MediaType: mediaType, Data: data})
 	}
-	items, err := h.allItems(ctx, body.SessionID)
+	var items []transcript.Item
+	var err error
+	if body.AgentID != "" {
+		items, err = h.allAgentItems(ctx, body.SessionID, body.AgentID)
+	} else {
+		items, err = h.allItems(ctx, body.SessionID)
+	}
 	if err != nil {
 		return failWith(req, err)
 	}
 	for _, it := range items {
+		for _, img := range it.Images {
+			if img.ID != body.ID {
+				continue
+			}
+			data, mediaType := img.Original, img.OriginalMediaType
+			if len(data) == 0 {
+				data, mediaType = img.Data, img.MediaType
+			}
+			if len(data) > protocol.MaxImageBytes {
+				return failWith(req, errImageTooLarge)
+			}
+			return agent.Reply(req, protocol.ChatImageResponse{MediaType: mediaType, Data: data})
+		}
 		if it.Tool == nil || it.Tool.Result == nil {
 			continue
 		}

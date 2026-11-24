@@ -3,6 +3,7 @@ package attach_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -305,5 +306,124 @@ func TestOutputReadWhileInputBlocked(t *testing.T) {
 	})
 	if !printed {
 		t.Fatal("output stopped being read while cursor answers waited for the input buffer")
+	}
+}
+
+// Canceling a Send while another operation (e.g. rewind) holds the operation
+// lock returns promptly and never types the canceled keys afterwards.
+func TestCancelWhileWaitingForOpsLock(t *testing.T) {
+	p, log := newPool(t, time.Minute)
+	c, err := p.Acquire(context.Background(), "abc12345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Release("abc12345")
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	doDone := make(chan error, 1)
+	go func() {
+		doDone <- c.Do(context.Background(), func(term *attach.Term) error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- c.Send(ctx, []attach.Step{{Keys: []byte("SHOULD_NEVER_BE_TYPED")}})
+	}()
+	time.Sleep(50 * time.Millisecond)
+	start := time.Now()
+	cancel()
+	select {
+	case err := <-sendDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Send returned %v, want context.Canceled", err)
+		}
+		if d := time.Since(start); d > 300*time.Millisecond {
+			t.Fatalf("canceled Send took %v to return", d)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Send did not return promptly after cancel while waiting for ops lock")
+	}
+
+	close(release)
+	if err := <-doDone; err != nil {
+		t.Fatal(err)
+	}
+	// Type a marker after the lock is released and ensure the canceled keys never arrived.
+	if err := c.Send(context.Background(), []attach.Step{{Keys: []byte("AFTER_MARKER")}}); err != nil {
+		t.Fatal(err)
+	}
+	got := waitLog(t, log, "AFTER_MARKER")
+	if strings.Contains(got, "SHOULD_NEVER_BE_TYPED") {
+		t.Fatalf("canceled keys were typed into the terminal: %q", got)
+	}
+}
+
+// When a terminal stops reading stdin so a large paste blocks, canceling ctx
+// returns promptly without typing Enter and still emits pasteEnd once the
+// terminal drains input.
+func TestCancelBlockedPasteReturnsAndSendsPasteEnd(t *testing.T) {
+	dir := t.TempDir()
+	trigger := filepath.Join(dir, "go")
+	log := filepath.Join(dir, "keys.log")
+	p := attach.NewPool(attach.Options{
+		Command: func(string) []string {
+			return []string{"/bin/sh", "-c", `stty raw -echo; printf ready; while [ ! -f "$1" ]; do sleep 0.02; done; exec cat > "$2"`, "sh", trigger, log}
+		},
+		Quiet:        100 * time.Millisecond,
+		ReadyTimeout: time.Second,
+	})
+	t.Cleanup(p.Close)
+	c, err := p.Acquire(context.Background(), "abc12345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Release("abc12345")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- c.Send(ctx, attach.SendKeys(strings.Repeat("a", 64<<10), nil, 0))
+	}()
+	// Wait past clearWait (400ms) so the paste step has started and blocked on the full PTY buffer.
+	select {
+	case err := <-sendDone:
+		t.Fatalf("64 KB paste did not block when terminal was not reading: %v", err)
+	case <-time.After(600 * time.Millisecond):
+	}
+
+	start := time.Now()
+	cancel()
+	select {
+	case err := <-sendDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Send returned %v, want context.Canceled", err)
+		}
+		if d := time.Since(start); d > 300*time.Millisecond {
+			t.Fatalf("canceled blocked paste took %v to return", d)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("blocked paste did not return promptly after cancel")
+	}
+
+	// Let the terminal start draining stdin; pasteEnd must close the bracketed paste, with no Enter.
+	if err := os.WriteFile(trigger, []byte("go"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := waitLog(t, log, "\x1b[201~")
+	if !strings.Contains(got, "\x1b[200~") {
+		t.Fatalf("log missing pasteStart: %q", got[:min(32, len(got))])
+	}
+	if !strings.HasSuffix(got, "\x1b[201~") {
+		t.Fatalf("log does not end with pasteEnd: %q", got[max(0, len(got)-32):])
+	}
+	if strings.Contains(got, "\r") {
+		t.Fatalf("canceled paste still sent Enter")
 	}
 }

@@ -403,6 +403,51 @@ func TestSendTextNotDeliveredByBareEnqueue(t *testing.T) {
 	}
 }
 
+// Two chat.send at once are confirmed each by its own record: the one
+// typed second gets no credit for the record of the first, whatever
+// Claude Code writes a moment after an Enter.
+func TestSendsAtOnceConfirmedEachByItsOwn(t *testing.T) {
+	const user = `{"type":"user","message":{"role":"user","content":"same"}}`
+	const enqueue = `{"type":"queue-operation","operation":"enqueue"}`
+	cases := []struct {
+		name   string
+		s      setup
+		a, b   string
+		record string // what an Enter after text matching match writes
+		match  string
+		bOK    bool
+	}{
+		// Only one record shows up for the same text sent twice.
+		{"same text", setup{}, "same", "same", user, "*same*", false},
+		// Claude Code queues a slash command with an enqueue without its name.
+		{"second command not queued", running(), "/foo 1", "/bar 2", enqueue, "*foo*", false},
+		{"both commands queued", running(), "/foo 1", "/bar 2", enqueue, "*/*", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := c.s
+			// Records are written by the first Enter after text that matches.
+			s.opts = shellAttach(`printf '────────\r\n❯\302\240'; cr=$(printf '\r'); n=0; buf=; while :; do c=$(dd bs=1 count=1 2>/dev/null); [ -z "$c" ] && exit; printf '%s' "$c" >> "$FAKE_ATTACH_LOG"; buf="$buf$c"; if [ "$c" = "$cr" ]; then case "$buf" in ` + c.match + `) n=$((n+1)); { [ "` + c.a + `" != "` + c.b + `" ] || [ $n -eq 1 ]; } && printf '%s\n' '` + c.record + `' >> "$FAKE_ATTACH_TRANSCRIPT";; esac; buf=; fi; done`)
+			f := newFixture(t, s)
+			first := make(chan protocol.Envelope, 1)
+			go func() {
+				first <- f.h.Handle(context.Background(), req("r-a", "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: c.a}))
+			}()
+			// The second goes once the first is being typed.
+			for b, _ := os.ReadFile(f.keys); !strings.Contains(string(b), c.a); b, _ = os.ReadFile(f.keys) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			second := f.call(t, "c2", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: c.b})
+			if res := <-first; res.Error != nil {
+				t.Errorf("first: error %+v", res.Error)
+			}
+			if c.bOK && second.Error != nil || !c.bOK && (second.Error == nil || second.Error.Code != protocol.CodeNotDelivered) {
+				t.Errorf("second: error %+v, want delivered %v", second.Error, c.bOK)
+			}
+		})
+	}
+}
+
 func TestSendNotDelivered(t *testing.T) {
 	f := newFixture(t, setup{attachEnv: []string{fakeattach.DeliverEnv("none")}})
 	start := time.Now()
@@ -861,7 +906,7 @@ func TestSendCleansControlBytes(t *testing.T) {
 
 // A custom answer is typed key by key; Shift+Tab and Ctrl+C in it are not.
 func TestAnswerCustomCleansControlBytes(t *testing.T) {
-	f := newFixture(t, setup{})
+	f := newFixture(t, setup{screen: questionScreen("颜色？")})
 	f.blockedOn(t, "toolu_q1", "AskUserQuestion", `{"questions":[{"question":"颜色？","header":"颜色","multiSelect":false,"options":[{"label":"红","description":""},{"label":"绿","description":""}]}]}`)
 	f.ok(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_q1", Answers: []protocol.Answer{{Custom: "都\x1b[Z不\x03要"}}})
 	got := f.keyLog()
@@ -1075,5 +1120,60 @@ func TestChatFollowsMovedTranscript(t *testing.T) {
 				t.Fatalf("item %d sent again after the move: %+v", it.Seq, it)
 			}
 		}
+	}
+}
+
+// A `claude agents` that takes 3 seconds each time holds up neither an
+// open chat's new records nor a subagent chat's: they still reach the
+// phone within a second.
+func TestSlowSessionListDoesNotHoldItems(t *testing.T) {
+	const text = "列表慢时的新消息"
+	for _, sub := range []bool{false, true} {
+		name := "session"
+		if sub {
+			name = "subagent"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, setup{status: "busy", state: "working"})
+			open := protocol.ChatOpenRequest{SessionID: shortID}
+			add := func() { f.appendTranscript(t, userLine(text)) }
+			if sub {
+				dir := f.addSubagents(t)
+				open.AgentID = goAgent
+				add = func() {
+					appendFile(t, filepath.Join(dir, "agent-"+goAgent+".jsonl"), `{"type":"assistant","isSidechain":true,"agentId":"`+goAgent+`","message":{"role":"assistant","content":[{"type":"text","text":"`+text+`"}]}}`+"\n")
+				}
+			}
+			f.ok(t, "c1", protocol.MethodChatOpen, open)
+			if err := os.WriteFile(filepath.Join(f.sample, "agents.delay"), []byte("3\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// A state poll recorded from now on sleeps its 3 seconds.
+			before := len(fakeclaude.Calls(t, f.claudeLog))
+			for deadline := time.Now().Add(5 * time.Second); len(fakeclaude.Calls(t, f.claudeLog)) == before; time.Sleep(10 * time.Millisecond) {
+				if time.Now().After(deadline) {
+					t.Fatal("no state poll after the list turned slow")
+				}
+			}
+			start := time.Now()
+			add()
+			for deadline := time.After(time.Second); ; {
+				select {
+				case e := <-f.events:
+					var ev protocol.ChatItemsEvent
+					if e.Method != protocol.EventChatItems || json.Unmarshal(e.Body, &ev) != nil {
+						continue
+					}
+					for _, it := range ev.Items {
+						if it.Text == text {
+							t.Logf("pushed after %v", time.Since(start))
+							return
+						}
+					}
+				case <-deadline:
+					t.Fatal("the new record was not pushed within 1 s while claude agents ran")
+				}
+			}
+		})
 	}
 }

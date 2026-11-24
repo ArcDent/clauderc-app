@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -33,9 +34,10 @@ const (
 	DefaultReadyTimeout = 6 * time.Second
 	// DefaultLinger is how long an attach outlives its last holder.
 	DefaultLinger = 5 * time.Minute
-	// writeChunk is the most written to the terminal at once, so a long
-	// paste can be cancelled between chunks.
-	writeChunk = 4 << 10
+	// writeChunk is the most written to the terminal at once, small enough
+	// to fit under macOS's 1 KB PTY input queue so a blocked paste cancels
+	// cleanly and still sends pasteEnd.
+	writeChunk = 512
 )
 
 // ErrClosed is returned when the attach process has ended.
@@ -210,6 +212,15 @@ func (p *Pool) Close() {
 	}
 }
 
+// writeReq is one chunk sent to the PTY writer goroutine. state coordinates
+// cancellation atomically: 0=running, 1=written, 2=canceled.
+type writeReq struct {
+	data      []byte
+	done      chan error
+	state     *atomic.Int32
+	pasteTail bool // send pasteEnd if caller cancels before this write completes
+}
+
 // Conn is one attach process.
 type Conn struct {
 	cmd  *exec.Cmd
@@ -218,8 +229,9 @@ type Conn struct {
 	// replies wakes the goroutine that answers cursor position queries.
 	replies chan struct{}
 
-	ops     sync.Mutex // serializes operations
-	writeMu sync.Mutex // serializes writes to the terminal
+	ops      chan struct{} // 1-slot semaphore serializing operations, cancelable via ctx
+	writeSem chan struct{} // 1-slot semaphore serializing multi-chunk writes
+	writes   chan writeReq // serialized PTY writes, allowing ctx cancellation while blocked
 
 	mu      sync.Mutex
 	screen  *Screen
@@ -248,12 +260,23 @@ func start(argv []string, dir string, env []string, quiet, ready time.Duration) 
 	if err != nil {
 		return nil, err
 	}
-	c := &Conn{cmd: cmd, ptmx: ptmx, done: make(chan struct{}), replies: make(chan struct{}, 1), screen: NewScreen(Rows, Cols), lastOut: time.Now()}
+	c := &Conn{
+		cmd:      cmd,
+		ptmx:     ptmx,
+		done:     make(chan struct{}),
+		replies:  make(chan struct{}, 1),
+		ops:      make(chan struct{}, 1),
+		writeSem: make(chan struct{}, 1),
+		writes:   make(chan writeReq),
+		screen:   NewScreen(Rows, Cols),
+		lastOut:  time.Now(),
+	}
 	go func() {
 		_ = cmd.Wait()
 		close(c.done)
 	}()
 	go c.pump()
+	go c.writeLoop()
 	go c.answerCursor()
 	c.waitQuiet(context.Background(), quiet, ready)
 	return c, nil
@@ -304,23 +327,114 @@ func (c *Conn) answerCursor() {
 	}
 }
 
-// write writes b in chunks, checking ctx between them. A paste cut short
-// is still ended, so the input does not stay in paste mode.
+// writeLoop performs the blocking PTY writes on a single goroutine so callers
+// can cancel via ctx without deadlocking and a canceled paste still ends with
+// pasteEnd as soon as the PTY accepts input again.
+func (c *Conn) writeLoop() {
+	for {
+		select {
+		case <-c.done:
+			return
+		case req := <-c.writes:
+			_, err := c.ptmx.Write(req.data)
+			if req.state != nil && !req.state.CompareAndSwap(0, 1) {
+				if err == nil && req.pasteTail {
+					_, _ = c.ptmx.Write(pasteEnd)
+				}
+			}
+			req.done <- err
+		}
+	}
+}
+
+func (c *Conn) lockOps(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case c.ops <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.done:
+		return ErrClosed
+	}
+}
+
+func (c *Conn) unlockOps() { <-c.ops }
+
+func (c *Conn) lockWrite(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case c.writeSem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.done:
+		return ErrClosed
+	}
+}
+
+func (c *Conn) unlockWrite() { <-c.writeSem }
+
+func (c *Conn) sendPasteEnd() {
+	req := writeReq{data: pasteEnd, done: make(chan error, 1)}
+	select {
+	case c.writes <- req:
+	case <-c.done:
+	}
+}
+
+// write writes b in chunks, checking ctx before and during each write. A paste
+// cut short is still ended with pasteEnd so the input does not stay in paste mode.
 func (c *Conn) write(ctx context.Context, b []byte) error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	if err := c.lockWrite(ctx); err != nil {
+		return err
+	}
+	defer c.unlockWrite()
+	isPaste := bytes.HasPrefix(b, pasteStart)
 	for off := 0; off < len(b); off += writeChunk {
 		if c.ended() {
 			return ErrClosed
 		}
 		if err := ctx.Err(); err != nil {
-			if off > 0 && bytes.HasPrefix(b, pasteStart) {
-				_, _ = c.ptmx.Write(pasteEnd)
+			if off > 0 && isPaste {
+				c.sendPasteEnd()
 			}
 			return err
 		}
-		if _, err := c.ptmx.Write(b[off:min(off+writeChunk, len(b))]); err != nil {
-			return err
+		end := min(off+writeChunk, len(b))
+		chunk := b[off:end]
+		moreAfter := end < len(b)
+		var state atomic.Int32
+		req := writeReq{data: chunk, done: make(chan error, 1), state: &state, pasteTail: isPaste && moreAfter}
+		select {
+		case c.writes <- req:
+		case <-ctx.Done():
+			if off > 0 && isPaste {
+				c.sendPasteEnd()
+			}
+			return ctx.Err()
+		case <-c.done:
+			return ErrClosed
+		}
+		select {
+		case err := <-req.done:
+			if err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			if !state.CompareAndSwap(0, 2) {
+				// writeLoop already finished this chunk before noticing cancel.
+				if err := <-req.done; err == nil && isPaste && moreAfter {
+					c.sendPasteEnd()
+				}
+			}
+			return ctx.Err()
+		case <-c.done:
+			return ErrClosed
 		}
 	}
 	return nil
@@ -344,10 +458,13 @@ func (c *Conn) waitQuiet(ctx context.Context, quiet, max time.Duration) {
 	}
 }
 
-// Send types steps, one operation at a time per attach.
+// Send types steps, one operation at a time per attach; waiting for the
+// operation lock honors ctx cancellation.
 func (c *Conn) Send(ctx context.Context, steps []Step) error {
-	c.ops.Lock()
-	defer c.ops.Unlock()
+	if err := c.lockOps(ctx); err != nil {
+		return err
+	}
+	defer c.unlockOps()
 	return c.send(ctx, steps)
 }
 
@@ -391,6 +508,9 @@ func (c *Conn) View() View {
 // PID is the attach process id.
 func (c *Conn) PID() int { return c.cmd.Process.Pid }
 
+// Ended reports whether the attach process has exited.
+func (c *Conn) Ended() bool { return c.ended() }
+
 func (c *Conn) ended() bool {
 	select {
 	case <-c.done:
@@ -417,10 +537,12 @@ func (c *Conn) Close() {
 }
 
 // Do runs fn as one operation: no other Send or Do on this attach runs
-// until it returns.
+// until it returns; waiting for the operation lock honors ctx cancellation.
 func (c *Conn) Do(ctx context.Context, fn func(t *Term) error) error {
-	c.ops.Lock()
-	defer c.ops.Unlock()
+	if err := c.lockOps(ctx); err != nil {
+		return err
+	}
+	defer c.unlockOps()
 	return fn(&Term{c: c, ctx: ctx})
 }
 
@@ -432,6 +554,14 @@ type Term struct {
 
 // Send types steps.
 func (t *Term) Send(steps []Step) error { return t.c.send(t.ctx, steps) }
+
+// Detached is the attach as the steps that close a panel see it: they go
+// on when the request is given up, so the panel is not left open on the
+// computer, for at most d.
+func (t *Term) Detached(d time.Duration) (*Term, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.ctx), d)
+	return &Term{c: t.c, ctx: ctx}, cancel
+}
 
 // Screen returns the current screen text.
 func (t *Term) Screen() string {

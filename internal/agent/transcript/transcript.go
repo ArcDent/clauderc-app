@@ -14,9 +14,11 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
+	"clauderc/internal/agent/picture"
 	"clauderc/internal/protocol"
 )
 
@@ -520,16 +522,36 @@ func (t *Transcript) user(content, toolUseResult json.RawMessage) []int {
 }
 
 // userMessage adds a user bubble, or turns the matching queued item into
-// it, keeping that item's seq.
+// it, keeping that item's seq. Any attached pictures are downscaled to
+// UserImageThumbEdge thumbnails with stable IDs for chat.image.
 func (t *Transcript) userMessage(text string, images []protocol.Image) []int {
 	if text == "" && len(images) == 0 {
 		return nil
 	}
 	if i, ok := t.unqueue(text); ok {
-		t.items[i].Images = images
+		t.items[i].Images = t.thumbUserImages(t.items[i].Seq, images)
 		return []int{i}
 	}
-	return []int{t.add(Item{ChatItem: protocol.ChatItem{Kind: protocol.ItemUser, Text: text, Images: images}})}
+	seq := int64(len(t.items) + 1)
+	return []int{t.add(Item{ChatItem: protocol.ChatItem{Kind: protocol.ItemUser, Text: text, Images: t.thumbUserImages(seq, images)}})}
+}
+
+var validUserImgPrefix = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+func (t *Transcript) thumbUserImages(seq int64, raw []protocol.Image) []protocol.Image {
+	if len(raw) == 0 {
+		return nil
+	}
+	prefix := "s" + strconv.FormatInt(seq, 10)
+	if t.cur != "" && validUserImgPrefix.MatchString(t.cur) {
+		prefix = t.cur
+	}
+	out := make([]protocol.Image, len(raw))
+	for i, img := range raw {
+		id := "usr-" + prefix + "." + strconv.Itoa(i)
+		out[i] = picture.UserThumb(id, img.MediaType, img.Data)
+	}
+	return out
 }
 
 var (

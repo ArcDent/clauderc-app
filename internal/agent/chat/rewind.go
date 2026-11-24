@@ -164,6 +164,9 @@ func runRewind(t *attach.Term, msgs []string, k int, label string, conversation 
 	// leave presses Esc until the panel is gone, one press at a time: the
 	// list a press goes back to takes no keys for about a second.
 	leave := func(err error) (string, bool, error) {
+		// It goes on when the request was given up, until the reply was due.
+		t, cancel := t.Detached(max(time.Until(replyBy), 0))
+		defer cancel()
 		for range rewindLeavePresses {
 			screen := t.Screen()
 			if !attach.RewindShown(screen) {
@@ -391,6 +394,8 @@ func (h *Handler) rewound(target discovery.Target, m rewindMark) {
 	if s == nil {
 		return
 	}
+	s.pushMu.Lock()
+	defer s.pushMu.Unlock()
 	s.mu.Lock()
 	f := s.follower
 	s.mu.Unlock()
@@ -398,7 +403,11 @@ func (h *Handler) rewound(target discovery.Target, m rewindMark) {
 		return
 	}
 	if items := f.Rewind(m.uuid); len(items) > 0 {
-		s.pushAll(protocol.EventChatItems, protocol.ChatItemsEvent{SessionID: s.id, Items: toProtocol(items)})
+		s.mu.Lock()
+		s.rev++
+		rev := s.rev
+		s.mu.Unlock()
+		s.pushAll(protocol.EventChatItems, protocol.ChatItemsEvent{SessionID: s.id, Items: toProtocol(items), Rev: rev})
 	}
 }
 
@@ -427,10 +436,12 @@ const rewindRestoredGrace = 5 * time.Second
 // wrapping where the panel does not, so a few letters typed after the
 // panel closed are never taken for the message put back.
 func restoredQuote(quote, input string) bool {
-	squash := func(s string) string { return strings.Join(strings.Fields(s), "") }
 	q := squash(strings.TrimSuffix(strings.TrimSpace(quote), "…"))
 	return q != "" && strings.HasPrefix(squash(input), q)
 }
+
+// squash leaves out the spaces and line breaks of s.
+func squash(s string) string { return strings.Join(strings.Fields(s), "") }
 
 // watchRewind reads one screen of an open chat. Once the panel closes
 // after a way back that takes the conversation, and Claude Code's input

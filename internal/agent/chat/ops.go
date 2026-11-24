@@ -81,7 +81,8 @@ func (h *Handler) decodeSession(ctx context.Context, req protocol.Envelope, v an
 	return h.lookup(ctx, s.SessionID)
 }
 
-// withTerm runs fn as one operation on the running session's attach.
+// withTerm runs fn as one operation on the running session's attach. The
+// panels it opens meanwhile are its own (see Handler.driven).
 func (h *Handler) withTerm(ctx context.Context, target discovery.Target, fn func(t *attach.Term) error) error {
 	if !target.Running {
 		return errStopped
@@ -91,7 +92,29 @@ func (h *Handler) withTerm(ctx context.Context, target discovery.Target, fn func
 		return err
 	}
 	defer h.pool.Release(target.ID)
-	return conn.Do(ctx, fn)
+	return conn.Do(ctx, func(t *attach.Term) error {
+		h.mu.Lock()
+		h.driving[target.ID]++
+		h.mu.Unlock()
+		defer func() {
+			h.mu.Lock()
+			if h.driving[target.ID]--; h.driving[target.ID] == 0 {
+				delete(h.driving, target.ID)
+			}
+			h.mu.Unlock()
+		}()
+		return fn(t)
+	})
+}
+
+// driven reports whether an operation of withTerm runs on session id. An
+// open chat's screen reads then take neither the panel it opens, such as
+// the /model picker, for one left open, nor its /rewind for one made by
+// hand.
+func (h *Handler) driven(id string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.driving[id] > 0
 }
 
 // currentPending reads the session's pending prompt from its transcript.
@@ -104,6 +127,21 @@ func (h *Handler) currentPending(target discovery.Target) *protocol.Pending {
 }
 
 var errPendingChanged = &opError{protocol.CodePendingChanged, "待确认的内容已变化，请看最新的请求再回答"}
+
+// errPoppedOp is a prompt or dialog that came up during an operation:
+// nothing more is typed, not even the Esc that would deny it.
+var errPoppedOp = &opError{protocol.CodeInvalidParams, "会话弹出了待确认，这次操作没有做完，请先处理它"}
+
+// panelLeave bounds the Esc that closes a panel once the request is given up.
+const panelLeave = 2 * time.Second
+
+// closePanel presses Esc to close the panel an operation opened, even when
+// the request was given up meanwhile.
+func closePanel(t *attach.Term) error {
+	lt, cancel := t.Detached(panelLeave)
+	defer cancel()
+	return lt.Send(attach.CancelKeys())
+}
 
 var errPickerOpen = &opError{protocol.CodeInvalidParams, "电脑上开着模型选择界面，这时按回车会改掉默认模型；请先在电脑上关掉它再试"}
 
@@ -130,7 +168,7 @@ func (h *Handler) answer(ctx context.Context, req protocol.Envelope) protocol.En
 	if p == nil || p.ToolUseID != body.ToolUseID {
 		return failWith(req, errPendingChanged)
 	}
-	steps, err := answerSteps(p, body)
+	groups, err := answerSteps(p, body)
 	if err != nil {
 		return failWith(req, err)
 	}
@@ -142,12 +180,75 @@ func (h *Handler) answer(ctx context.Context, req protocol.Envelope) protocol.En
 		if err := checkNoPicker(t); err != nil {
 			return err
 		}
-		return t.Send(steps)
+		// The transcript keeps a permission prompt pending until the tool's
+		// result is written, also while the tool runs once allowed on the
+		// computer; only the screen tells the prompt is still up.
+		if !awayFromInput(t.View()) {
+			return errPendingChanged
+		}
+		return typeAnswer(t, p.Questions, groups)
 	})
 	if err != nil {
 		return failWith(req, err)
 	}
 	return agent.Reply(req, struct{}{})
+}
+
+// errAnswerCut is a question that went from the screen while it was being
+// answered: the prompt was left with Esc.
+var errAnswerCut = &opError{protocol.CodePendingChanged, "回答到一半，电脑上的题目变了，已按 Esc 退出这次提问"}
+
+// typeAnswer types the groups of keys of an answer to questions in turn.
+// Taking more than one group, each needs its question on screen, or the
+// review page for the last: one closed elsewhere would leave the keys to
+// the input box or to whatever came up. Failing that before the first,
+// nothing is typed; later, a screen that still shows the prompt is left
+// with Esc, and anything else gets no key, not even Esc.
+func typeAnswer(t *attach.Term, questions []protocol.Question, groups [][]attach.Step) error {
+	for i, g := range groups {
+		if screen := t.Screen(); len(groups) > 1 && !questionShown(screen, questions, i) {
+			if i > 0 && awayFromInput(t.View()) && questionTabs(strings.Split(screen, "\n")) >= 0 {
+				_ = closePanel(t)
+				return errAnswerCut
+			}
+			return errPendingChanged
+		}
+		if err := t.Send(g); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reviewTitle heads the page that submits the answers (RESULTS.md).
+const reviewTitle = "Review your answers"
+
+// questionTabs is the index of the lowest line that is the tab bar of a
+// question prompt answered in more than one step, "← ☐ 颜色 ☐ 动物 ✔ Submit
+// →" (RESULTS.md), or -1.
+func questionTabs(lines []string) int {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); strings.HasPrefix(l, "←") && strings.Contains(l, "Submit") {
+			return i
+		}
+	}
+	return -1
+}
+
+// questionShown reports whether the screen shows, under the prompt's tab
+// bar, question i of questions, or past the last one the review page.
+// Spaces are left out, the question wrapping on screen.
+func questionShown(screen string, questions []protocol.Question, i int) bool {
+	lines := strings.Split(screen, "\n")
+	tabs := questionTabs(lines)
+	if tabs < 0 {
+		return false
+	}
+	want := reviewTitle
+	if i < len(questions) {
+		want = questions[i].Question
+	}
+	return strings.Contains(squash(strings.Join(lines[tabs+1:], "")), squash(want))
 }
 
 // answerErrors words the reasons attach.AnswerKeys refuses answers.
@@ -161,23 +262,25 @@ var answerErrors = []struct {
 	{attach.ErrSingleAnswer, "单选题只能选一个答案"},
 }
 
-func answerSteps(p *protocol.Pending, body protocol.ChatAnswerRequest) ([]attach.Step, error) {
+// answerSteps returns the keys of an answer in groups (see
+// attach.AnswerKeys); a permission prompt takes one.
+func answerSteps(p *protocol.Pending, body protocol.ChatAnswerRequest) ([][]attach.Step, error) {
 	badDecision := &opError{protocol.CodeInvalidParams, "权限请求只能选允许或拒绝"}
 	if p.Kind == protocol.PendingPermission {
 		switch {
 		case len(body.Answers) > 0:
 			return nil, badDecision
 		case body.Decision == protocol.DecisionAllow:
-			return attach.AllowKeys(), nil
+			return [][]attach.Step{attach.AllowKeys()}, nil
 		case body.Decision == protocol.DecisionDeny:
-			return attach.DenyKeys(), nil
+			return [][]attach.Step{attach.DenyKeys()}, nil
 		}
 		return nil, badDecision
 	}
 	if body.Decision != "" {
 		return nil, &opError{protocol.CodeInvalidParams, "提问要选选项或填写回答，不能选允许或拒绝"}
 	}
-	steps, err := attach.AnswerKeys(p.Questions, body.Answers)
+	groups, err := attach.AnswerKeys(p.Questions, body.Answers)
 	if err != nil {
 		for _, a := range answerErrors {
 			if errors.Is(err, a.err) {
@@ -186,7 +289,7 @@ func answerSteps(p *protocol.Pending, body protocol.ChatAnswerRequest) ([]attach
 		}
 		return nil, err
 	}
-	return steps, nil
+	return groups, nil
 }
 
 // interrupt sends Esc only while the session works. Otherwise Esc would
@@ -198,7 +301,13 @@ func (h *Handler) interrupt(ctx context.Context, req protocol.Envelope) protocol
 		return failWith(req, err)
 	}
 	if target.SessionState(h.currentPending(target) != nil) == protocol.StateWorking {
-		err = h.withTerm(ctx, target, func(t *attach.Term) error { return t.Send(attach.InterruptKeys()) })
+		err = h.withTerm(ctx, target, func(t *attach.Term) error {
+			// A prompt may have come up while the terminal was being taken.
+			if awayFromInput(t.View()) {
+				return errPoppedOp
+			}
+			return t.Send(attach.InterruptKeys())
+		})
 		if err != nil {
 			return failWith(req, err)
 		}
@@ -206,19 +315,28 @@ func (h *Handler) interrupt(ctx context.Context, req protocol.Envelope) protocol
 	return agent.Reply(req, struct{}{})
 }
 
-// openPicker runs /model and reads the picker. It types nothing while the
-// picker is open already: the Enter after /model would land on the list
-// and save the default model. Once /model went out, every failure leaves
-// with Esc, so the picker is not left open, not even when it shows up late.
+// openPicker runs /model and reads the picker. It types nothing off the
+// input or while the picker is open already: the Enter after /model would
+// land on the list and save the default model, or on a prompt and allow it.
+// Once /model went out, every failure leaves with Esc, so the picker is not
+// left open, not even when it shows up late or the request was given up.
 func openPicker(t *attach.Term) ([]attach.PickerItem, error) {
-	if attach.PickerOpen(t.Screen()) {
-		return nil, errPickerOpen
-	}
-	fail := func(err error) ([]attach.PickerItem, error) {
-		_ = t.Send(attach.CancelKeys())
+	if err := checkInput(t); err != nil {
 		return nil, err
 	}
-	if err := t.Send(attach.OpenModelPickerKeys()); err != nil {
+	fail := func(err error) ([]attach.PickerItem, error) {
+		_ = closePanel(t)
+		return nil, err
+	}
+	keys := attach.OpenModelPickerKeys()
+	if err := t.Send(keys[:len(keys)-1]); err != nil {
+		return nil, err
+	}
+	// No Esc for a prompt that came up meanwhile: it would deny it.
+	if awayFromInput(t.View()) {
+		return nil, errPoppedOp
+	}
+	if err := t.Send(keys[len(keys)-1:]); err != nil {
 		return fail(err)
 	}
 	found := t.WaitFor(func(s string) bool {
@@ -270,7 +388,7 @@ func (h *Handler) models(ctx context.Context, req protocol.Envelope) protocol.En
 		for i, it := range items {
 			models[i] = protocol.ModelOption{ID: ids[i], Label: it.Label, Description: it.Description, Current: it.Current}
 		}
-		return t.Send(attach.CancelKeys())
+		return closePanel(t)
 	})
 	if err != nil {
 		return failWith(req, err)
@@ -305,7 +423,7 @@ func (h *Handler) setModel(ctx context.Context, req protocol.Envelope) protocol.
 			}
 		}
 		if to == 0 || from == 0 {
-			if cerr := t.Send(attach.CancelKeys()); cerr != nil {
+			if cerr := closePanel(t); cerr != nil {
 				return cerr
 			}
 			if to == 0 {
@@ -314,6 +432,7 @@ func (h *Handler) setModel(ctx context.Context, req protocol.Envelope) protocol.
 			return &opError{protocol.CodeInternal, "找不到模型选择界面的光标位置，已取消"}
 		}
 		if err := t.Send(attach.PickModelKeys(from, to)); err != nil {
+			_ = closePanel(t)
 			return err
 		}
 		if t.WaitFor(attach.ConfirmOpen, confirmWait) {
@@ -355,6 +474,9 @@ func (h *Handler) setPermissionMode(ctx context.Context, req protocol.Envelope) 
 		return agent.Fail(req, protocol.CodeInvalidParams, "这个权限模式不能从手机切换")
 	}
 	err = h.withTerm(ctx, target, func(t *attach.Term) error {
+		if err := checkInput(t); err != nil {
+			return err
+		}
 		for presses := 0; ; presses++ {
 			mode, ok, err := readMode(t)
 			if err != nil {
@@ -366,6 +488,11 @@ func (h *Handler) setPermissionMode(ctx context.Context, req protocol.Envelope) 
 			}
 			if presses == maxModePresses {
 				return &opError{protocol.CodeInternal, fmt.Sprintf("按了 %d 次切换键仍没到目标权限模式", maxModePresses)}
+			}
+			// Shift+Tab on a permission prompt for an edit allows all
+			// edits for the session.
+			if awayFromInput(t.View()) {
+				return errPoppedOp
 			}
 			if err := t.Send(attach.CycleModeKeys()); err != nil {
 				return err

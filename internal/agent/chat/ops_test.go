@@ -1,13 +1,19 @@
 package chat_test
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"clauderc/internal/agent"
 	"clauderc/internal/agent/chat"
 	"clauderc/internal/agent/fakeattach"
 	"clauderc/internal/protocol"
@@ -49,7 +55,7 @@ func TestAnswerPermission(t *testing.T) {
 		decision protocol.Decision
 		keys     string
 	}{{protocol.DecisionAllow, "\r"}, {protocol.DecisionDeny, "\x1b"}} {
-		f := newFixture(t, setup{})
+		f := newFixture(t, setup{screen: promptScreen})
 		f.blockedOn(t, "toolu_p1", "Bash", `{"command":"touch marker.txt"}`)
 		f.ok(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_p1", Decision: c.decision})
 		if got := f.keyLog(); got != c.keys {
@@ -70,7 +76,8 @@ func TestAnswerQuestions(t *testing.T) {
 		{"two questions", twoQuestionInput, []protocol.Answer{{Selected: []int{1}}, {Selected: []int{1}}}, "\x1b[B\r\x1b[B\r\r"},
 	}
 	for _, c := range cases {
-		f := newFixture(t, setup{})
+		// One screen shows every step, so only the keys are looked at.
+		f := newFixture(t, setup{screen: questionScreen("你喜欢哪些水果？", "你喜欢哪种颜色？", "你喜欢哪种动物？", "Review your answers")})
 		f.blockedOn(t, "toolu_q1", "AskUserQuestion", c.input)
 		f.ok(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_q1", Answers: c.answers})
 		if got := f.keyLog(); got != c.keys {
@@ -131,7 +138,7 @@ func TestEnterRefusedWhilePickerOpen(t *testing.T) {
 	}
 }
 
-// On the recorded prompt screen the same operations type as usual.
+// On the recorded input screen a message is typed as usual.
 func TestEnterAllowedOnPromptScreen(t *testing.T) {
 	f := newFixture(t, setup{replay: "mode-default"})
 	// The replay does not write the transcript, so delivery is not seen.
@@ -139,9 +146,7 @@ func TestEnterAllowedOnPromptScreen(t *testing.T) {
 	if res.Error == nil || res.Error.Code != protocol.CodeNotDelivered {
 		t.Errorf("send: error %+v, want notDelivered after typing", res.Error)
 	}
-	f.blockedOn(t, "toolu_p1", "Bash", `{"command":"touch marker.txt"}`)
-	f.ok(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_p1", Decision: protocol.DecisionAllow})
-	if got, want := f.keyLog(), "\x15\x1b[200~你好\x1b[201~\r"+"\r"; got != want {
+	if got, want := f.keyLog(), "\x15\x1b[200~你好\x1b[201~\r"; got != want {
 		t.Fatalf("keys %q, want %q", got, want)
 	}
 }
@@ -256,6 +261,56 @@ func TestPermissionModeFromScreen(t *testing.T) {
 			t.Fatalf("no chat.state with acceptEdits; last %s", e.Body)
 		default:
 		}
+	}
+}
+
+// A chat.state the poll worked out with the old mode does not reach the
+// phone after the one chat.setPermissionMode pushes: the phone's last
+// chat.state has the new mode.
+func TestSwitchedModeIsThePhonesLastState(t *testing.T) {
+	var armed atomic.Bool
+	held, switched := make(chan struct{}, 1), make(chan struct{})
+	var once sync.Once
+	f := newFixture(t, setup{opts: func(o *chat.Options) {
+		push := o.Push
+		o.Push = agent.PusherFunc(func(e protocol.Envelope) {
+			var ev protocol.ChatStateEvent
+			state := e.Method == protocol.EventChatState && json.Unmarshal(e.Body, &ev) == nil
+			// The poll's push of the old mode waits until the switch's
+			// went out, or long enough for the switch to get there.
+			if state && ev.State == protocol.StateWorking && ev.PermissionMode == protocol.PermissionDefault && armed.CompareAndSwap(true, false) {
+				held <- struct{}{}
+				select {
+				case <-switched:
+				case <-time.After(3 * time.Second):
+				}
+			}
+			push.Push(e)
+			if state && ev.PermissionMode == protocol.PermissionAcceptEdits {
+				once.Do(func() { close(switched) })
+			}
+		})
+	}})
+	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
+	armed.Store(true)
+	f.setAgents(t, "busy", "working", "7")
+	select {
+	case <-held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the poll pushed no working state")
+	}
+	f.ok(t, "c1", protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: shortID, Mode: protocol.PermissionAcceptEdits})
+	time.Sleep(500 * time.Millisecond)
+	var last protocol.ChatStateEvent
+	for len(f.events) > 0 {
+		if e := <-f.events; e.Method == protocol.EventChatState {
+			if err := json.Unmarshal(e.Body, &last); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if last.PermissionMode != protocol.PermissionAcceptEdits {
+		t.Fatalf("last chat.state = %+v, want acceptEdits", last.ChatStatus)
 	}
 }
 
@@ -428,5 +483,227 @@ func TestModelsLeavesWithEscWhenPickerNeverShows(t *testing.T) {
 	}
 	if got := f.keyLog(); got != openPicker+"\x1b" {
 		t.Fatalf("keys %q, want the picker opened and the last key Esc", got)
+	}
+}
+
+// promptScreen is a permission prompt: no input box, the cursor hidden.
+const promptScreen = "\x1b[?25l Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No"
+
+// On a permission prompt the keys of the model and mode operations would
+// answer it: /model's Enter allows it, Shift+Tab allows all edits.
+func TestModelAndModeOpsRefusedOnAPrompt(t *testing.T) {
+	s := running()
+	s.screen = promptScreen
+	f := newFixture(t, s)
+	want := "会话停在面板或对话框上，先在终端里关掉再发"
+	for _, c := range []struct {
+		method protocol.Method
+		body   any
+	}{
+		{protocol.MethodChatModels, protocol.ChatModelsRequest{SessionID: shortID}},
+		{protocol.MethodChatSetModel, protocol.ChatSetModelRequest{SessionID: shortID, Model: "Opus 5.5"}},
+		{protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: shortID, Mode: protocol.PermissionPlan}},
+	} {
+		res := f.call(t, "c1", c.method, c.body)
+		if res.Error == nil || res.Error.Code != protocol.CodeInvalidParams || res.Error.Message != want {
+			t.Errorf("%s: error %+v, want invalidParams %q", c.method, res.Error, want)
+		}
+	}
+	if got := f.keyLog(); got != "" {
+		t.Fatalf("keys sent on the prompt: %q", got)
+	}
+}
+
+// A prompt that comes up while /model is typed gets neither its Enter nor
+// the Esc that would deny it.
+func TestModelsStopsWhenAPromptComesUp(t *testing.T) {
+	prompt := `\033[2J\033[H\033[?25l Bash command\r\n\r\n Do you want to proceed?\r\n ❯ 1. Yes\r\n   2. No`
+	s := running()
+	s.opts = shellAttach(`printf '────────\r\n❯\302\240'; n=0; while :; do c=$(dd bs=1 count=1 2>/dev/null); [ -z "$c" ] && exit; printf '%s' "$c" >> "$FAKE_ATTACH_LOG"; if [ "$c" = "~" ]; then n=$((n+1)); [ $n -eq 2 ] && printf '` + prompt + `'; fi; done`)
+	f := newFixture(t, s)
+	res := f.call(t, "c1", protocol.MethodChatModels, protocol.ChatModelsRequest{SessionID: shortID})
+	if res.Error == nil || res.Error.Message != "会话弹出了待确认，这次操作没有做完，请先处理它" {
+		t.Errorf("error %+v", res.Error)
+	}
+	if got := f.keyLog(); got != strings.TrimSuffix(openPicker, "\r") {
+		t.Fatalf("keys %q, want /model typed and nothing after it", got)
+	}
+}
+
+// A request given up while the picker is open still closes it with Esc:
+// left open, an Enter on the computer would save the default model.
+func TestModelsClosesThePickerWhenGivenUp(t *testing.T) {
+	f := newFixture(t, setup{})
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		// The log as it is now: keyLog waits for it to settle.
+		for b, _ := os.ReadFile(f.keys); !strings.Contains(string(b), openPicker); b, _ = os.ReadFile(f.keys) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		time.Sleep(150 * time.Millisecond)
+		cancel()
+	}()
+	f.h.Handle(ctx, req("r-models", "c1", protocol.MethodChatModels, protocol.ChatModelsRequest{SessionID: shortID}))
+	deadline := time.Now().Add(3 * time.Second)
+	for f.keyLog() != openPicker+"\x1b" && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := f.keyLog(); got != openPicker+"\x1b" {
+		t.Fatalf("keys %q, want the picker opened and closed with Esc", got)
+	}
+}
+
+// questionScreen is a question prompt answered in more than one step, the
+// cursor hidden: its tab bar, then lines.
+func questionScreen(lines ...string) string {
+	return "\x1b[?25l────────\n ← ☐ 颜色  ☐ 动物  ✔ Submit →\n\n " + strings.Join(lines, "\n ") + "\n\n Enter to select · Esc to cancel"
+}
+
+// inputScreen is the input box, the cursor showing.
+const inputScreen = "\x1b[?25h────────\n❯ \n────────"
+
+// stepAttach draws screens[0], and at each Enter the next screen while
+// there is one; received bytes go to the key log.
+func stepAttach(t *testing.T, screens ...string) func(*chat.Options) {
+	t.Helper()
+	dir := t.TempDir()
+	for i, s := range screens {
+		if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(i)), []byte("\x1b[2J\x1b[H"+strings.ReplaceAll(s, "\n", "\r\n")), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return shellAttach(`d='` + dir + `'; cr=$(printf '\r'); i=0; cat "$d/0"; while :; do c=$(dd bs=1 count=1 2>/dev/null); [ -z "$c" ] && exit; printf '%s' "$c" >> "$FAKE_ATTACH_LOG"; if [ "$c" = "$cr" ]; then i=$((i+1)); [ -f "$d/$i" ] && cat "$d/$i"; fi; done`)
+}
+
+// A prompt that comes up while chat.interrupt waits for the terminal would
+// take its Esc as a denial: the screen is looked at once the terminal is
+// held.
+func TestInterruptLooksAtTheScreenWithTheTerminal(t *testing.T) {
+	prompt := `\033[2J\033[H\033[?25l Bash command\r\n\r\n Do you want to proceed?\r\n ❯ 1. Yes\r\n   2. No`
+	s := running()
+	// The prompt comes up as the paste of a message ends, on its second ~.
+	s.opts = shellAttach(`printf '────────\r\n❯\302\240'; n=0; while :; do c=$(dd bs=1 count=1 2>/dev/null); [ -z "$c" ] && exit; printf '%s' "$c" >> "$FAKE_ATTACH_LOG"; if [ "$c" = "~" ]; then n=$((n+1)); [ $n -eq 2 ] && printf '` + prompt + `'; fi; done`)
+	f := newFixture(t, s)
+	sent := make(chan protocol.Envelope, 1)
+	go func() {
+		sent <- f.h.Handle(context.Background(), req("r-send", "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "hi"}))
+	}()
+	// The message holds the terminal from its Ctrl+U on.
+	for b, _ := os.ReadFile(f.keys); !strings.Contains(string(b), "\x15"); b, _ = os.ReadFile(f.keys) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	res := f.call(t, "c1", protocol.MethodChatInterrupt, protocol.ChatInterruptRequest{SessionID: shortID})
+	if res.Error == nil || res.Error.Message != "会话弹出了待确认，这次操作没有做完，请先处理它" {
+		t.Errorf("interrupt: error %+v, want the prompt reported", res.Error)
+	}
+	if res := <-sent; res.Error == nil || res.Error.Message != "会话弹出了待确认，消息没有发出" {
+		t.Errorf("send: error %+v", res.Error)
+	}
+	if got := f.keyLog(); got != "\x15\x1b[200~hi\x1b[201~" {
+		t.Fatalf("keys %q, want the message typed and no Esc", got)
+	}
+}
+
+// Allowed on the computer, a tool runs while the transcript still has it
+// pending; the prompt is gone from the screen, and a denial from the phone
+// would interrupt the tool: no key goes out.
+func TestAnswerAfterThePromptLeftTheScreen(t *testing.T) {
+	f := newFixture(t, setup{screen: inputScreen})
+	f.blockedOn(t, "toolu_p1", "Bash", `{"command":"sleep 30"}`)
+	res := f.call(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_p1", Decision: protocol.DecisionDeny})
+	if res.Error == nil || res.Error.Code != protocol.CodePendingChanged {
+		t.Errorf("error %+v, want pendingChanged", res.Error)
+	}
+	if got := f.keyLog(); got != "" {
+		t.Fatalf("keys %q, want none", got)
+	}
+}
+
+// Answers to more than one question go question by question, each looked
+// for on the screen first: one closed elsewhere would leave the rest of the
+// keys to the input box or to whatever came up.
+func TestAnswerLooksForEachQuestion(t *testing.T) {
+	q1 := questionScreen("你喜欢哪种颜色？", "❯ 1. 红", "  2. 绿", "  3. 蓝")
+	q2 := questionScreen("你喜欢哪种动物？", "❯ 1. 猫", "  2. 狗")
+	review := questionScreen("Review your answers", "● 你喜欢哪种颜色？ → 绿", "● 你喜欢哪种动物？ → 狗", "❯ 1. Submit answers", "  2. Cancel")
+	const changed = "待确认的内容已变化，请看最新的请求再回答"
+	cases := []struct {
+		name    string
+		screens []string
+		keys    string
+		err     string
+	}{
+		{"each question shows", []string{q1, q2, review}, "\x1b[B\r\x1b[B\r\r", ""},
+		// The prompt stays on the first question: Esc leaves it.
+		{"second question missing", []string{q1}, "\x1b[B\r\x1b", "回答到一半，电脑上的题目变了，已按 Esc 退出这次提问"},
+		// Answered on the computer meanwhile: the input box gets no key.
+		{"prompt closed", []string{q1, inputScreen}, "\x1b[B\r", changed},
+		// A permission prompt that came up gets no key, not even Esc.
+		{"another prompt", []string{q1, promptScreen}, "\x1b[B\r", changed},
+		// Moved on to the second question on the computer: nothing typed.
+		{"first question gone", []string{q2}, "", changed},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := setup{opts: stepAttach(t, c.screens...)}
+			f := newFixture(t, s)
+			f.blockedOn(t, "toolu_q1", "AskUserQuestion", twoQuestionInput)
+			res := f.call(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_q1",
+				Answers: []protocol.Answer{{Selected: []int{1}}, {Selected: []int{1}}}})
+			if c.err == "" && res.Error != nil || c.err != "" && (res.Error == nil || res.Error.Message != c.err) {
+				t.Errorf("error %+v, want %q", res.Error, c.err)
+			}
+			if got := f.keyLog(); got != c.keys {
+				t.Errorf("keys %q, want %q", got, c.keys)
+			}
+		})
+	}
+}
+
+// The /model picker chat.setModel opens is its own, not a panel left open:
+// an open chat does not tell the phone the session stopped on a panel,
+// however long the picker shows.
+func TestSetModelPickerIsNoPanelLeftOpen(t *testing.T) {
+	dir := t.TempDir()
+	picker := "\x1b[2J\x1b[H\x1b[?25l   Select model\r\n\r\n"
+	for i := 1; i <= 10; i++ {
+		mark := " "
+		if i == 10 {
+			mark = "❯"
+		}
+		picker += fmt.Sprintf("   %s %d. Model %d  Custom model\r\n", mark, i, i)
+	}
+	picker += "\r\n   Enter to set as default · s to use this session only · Esc to cancel\r\n"
+	for name, text := range map[string]string{"picker": picker, "input": "\x1b[2J\x1b[H\x1b[?25h────────\r\n❯ \r\n────────"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := running()
+	// Enter opens the picker, s closes it.
+	s.opts = shellAttach(`d='` + dir + `'; cr=$(printf '\r'); p=0; cat "$d/input"; while :; do c=$(dd bs=1 count=1 2>/dev/null); [ -z "$c" ] && exit; printf '%s' "$c" >> "$FAKE_ATTACH_LOG"; if [ "$c" = "$cr" ] && [ $p -eq 0 ]; then p=1; cat "$d/picker"; elif [ "$c" = s ] && [ $p -eq 1 ]; then p=0; cat "$d/input"; fi; done`)
+	f := newFixture(t, s)
+	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
+	start := time.Now()
+	// Nine rows up from the cursor: the picker shows about 5 seconds.
+	f.ok(t, "c1", protocol.MethodChatSetModel, protocol.ChatSetModelRequest{SessionID: shortID, Model: "Model 1"})
+	if took := time.Since(start); took < 5*time.Second {
+		t.Fatalf("setModel took %v, want the picker open about 5 s", took)
+	}
+	if got := f.keyLog(); !strings.Contains(got, strings.Repeat("\x1b[A", 9)+"s") {
+		t.Fatalf("keys %q, want Model 1 picked", got)
+	}
+	for {
+		e, ok := f.maybeEvent(protocol.EventChatState, time.Second)
+		if !ok {
+			break
+		}
+		var ev protocol.ChatStateEvent
+		if err := json.Unmarshal(e.Body, &ev); err != nil {
+			t.Fatal(err)
+		}
+		if ev.UnknownDialog {
+			t.Fatalf("chat.state told of a panel left open: %s", e.Body)
+		}
 	}
 }

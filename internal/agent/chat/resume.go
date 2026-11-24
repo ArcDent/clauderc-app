@@ -91,6 +91,27 @@ func (r *resumes) drop(id string) error {
 	return r.saveLocked()
 }
 
+// update replaces the entry of id with next, or drops it when next is
+// nil, only while the entry is still was: a message being sent leaves
+// alone what chat.autoResume set or turned off meanwhile.
+func (r *resumes) update(id string, was resumeEntry, next *resumeEntry) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if cur, ok := r.entries[id]; !ok || !cur.same(was) {
+		return nil
+	}
+	if next == nil {
+		delete(r.entries, id)
+	} else {
+		r.entries[id] = *next
+	}
+	return r.saveLocked()
+}
+
+func (e resumeEntry) same(o resumeEntry) bool {
+	return e.SessionID == o.SessionID && e.Text == o.Text && e.At.Equal(o.At) && e.LimitAt.Equal(o.LimitAt) && e.Attempts == o.Attempts
+}
+
 // due marks the entries whose time has come as being sent and returns
 // them; done must be called for each.
 func (r *resumes) due(now time.Time) map[string]resumeEntry {
@@ -201,6 +222,24 @@ var (
 	errNoReset    = &opError{protocol.CodeInvalidParams, "读不到这次限额的重置时间"}
 )
 
+// lockAutoResume serializes chat.autoResume per session so an earlier edit
+// waiting on usage.get cannot re-enable auto-resume after a later turn-off.
+func (h *Handler) lockAutoResume(ctx context.Context, id string) (func(), error) {
+	h.mu.Lock()
+	ch := h.autoResuming[id]
+	if ch == nil {
+		ch = make(chan struct{}, 1)
+		h.autoResuming[id] = ch
+	}
+	h.mu.Unlock()
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // autoResume serves chat.autoResume.
 func (h *Handler) autoResume(ctx context.Context, req protocol.Envelope) protocol.Envelope {
 	var body protocol.ChatAutoResumeRequest
@@ -211,6 +250,11 @@ func (h *Handler) autoResume(ctx context.Context, req protocol.Envelope) protoco
 	if err != nil {
 		return failWith(req, err)
 	}
+	unlock, err := h.lockAutoResume(ctx, target.ID)
+	if err != nil {
+		return failWith(req, err)
+	}
+	defer unlock()
 	var limit *transcript.Limit
 	if path, err := transcript.Find(h.opts.Source.ClaudeDir, target.SessionID); err == nil {
 		if t, err := transcript.ReadFile(path); err == nil {
@@ -269,7 +313,10 @@ func (h *Handler) resumeLoop(ctx context.Context, done chan<- struct{}) {
 		case <-tick.C:
 		}
 		for id, e := range h.resumes.due(h.opts.Now()) {
+			// Close waits for it before it closes the attaches.
+			h.bg.Add(1)
 			go func() {
+				defer h.bg.Done()
 				defer h.resumes.done(id)
 				h.resume(ctx, id, e)
 			}()
@@ -279,11 +326,13 @@ func (h *Handler) resumeLoop(ctx context.Context, done chan<- struct{}) {
 
 // resume sends the waiting message of session id, unless its transcript
 // no longer ends on the limit it waited for. A failed send is tried again
-// a resumeDelay later, resumeAttempts times in all.
+// a resumeDelay later, resumeAttempts times in all. What it writes back
+// goes only over e as it was: chat.autoResume may change or drop it while
+// the message is being sent.
 func (h *Handler) resume(ctx context.Context, id string, e resumeEntry) {
 	path, err := transcript.Find(h.opts.Source.ClaudeDir, e.SessionID)
 	if err != nil {
-		_ = h.resumes.drop(id)
+		_ = h.resumes.update(id, e, nil)
 		return
 	}
 	t, err := transcript.ReadFile(path)
@@ -291,7 +340,7 @@ func (h *Handler) resume(ctx context.Context, id string, e resumeEntry) {
 		return
 	}
 	if l := t.Info().Limit; l == nil || !l.At.Equal(e.LimitAt) {
-		_ = h.resumes.drop(id)
+		_ = h.resumes.update(id, e, nil)
 		return
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, resumeTimeout)
@@ -299,7 +348,7 @@ func (h *Handler) resume(ctx context.Context, id string, e resumeEntry) {
 	body, _ := json.Marshal(protocol.ChatSendRequest{SessionID: id, Text: e.Text})
 	res := h.send(sendCtx, protocol.Envelope{V: protocol.Version, Kind: protocol.KindRequest, ID: "auto-resume", Method: protocol.MethodChatSend, Body: body})
 	if res.Error == nil {
-		_ = h.resumes.drop(id)
+		_ = h.resumes.update(id, e, nil)
 		return
 	}
 	if ctx.Err() != nil {
@@ -307,11 +356,12 @@ func (h *Handler) resume(ctx context.Context, id string, e resumeEntry) {
 		return
 	}
 	h.opts.Logger.Error("auto resume failed", "session", id, "code", res.Error.Code)
-	e.Attempts++
-	if e.Attempts >= resumeAttempts {
-		_ = h.resumes.drop(id)
+	next := e
+	next.Attempts++
+	if next.Attempts >= resumeAttempts {
+		_ = h.resumes.update(id, e, nil)
 		return
 	}
-	e.At = h.opts.Now().Add(resumeDelay)
-	_ = h.resumes.set(id, e)
+	next.At = h.opts.Now().Add(resumeDelay)
+	_ = h.resumes.update(id, e, &next)
 }

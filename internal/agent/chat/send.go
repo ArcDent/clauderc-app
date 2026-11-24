@@ -41,69 +41,129 @@ func (h *Handler) send(ctx context.Context, req protocol.Envelope) protocol.Enve
 	if msg := checkMessage(body); msg != "" {
 		return agent.Fail(req, protocol.CodeInvalidParams, msg)
 	}
-	target, err := h.lookup(ctx, body.SessionID)
+	dedupKey := ""
+	if body.ClientReqID != "" {
+		dedupKey = body.SessionID + "\x00" + body.ClientReqID
+	}
+	res, err := h.sendDedup.Do(ctx, dedupKey, func() (protocol.ChatSendResponse, error) {
+		return h.sendOnce(ctx, body)
+	})
 	if err != nil {
 		return failWith(req, err)
 	}
+	return agent.Reply(req, res)
+}
+
+func (h *Handler) sendOnce(ctx context.Context, body protocol.ChatSendRequest) (protocol.ChatSendResponse, error) {
+	target, err := h.lookup(ctx, body.SessionID)
+	if err != nil {
+		return protocol.ChatSendResponse{}, err
+	}
 	if instruction, ok := h.forkHere(target, body); ok {
 		if err := h.opts.Forker.Fork(ctx, target.ID, instruction); err != nil {
-			return agent.FailErr(req, err)
+			return protocol.ChatSendResponse{}, err
 		}
-		return agent.Reply(req, protocol.ChatSendResponse{})
+		return protocol.ChatSendResponse{}, nil
 	}
 	if !target.Running {
 		if h.opts.Waker == nil {
-			return failWith(req, errStopped)
+			return protocol.ChatSendResponse{}, errStopped
 		}
 		if err := h.opts.Waker.Wake(ctx, target.SessionID, h.hold); err != nil {
 			// A Waker failure with a protocol code, such as a working
 			// directory that is gone, tells the phone why.
 			var pe *protocol.Error
 			if errors.As(err, &pe) {
-				return agent.Fail(req, pe.Code, "唤醒会话失败："+pe.Message)
+				return protocol.ChatSendResponse{}, &opError{pe.Code, "唤醒会话失败：" + pe.Message}
 			}
-			return agent.Fail(req, protocol.CodeInternal, "唤醒会话失败，请稍后重试")
+			return protocol.ChatSendResponse{}, &opError{protocol.CodeInternal, "唤醒会话失败，请稍后重试"}
 		}
 	}
 	paths, err := h.saveImages(body.Images)
 	if err != nil {
-		return agent.Fail(req, protocol.CodeInternal, "保存图片失败")
+		return protocol.ChatSendResponse{}, &opError{protocol.CodeInternal, "保存图片失败"}
 	}
 	conn, err := h.pool.Acquire(ctx, target.ID)
 	if err != nil {
-		return agent.Fail(req, protocol.CodeInternal, "接入会话失败，请稍后重试")
+		return protocol.ChatSendResponse{}, &opError{protocol.CodeInternal, "接入会话失败，请稍后重试"}
 	}
 	defer h.pool.Release(target.ID)
+	unlock, err := h.lockSend(ctx, target.ID)
+	if err != nil {
+		return protocol.ChatSendResponse{}, err
+	}
+	defer unlock()
 
 	if transcript.IsPanelCommand(body.Text) && len(paths) == 0 {
-		return h.sendPanel(ctx, req, conn, strings.TrimSpace(body.Text))
+		env := h.sendPanel(ctx, protocol.Envelope{}, conn, strings.TrimSpace(body.Text))
+		if env.Error != nil {
+			return protocol.ChatSendResponse{}, &opError{env.Error.Code, env.Error.Message}
+		}
+		return protocol.ChatSendResponse{}, nil
 	}
 
 	w := &watch{claudeDir: h.opts.Source.ClaudeDir, sessionID: target.SessionID}
 	w.f = openFollower(w.claudeDir, w.sessionID)
+	steps := attach.SendKeys(body.Text, paths, h.opts.ImageWait)
 	err = conn.Do(ctx, func(t *attach.Term) error {
 		if err := checkInput(t); err != nil {
 			return err
 		}
-		if err := t.Send(attach.SendKeys(body.Text, paths, h.opts.ImageWait)); err != nil {
+		if err := t.Send(steps[:len(steps)-1]); err != nil {
+			return &opError{protocol.CodeInternal, "向会话输入消息失败，请重试"}
+		}
+		// Typing takes a second or more; a permission prompt that came up
+		// meanwhile would take the Enter and allow what it has selected.
+		if awayFromInput(t.View()) {
+			return errPopped
+		}
+		if err := t.Send(steps[len(steps)-1:]); err != nil {
 			return &opError{protocol.CodeInternal, "向会话输入消息失败，请重试"}
 		}
 		return nil
 	})
 	if err != nil {
-		return failWith(req, err)
+		return protocol.ChatSendResponse{}, err
 	}
-	ok, queued, unknown := w.wait(ctx, body.Text, h.opts.DeliveryTimeout)
+	var checkClear func() bool
+	if commandName(body.Text) == "/clear" {
+		checkClear = func() bool {
+			updated, err := h.lookup(ctx, body.SessionID)
+			return err == nil && updated.SessionID != "" && updated.SessionID != target.SessionID
+		}
+	}
+	ok, queued, unknown := w.wait(ctx, body.Text, h.opts.DeliveryTimeout, checkClear)
 	if unknown {
-		return agent.Fail(req, protocol.CodeInvalidParams, fmt.Sprintf("会话不认识 %s 这个命令", commandName(body.Text)))
+		return protocol.ChatSendResponse{}, &opError{protocol.CodeInvalidParams, fmt.Sprintf("会话不认识 %s 这个命令", commandName(body.Text))}
 	}
 	if !ok && strings.HasPrefix(strings.TrimSpace(body.Text), "/") {
 		ok = tookCommand(ctx, conn, body.Text)
 	}
 	if !ok {
-		return agent.Fail(req, protocol.CodeNotDelivered, fmt.Sprintf("消息发出后 %g 秒内没有出现在会话里，可能没有送达", h.opts.DeliveryTimeout.Seconds()))
+		return protocol.ChatSendResponse{}, &opError{protocol.CodeNotDelivered, fmt.Sprintf("消息发出后 %g 秒内没有出现在会话里，可能没有送达", h.opts.DeliveryTimeout.Seconds())}
 	}
-	return agent.Reply(req, protocol.ChatSendResponse{Queued: queued})
+	return protocol.ChatSendResponse{Queued: queued}, nil
+}
+
+// lockSend waits for the chat.send under way on session id, or for ctx to
+// end, and returns what lets the next one go. A message is typed only once
+// the one before showed up or was given up: its record, written a moment
+// after its Enter, would count for this one too, the same text or, for a
+// slash command, the bare enqueue Claude Code writes for any.
+func (h *Handler) lockSend(ctx context.Context, id string) (func(), error) {
+	h.mu.Lock()
+	ch := h.sending[id]
+	if ch == nil {
+		ch = make(chan struct{}, 1)
+		h.sending[id] = ch
+	}
+	h.mu.Unlock()
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // forkHere reports whether the agent forks the session itself for a
@@ -222,7 +282,13 @@ func inputBox(screen string) ([]string, bool) {
 	return nil, false
 }
 
-var errOffInput = &opError{protocol.CodeInvalidParams, "会话停在面板或对话框上，先在终端里关掉再发"}
+var (
+	errOffInput = &opError{protocol.CodeInvalidParams, "会话停在面板或对话框上，先在终端里关掉再发"}
+	// errPopped is a prompt or dialog that came up while a message was
+	// typed: Enter is not pressed, and the message stays in the input box
+	// under it.
+	errPopped = &opError{protocol.CodeInvalidParams, "会话弹出了待确认，消息没有发出"}
+)
 
 // checkInput refuses to type into a session that is off its input (see
 // awayFromInput): a panel or dialog there would take the keys, and its
@@ -365,8 +431,9 @@ func commandName(text string) string {
 // enqueue record without text, which is how Claude Code queues one; and
 // whether it waits in the queue. unknown is true, at once, when Claude
 // Code turns the slash command down as unknown.
-func (w *watch) wait(ctx context.Context, text string, timeout time.Duration) (ok, queued, unknown bool) {
+func (w *watch) wait(ctx context.Context, text string, timeout time.Duration, checkClear func() bool) (ok, queued, unknown bool) {
 	deadline := time.Now().Add(timeout)
+	nextClear := time.Now().Add(500 * time.Millisecond)
 	command := strings.HasPrefix(strings.TrimSpace(text), "/")
 	commands, unknowns := 0, 0
 	if w.f != nil {
@@ -396,7 +463,16 @@ func (w *watch) wait(ctx context.Context, text string, timeout time.Duration) (o
 				return false, false, true
 			}
 		}
+		if checkClear != nil && !time.Now().Before(nextClear) {
+			if checkClear() {
+				return true, false, false
+			}
+			nextClear = time.Now().Add(500 * time.Millisecond)
+		}
 		if time.Now().After(deadline) {
+			if checkClear != nil && checkClear() {
+				return true, false, false
+			}
 			return false, false, false
 		}
 		select {

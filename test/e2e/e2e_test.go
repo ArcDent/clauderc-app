@@ -82,8 +82,18 @@ type phone struct {
 }
 
 // call sends a request and returns its response, keeping events seen
-// meanwhile.
+// meanwhile. A failed request fails the test.
 func (p *phone) call(method protocol.Method, body any) protocol.Envelope {
+	p.t.Helper()
+	env := p.try(method, body)
+	if env.Error != nil {
+		p.t.Fatalf("%s failed: %+v", method, env.Error)
+	}
+	return env
+}
+
+// try is call that returns a failed response too.
+func (p *phone) try(method protocol.Method, body any) protocol.Envelope {
 	p.t.Helper()
 	p.seq++
 	raw, _ := json.Marshal(body)
@@ -111,9 +121,6 @@ func (p *phone) call(method protocol.Method, body any) protocol.Envelope {
 			continue
 		}
 		if env.ID == req.ID {
-			if env.Error != nil {
-				p.t.Fatalf("%s failed: %+v", method, env.Error)
-			}
 			return env
 		}
 	}
@@ -160,7 +167,7 @@ func TestPhoneDrivesAgentThroughRelay(t *testing.T) {
 			HTTPClient: hs.Client(),
 			Attach: attach.Options{
 				Command: fakeattach.Command,
-				Env:     append(fakeattach.Env(keys), fakeattach.TranscriptEnv(transcript)...),
+				Env:     append(append(fakeattach.Env(keys), fakeattach.TranscriptEnv(transcript)...), fakeattach.PermissionEnv()),
 			},
 		})
 	}()
@@ -224,14 +231,23 @@ func TestPhoneDrivesAgentThroughRelay(t *testing.T) {
 		t.Fatalf("chat.open = %d items, pending %+v", len(opened.Items), opened.Pending)
 	}
 
-	p.call(protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "端到端测试消息"})
-	if data, err := os.ReadFile(transcript); err != nil || !strings.Contains(string(data), "端到端测试消息") {
-		t.Fatalf("message not in the transcript (%v)", err)
+	// The permission prompt on screen would take a message's Enter.
+	if res := p.try(protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "端到端测试消息"}); res.Error == nil {
+		t.Fatal("chat.send on the permission prompt succeeded")
+	}
+	if sent, err := os.ReadFile(keys); err != nil || bytes.Contains(sent, []byte("\r")) {
+		t.Fatalf("chat.send on the permission prompt pressed Enter: %q (%v)", sent, err)
 	}
 
 	p.call(protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: toolUseID, Decision: protocol.DecisionAllow})
 	if sent, err := os.ReadFile(keys); err != nil || !bytes.HasSuffix(sent, []byte("\r")) {
 		t.Errorf("allow did not press Enter: %q (%v)", sent, err)
+	}
+
+	// Back on the input box once allowed.
+	p.call(protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "端到端测试消息"})
+	if data, err := os.ReadFile(transcript); err != nil || !strings.Contains(string(data), "端到端测试消息") {
+		t.Fatalf("message not in the transcript (%v)", err)
 	}
 
 	var created protocol.SessionCreateResponse
@@ -262,6 +278,171 @@ func TestPhoneDrivesAgentThroughRelay(t *testing.T) {
 				t.Fatal("phone still connected 2 seconds after revoke")
 			}
 			break
+		}
+	}
+}
+
+func TestPhoneContinuesChatAfterAgentReconnects(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := relay.NewServer(relay.Options{EnrollKey: enrollKey, PublicURL: "wss://relay.example.com", Store: st})
+	hs := httptest.NewTLSServer(srv)
+	defer srv.Close()
+	defer hs.Close()
+
+	claudeDir, _, transcript := claudeHome(t)
+	fakeclaude.Setup(t, claudeDir)
+	keys := filepath.Join(t.TempDir(), "keys")
+	cfg := config.Config{
+		RelayURL:     hs.URL,
+		Name:         "e2e 重连目标机",
+		ClaudePath:   fakeclaude.Path(),
+		ClaudeDir:    claudeDir,
+		EnrollKey:    enrollKey,
+		MachineID:    machineID,
+		ProfilesFile: filepath.Join(t.TempDir(), "profiles.json"),
+		LaunchDir:    filepath.Join(t.TempDir(), "launch"),
+	}
+	startAgent := func() (context.CancelFunc, <-chan error) {
+		actx, acancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			done <- app.Run(actx, app.Options{
+				Config:     cfg,
+				Version:    "e2e",
+				HTTPClient: hs.Client(),
+				Attach: attach.Options{
+					Command: fakeattach.Command,
+					Env:     append(fakeattach.Env(keys), fakeattach.TranscriptEnv(transcript)...),
+				},
+			})
+		}()
+		return acancel, done
+	}
+
+	cancel1, done1 := startAgent()
+
+	pairCtx, pairCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer pairCancel()
+	admin := pairing.Client{RelayURL: hs.URL, EnrollKey: enrollKey, HTTPClient: hs.Client()}
+	code, err := admin.PairCode(pairCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(protocol.PairRequest{Code: code.Code, DeviceName: "e2e phone"})
+	res, err := hs.Client().Post(hs.URL+protocol.PathPair, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paired protocol.PairResponse
+	if err := json.NewDecoder(res.Body).Decode(&paired); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	ws, _, err := websocket.Dial(pairCtx, "wss"+strings.TrimPrefix(hs.URL, "https")+protocol.PathAppWS, &websocket.DialOptions{
+		HTTPClient: hs.Client(),
+		HTTPHeader: http.Header{"Authorization": {"Bearer " + paired.Token}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.CloseNow()
+	ws.SetReadLimit(protocol.MaxMessageBytes)
+	p := &phone{t: t, ws: ws}
+
+	var firstConnID string
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var machines protocol.MachinesListResponse
+		decode(t, p.call(protocol.MethodMachinesList, protocol.Empty{}), &machines)
+		if len(machines.Machines) == 1 && machines.Machines[0].Online && machines.Machines[0].ConnID != "" {
+			firstConnID = machines.Machines[0].ConnID
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("machine not online with connId: %+v", machines)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	var opened protocol.ChatOpenResponse
+	decode(t, p.call(protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID}), &opened)
+	if len(opened.Items) == 0 {
+		t.Fatal("chat.open returned no items")
+	}
+
+	// Disconnect the agent for 1 second while the phone stays connected.
+	cancel1()
+	if err := <-done1; err != nil {
+		t.Fatalf("first agent: %v", err)
+	}
+	time.Sleep(time.Second)
+
+	cancel2, done2 := startAgent()
+	defer func() {
+		cancel2()
+		if err := <-done2; err != nil {
+			t.Errorf("second agent: %v", err)
+		}
+	}()
+
+	// Wait on the existing phone socket for machine.status online with a new connId.
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer waitCancel()
+	var secondConnID string
+	for secondConnID == "" {
+		_, data, err := ws.Read(waitCtx)
+		if err != nil {
+			t.Fatalf("waiting for reconnect status: %v", err)
+		}
+		env, err := protocol.Decode(data)
+		if err != nil || env.Kind != protocol.KindEvent || env.Method != protocol.EventMachineStatus {
+			continue
+		}
+		var m protocol.Machine
+		if err := json.Unmarshal(env.Body, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.ID == machineID && m.Online && m.ConnID != "" && m.ConnID != firstConnID {
+			secondConnID = m.ConnID
+		}
+	}
+
+	// Reopen chat on the new agent connection.
+	p.call(protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
+
+	// Append a new assistant reply to the transcript and verify the phone receives chat.items.
+	f, err := os.OpenFile(transcript, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString("\n" + `{"parentUuid":"f6fdcd82-2b32-4d55-9494-7a83a098f6f5","isSidechain":false,"message":{"content":[{"text":"重连后的新条目","type":"text"}],"id":"msg_reconnect_1","model":"deepseek-v4.1-flash","role":"assistant","stop_reason":"end_turn","stop_sequence":null,"type":"message"},"type":"assistant","uuid":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","timestamp":"2026-11-13T02:11:00.000Z","sessionId":"` + sessionID + `"}` + "\n")
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	itemCtx, itemCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer itemCancel()
+	for {
+		_, data, err := ws.Read(itemCtx)
+		if err != nil {
+			t.Fatalf("waiting for new chat.items after reconnect: %v", err)
+		}
+		env, err := protocol.Decode(data)
+		if err != nil || env.Kind != protocol.KindEvent || env.Method != protocol.EventChatItems {
+			continue
+		}
+		var evt protocol.ChatItemsEvent
+		if err := json.Unmarshal(env.Body, &evt); err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range evt.Items {
+			if item.Text == "重连后的新条目" {
+				return
+			}
 		}
 	}
 }

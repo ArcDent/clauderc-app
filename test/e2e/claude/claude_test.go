@@ -773,6 +773,30 @@ func TestDeny(t *testing.T) {
 	}
 }
 
+// TestSendOnPrompt sends a message while the session waits on a permission
+// prompt, whose Enter would allow the tool: chat.send fails, and the prompt
+// stays up, neither allowed nor denied.
+func TestSendOnPrompt(t *testing.T) {
+	s := launch(t, "send_on_prompt")
+	marker := "marker_send_on_prompt.txt"
+	s.send("请只用 Bash 工具运行这条命令：touch " + marker + "  然后用一句话告诉我结果")
+	p := s.pending(protocol.PendingPermission, 120*time.Second)
+	if _, e := s.x.call(t, protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: s.id, Text: "只回复 HI"}); e == nil {
+		t.Error("停在权限提示上时 chat.send 成功了，want 失败")
+	} else {
+		t.Logf("chat.send：%s %s", e.Code, e.Message)
+	}
+	time.Sleep(3 * time.Second)
+	_, err := os.Stat(filepath.Join(s.ws, marker))
+	if id := s.unanswered(); id != p.ToolUseID || s.state() != protocol.StatePending || err == nil {
+		t.Errorf("未回答的工具调用 %q（want %q），状态 %s，标记文件存在=%v；want 提示还在、没被批准", id, p.ToolUseID, s.state(), err == nil)
+	}
+	s.x.must(t, protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: s.id, ToolUseID: p.ToolUseID, Decision: protocol.DecisionDeny}, nil)
+	if block, _ := s.result(p.ToolUseID); block["is_error"] != true {
+		t.Errorf("拒绝后 is_error=%v", block["is_error"])
+	}
+}
+
 // ask sends prompt and returns the question the session asks.
 func ask(t *testing.T, s *session, prompt string) protocol.Pending {
 	t.Helper()

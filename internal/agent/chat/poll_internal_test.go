@@ -40,7 +40,7 @@ func TestPollReadsOnlyChangedFiles(t *testing.T) {
 	}
 	h.mu.Lock()
 	s := h.newSession(discovery.Target{ID: "abc12345", SessionID: sid})
-	s.clients["phone"] = true
+	s.clients["phone"] = "sub-test"
 	h.chats[s.id] = s
 	h.mu.Unlock()
 	t.Cleanup(h.Close)
