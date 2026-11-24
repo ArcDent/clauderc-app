@@ -619,6 +619,32 @@ func (f *fixture) writeSample(t *testing.T, name, body string) {
 	}
 }
 
+// A claude that does not answer fails sessions.subscribe with a timeout
+// once ListTimeout has passed, instead of holding the request.
+func TestSubscribeTimesOut(t *testing.T) {
+	f := newFixture(t)
+	f.h.Close()
+	f.h = sessions.New(sessions.Options{
+		Source:      discovery.Source{ClaudePath: fakeclaude.Path(), ClaudeDir: f.sample},
+		Push:        agent.PusherFunc(func(e protocol.Envelope) { f.events <- e }),
+		ListTimeout: 300 * time.Millisecond,
+	})
+	t.Cleanup(f.h.Close)
+	f.writeSample(t, "agents.delay", "10")
+	done := make(chan protocol.Envelope, 1)
+	go func() {
+		done <- f.h.Handle(context.Background(), request("r1", "c1", protocol.MethodSessionsSubscribe))
+	}()
+	select {
+	case res := <-done:
+		if res.Error == nil || res.Error.Code != protocol.CodeTimeout || res.Error.Message != "读取会话列表超过 0.3 秒未完成" {
+			t.Fatalf("subscribe error = %v, want a timeout", res.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("sessions.subscribe still waiting for claude after 5s")
+	}
+}
+
 // After a remove the list is read and pushed at once, not at the next poll.
 func TestRefreshPushesAtOnce(t *testing.T) {
 	f := newSlowFixture(t)
@@ -665,4 +691,159 @@ func TestRefreshDropsStaleRead(t *testing.T) {
 		t.Fatalf("unexpected second push %s", e.Body)
 	case <-time.After(1500 * time.Millisecond):
 	}
+}
+
+// Re-subscribing with a snapshot taken before a state change keeps rev ordered
+// and still lets subsequent polls push the new list.
+func TestResubscribeBeforeChangeStillPushesWithRev(t *testing.T) {
+	sample := t.TempDir()
+	fakeclaude.Setup(t, sample)
+	writeAgents := func(status, state string) {
+		body := fmt.Sprintf(`[{"pid": 7, "id": "abc12345", "cwd": "/w/x", "kind": "background", "startedAt": 1794529871000, "name": "task", "status": %q, "state": %q}]`, status, state)
+		if err := os.WriteFile(filepath.Join(sample, "agents.json"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeAgents("idle", "blocked")
+
+	events := make(chan protocol.Envelope, 64)
+	var gateMu sync.Mutex
+	var holdOnce bool
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	h := sessions.New(sessions.Options{
+		Source:   discovery.Source{ClaudePath: fakeclaude.Path(), ClaudeDir: sample},
+		Push:     agent.PusherFunc(func(e protocol.Envelope) { events <- e }),
+		Interval: 200 * time.Millisecond,
+		Dialog: func(_ context.Context, id string) bool {
+			gateMu.Lock()
+			hold := holdOnce
+			if hold {
+				holdOnce = false
+			}
+			gateMu.Unlock()
+			if hold {
+				close(entered)
+				<-release
+			}
+			return false
+		},
+	})
+	t.Cleanup(h.Close)
+
+	res1 := h.Handle(context.Background(), request("r1", "c1", protocol.MethodSessionsSubscribe))
+	if res1.Error != nil {
+		t.Fatalf("first subscribe: %+v", res1.Error)
+	}
+	var list1 protocol.SessionList
+	if err := json.Unmarshal(res1.Body, &list1); err != nil {
+		t.Fatal(err)
+	}
+	if list1.Rev < 1 {
+		t.Fatalf("first subscribe rev = %d, want >= 1", list1.Rev)
+	}
+
+	// Pause c2's subscribe after it read the old idle state.
+	gateMu.Lock()
+	holdOnce = true
+	gateMu.Unlock()
+	sub2Ch := make(chan protocol.Envelope, 1)
+	go func() {
+		sub2Ch <- h.Handle(context.Background(), request("r2", "c2", protocol.MethodSessionsSubscribe))
+	}()
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("c2 subscribe did not reach Dialog")
+	}
+
+	// Change state to working and let the poller push it to c1 while c2's subscribe is still holding the old idle snapshot.
+	writeAgents("busy", "working")
+	var pushed protocol.SessionList
+	deadline := time.After(3 * time.Second)
+	for pushed.Rev == 0 {
+		select {
+		case e := <-events:
+			if e.Method == protocol.EventSessionsChanged && e.Client == "c1" {
+				if err := json.Unmarshal(e.Body, &pushed); err != nil {
+					t.Fatal(err)
+				}
+			}
+		case <-deadline:
+			t.Fatal("c1 never got working push")
+		}
+	}
+	if pushed.Rev <= list1.Rev || len(pushed.Sessions) != 1 || pushed.Sessions[0].State != protocol.StateWorking {
+		t.Fatalf("c1 push = %+v, want working with rev > %d", pushed, list1.Rev)
+	}
+
+	// Release c2's stale subscribe: its reply carries a rev older than pushed.Rev,
+	// and because it differed from h.last, the next poll still pushes working to c2.
+	close(release)
+	res2 := <-sub2Ch
+	if res2.Error != nil {
+		t.Fatalf("c2 subscribe: %+v", res2.Error)
+	}
+	var list2 protocol.SessionList
+	if err := json.Unmarshal(res2.Body, &list2); err != nil {
+		t.Fatal(err)
+	}
+	if list2.Rev >= pushed.Rev {
+		t.Fatalf("stale subscribe rev = %d, want < pushed rev %d", list2.Rev, pushed.Rev)
+	}
+
+	deadline = time.After(3 * time.Second)
+	for {
+		select {
+		case e := <-events:
+			if e.Method != protocol.EventSessionsChanged || e.Client != "c2" {
+				continue
+			}
+			var got protocol.SessionList
+			if err := json.Unmarshal(e.Body, &got); err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Sessions) == 1 && got.Sessions[0].State == protocol.StateWorking && got.Rev > pushed.Rev {
+				return
+			}
+		case <-deadline:
+			t.Fatal("c2 never received subsequent working push after stale subscribe")
+		}
+	}
+}
+
+// ClientGone during an in-flight sessions.subscribe cancels it, never adds the
+// client to subs, and starts no polling.
+func TestClientGoneDuringSubscribeLeavesNoSubscription(t *testing.T) {
+	f := newFixture(t)
+	f.writeSample(t, "agents.delay", "5")
+	done := make(chan protocol.Envelope, 1)
+	go func() {
+		done <- f.h.Handle(context.Background(), request("r1", "c1", protocol.MethodSessionsSubscribe))
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for f.calls(t) < 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("subscribe never called claude")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	start := time.Now()
+	f.h.ClientGone("c1")
+	select {
+	case res := <-done:
+		if res.Error == nil {
+			t.Fatalf("subscribe succeeded after ClientGone: %s", res.Body)
+		}
+		if d := time.Since(start); d > 2*time.Second {
+			t.Fatalf("subscribe took %v after ClientGone", d)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("subscribe did not stop after ClientGone")
+	}
+	_ = os.Remove(filepath.Join(f.sample, "agents.delay"))
+	f.setAgents(t, "busy")
+	f.assertQuiet(t)
 }
