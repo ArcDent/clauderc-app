@@ -321,16 +321,13 @@ func (c *Conn) session(ctx context.Context) (connected bool, err error) {
 	// has come from the relay for HeartbeatTimeout (design D2). Every frame
 	// and TCP chunk read starts it over: messages, large frame fragments,
 	// and the pings and pongs the websocket library handles internally.
-	var lastHeard atomic.Int64
 	var stopped atomic.Bool
-	lastHeard.Store(time.Now().UnixNano())
 	silence := time.AfterFunc(c.opts.HeartbeatTimeout, func() { cancel(errSilent) })
 	defer func() {
 		stopped.Store(true)
 		silence.Stop()
 	}()
 	heard := func() {
-		lastHeard.Store(time.Now().UnixNano())
 		if !stopped.Load() {
 			silence.Reset(c.opts.HeartbeatTimeout)
 		}
@@ -367,7 +364,7 @@ func (c *Conn) session(ctx context.Context) (connected bool, err error) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); c.write(ctx, cancel, ws, out) }()
-	go func() { defer wg.Done(); c.heartbeat(ctx, cancel, ws, &lastHeard) }()
+	go func() { defer wg.Done(); c.heartbeat(ctx, &wg, ws) }()
 	for {
 		_, data, err := ws.Read(ctx)
 		if err != nil {
@@ -404,9 +401,11 @@ func (c *Conn) write(ctx context.Context, cancel context.CancelCauseFunc, ws *we
 	}
 }
 
-// heartbeat pings every interval and drops the connection when a pong
-// does not come back within the timeout, unless bytes are actively arriving.
-func (c *Conn) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, ws *websocket.Conn, lastHeard *atomic.Int64) {
+// heartbeat pings every interval without waiting for the previous pong, so
+// the relay hears from the agent on schedule even while its pongs queue
+// behind megabytes it is still sending this way. Whether the relay is
+// alive is up to the silence timer in session, which every pong resets.
+func (c *Conn) heartbeat(ctx context.Context, wg *sync.WaitGroup, ws *websocket.Conn) {
 	t := time.NewTicker(c.opts.HeartbeatInterval)
 	defer t.Stop()
 	for {
@@ -415,16 +414,13 @@ func (c *Conn) heartbeat(ctx context.Context, cancel context.CancelCauseFunc, ws
 			return
 		case <-t.C:
 		}
-		pctx, pcancel := context.WithTimeout(ctx, c.opts.HeartbeatTimeout)
-		err := ws.Ping(pctx)
-		pcancel()
-		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) && time.Since(time.Unix(0, lastHeard.Load())) < c.opts.HeartbeatTimeout {
-				continue
-			}
-			cancel(fmt.Errorf("heartbeat: %w", err))
-			return
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pctx, pcancel := context.WithTimeout(ctx, c.opts.HeartbeatTimeout)
+			defer pcancel()
+			_ = ws.Ping(pctx)
+		}()
 	}
 }
 

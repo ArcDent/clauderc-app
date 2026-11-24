@@ -730,6 +730,73 @@ func (c *rateConn) Write(b []byte) (int, error) {
 	return total, nil
 }
 
+// backlogConn reads its connection eagerly into up to max bytes held in
+// memory, like the multi-megabyte loopback buffers Linux grows: whatever the
+// relay writes next, a ping included, waits behind all of it.
+type backlogConn struct {
+	net.Conn
+	mu   sync.Mutex
+	cond *sync.Cond
+	buf  []byte
+	err  error
+	max  int
+}
+
+func newBacklogConn(c net.Conn, max int) *backlogConn {
+	b := &backlogConn{Conn: c, max: max}
+	b.cond = sync.NewCond(&b.mu)
+	go b.fill()
+	return b
+}
+
+func (b *backlogConn) fill() {
+	chunk := make([]byte, 64<<10)
+	for {
+		b.mu.Lock()
+		for len(b.buf) >= b.max && b.err == nil {
+			b.cond.Wait()
+		}
+		done := b.err != nil
+		b.mu.Unlock()
+		if done {
+			return
+		}
+		n, err := b.Conn.Read(chunk)
+		b.mu.Lock()
+		b.buf = append(b.buf, chunk[:n]...)
+		if err != nil && b.err == nil {
+			b.err = err
+		}
+		b.cond.Broadcast()
+		b.mu.Unlock()
+	}
+}
+
+func (b *backlogConn) Read(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for len(b.buf) == 0 && b.err == nil {
+		b.cond.Wait()
+	}
+	if len(b.buf) == 0 {
+		return 0, b.err
+	}
+	n := copy(p, b.buf)
+	b.buf = b.buf[n:]
+	b.cond.Broadcast()
+	return n, nil
+}
+
+func (b *backlogConn) Close() error {
+	b.mu.Lock()
+	if b.err == nil {
+		b.err = net.ErrClosed
+	}
+	b.cond.Broadcast()
+	b.mu.Unlock()
+	return b.Conn.Close()
+}
+
 type largeHandler struct{}
 
 func (largeHandler) Methods() []protocol.Method { return []protocol.Method{"test.large"} }
@@ -777,6 +844,8 @@ func TestLargeMessageOnRateLimitedConnWithPings(t *testing.T) {
 	})
 
 	// Throttle only the agent<->relay TCP link to ~4.5 MB/s (~3.1s per 14 MB, > 1.2s HeartbeatTimeout).
+	// 8 MB queue up on the way to the agent, ~1.8s of it: a ping the relay
+	// sends during the transfer, or after its last chunk, is answered that late.
 	tr := r.http.Client().Transport.(*http.Transport).Clone()
 	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		nc, err := new(net.Dialer).DialContext(ctx, network, addr)
@@ -784,7 +853,7 @@ func TestLargeMessageOnRateLimitedConnWithPings(t *testing.T) {
 			return nil, err
 		}
 		return &rateConn{
-			Conn: nc,
+			Conn: newBacklogConn(nc, 8<<20),
 			r:    pacer{bytesPerSec: 4_500_000},
 			w:    pacer{bytesPerSec: 4_500_000},
 		}, nil
