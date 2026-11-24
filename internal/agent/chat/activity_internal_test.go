@@ -17,6 +17,7 @@ func screenSample(t *testing.T, name string) []string {
 }
 
 func TestScreenActivity(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ sample, want string }{
 		{"working-start.txt", "Whirring…"},
 		{"working-thinking.txt", "Whirring… (4s · thinking with low effort)"},
@@ -44,6 +45,7 @@ func TestScreenActivity(t *testing.T) {
 }
 
 func TestScreenPartial(t *testing.T) {
+	t.Parallel()
 	got := screenPartial(screenSample(t, "working-partial.txt"))
 	want := "终端模拟器像一台很窄的显示器：它从伪终端收到一串字节，再把这些字节翻译成屏幕上排列整齐的字符。程序写出的不只是文字，还" +
 		"有换行、回车、退格，以及以 ESC 开头的控制指令。模拟器先按 UTF-8" +

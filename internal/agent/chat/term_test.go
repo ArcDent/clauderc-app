@@ -33,6 +33,7 @@ func shellAttach(script string) func(*chat.Options) {
 }
 
 func TestTermOpenReturnsScreen(t *testing.T) {
+	t.Parallel()
 	s := running()
 	s.screen = "Claude Code\n❯ hello"
 	f := newFixture(t, s)
@@ -49,6 +50,7 @@ func TestTermOpenReturnsScreen(t *testing.T) {
 }
 
 func TestTermOpenStoppedSession(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{pid: "null"})
 	res := f.call(t, "c1", protocol.MethodTermOpen, protocol.TermOpenRequest{SessionID: shortID})
 	if res.Error == nil || res.Error.Code != protocol.CodeInvalidParams {
@@ -57,6 +59,7 @@ func TestTermOpenStoppedSession(t *testing.T) {
 }
 
 func TestTermKeys(t *testing.T) {
+	t.Parallel()
 	s := running()
 	s.screen = "❯ "
 	f := newFixture(t, s)
@@ -116,6 +119,7 @@ func (f *fixture) screens(t *testing.T, d time.Duration) []pushed {
 // The screen changes 20 times within about a second: at most 5 pushes in
 // any second, and the last one is the final screen.
 func TestTermScreenThrottled(t *testing.T) {
+	t.Parallel()
 	s := running()
 	s.opts = shellAttach(`printf 'ready'; head -c 1 >/dev/null; i=1; while [ $i -le 20 ]; do printf '\033[H\033[2Kframe %02d' $i; sleep 0.05; i=$((i+1)); done; exec cat > "$FAKE_ATTACH_LOG"`)
 	f := newFixture(t, s)
@@ -148,6 +152,7 @@ func TestTermScreenThrottled(t *testing.T) {
 }
 
 func TestTermStopsPushing(t *testing.T) {
+	t.Parallel()
 	s := running()
 	s.opts = shellAttach(`i=0; while true; do i=$((i+1)); printf '\033[H\033[2Ktick %d' $i; sleep 0.1; done`)
 	f := newFixture(t, s)
@@ -180,6 +185,7 @@ func echoAttach(onEnter string) func(*chat.Options) {
 }
 
 func TestSendPanelCommand(t *testing.T) {
+	t.Parallel()
 	s := running()
 	s.opts = echoAttach(`printf '\033[2J\033[H\033[?25l   Manage MCP servers'`)
 	f := newFixture(t, s)
@@ -197,6 +203,7 @@ func TestSendPanelCommand(t *testing.T) {
 }
 
 func TestSendPanelCommandNotDelivered(t *testing.T) {
+	t.Parallel()
 	// Enter leaves the command in the input.
 	s := running()
 	s.opts = echoAttach(`:`)
@@ -223,6 +230,7 @@ func TestSendPanelCommandNotDelivered(t *testing.T) {
 // its Enter and allow the tool: the screen is looked at once more before
 // Enter is pressed.
 func TestSendLooksAtTheScreenBeforeEnter(t *testing.T) {
+	t.Parallel()
 	const text = "先看一下 relay 的重连"
 	prompt := `\033[2J\033[H\033[?25l Bash command\r\n\r\n   rm -rf build\r\n\r\n Do you want to proceed?\r\n ❯ 1. Yes\r\n   2. No`
 	s := running()
@@ -259,6 +267,7 @@ func TestSendLooksAtTheScreenBeforeEnter(t *testing.T) {
 // A panel or dialog on screen takes typed keys, and its Enter acts on what
 // it has selected: nothing is typed then, a message or a panel command.
 func TestSendRefusedOffTheInput(t *testing.T) {
+	t.Parallel()
 	s := running()
 	s.opts = shellAttach(`printf '` + strings.ReplaceAll(mcpPanel, "\n", `\r\n`) + `'; exec cat > "$FAKE_ATTACH_LOG"`)
 	f := newFixture(t, s)

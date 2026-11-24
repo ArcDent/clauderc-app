@@ -9,6 +9,7 @@ import (
 )
 
 func TestCutTextKeepsWholeCharactersAndLines(t *testing.T) {
+	t.Parallel()
 	// No line break: cut at the limit, never inside 中 (3 bytes).
 	s := strings.Repeat("中", 10)
 	if got := cutText(s, 10); got != "中中中" || !utf8.ValidString(got) {
@@ -25,6 +26,7 @@ func TestCutTextKeepsWholeCharactersAndLines(t *testing.T) {
 }
 
 func TestCutPatch(t *testing.T) {
+	t.Parallel()
 	line := "+" + strings.Repeat("y", 99) // 101 bytes with its newline
 	big := []protocol.Hunk{
 		{OldStart: 1, OldLines: 0, NewStart: 1, NewLines: 60, Lines: repeat(line, 60)},
@@ -44,6 +46,7 @@ func TestCutPatch(t *testing.T) {
 }
 
 func TestTruncatedLeavesTheOriginal(t *testing.T) {
+	t.Parallel()
 	res := &protocol.ToolResult{Content: strings.Repeat("a\n", 6000)}
 	out := truncated(res)
 	if !out.Truncated || len(out.Content) > protocol.MaxToolOutputBytes || res.Truncated || len(res.Content) != 12000 {

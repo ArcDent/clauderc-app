@@ -16,6 +16,7 @@ import (
 // reads only those that changed: the transcript when it grew, a meta file
 // when it was written.
 func TestPollReadsOnlyChangedFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	const sid = "8f0c2a5e-0000-4000-8000-0000000000d1"
 	proj := filepath.Join(dir, "projects", "-w-x")

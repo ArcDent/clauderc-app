@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -45,6 +46,22 @@ func Setup(t testing.TB, sample string) (logDir string) {
 	t.Setenv("FAKE_CLAUDE_DIR", sample)
 	t.Setenv("FAKE_CLAUDE_LOG", logDir)
 	return logDir
+}
+
+// Command is Setup without the process environment, so tests using it may
+// run in parallel: it writes a claude of the test's own that runs the fake
+// claude on sample, and returns its path and the directory that receives
+// its call records.
+func Command(t testing.TB, sample string) (path, logDir string) {
+	t.Helper()
+	logDir = t.TempDir()
+	path = filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\nFAKE_CLAUDE_DIR=" + strconv.Quote(sample) + " FAKE_CLAUDE_LOG=" + strconv.Quote(logDir) +
+		" exec " + strconv.Quote(Path()) + ` "$@"` + "\n"
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return path, logDir
 }
 
 // Calls reads the calls recorded under logDir, in call order. A call that

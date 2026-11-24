@@ -121,7 +121,8 @@ func newFixture(t *testing.T, s setup) *fixture {
 		s.cwd = "/w/x"
 	}
 	f := &fixture{sample: t.TempDir(), uploads: filepath.Join(t.TempDir(), "uploads"), events: make(chan protocol.Envelope, 256), cwd: s.cwd}
-	f.claudeLog = fakeclaude.Setup(t, f.sample)
+	claude, claudeLog := fakeclaude.Command(t, f.sample)
+	f.claudeLog = claudeLog
 	f.setAgents(t, s.status, s.state, s.pid)
 	proj := filepath.Join(f.sample, "projects", "-w-x")
 	if err := os.MkdirAll(proj, 0o700); err != nil {
@@ -143,7 +144,7 @@ func newFixture(t *testing.T, s setup) *fixture {
 	}
 	f.keys = filepath.Join(t.TempDir(), "keys.log")
 	opts := chat.Options{
-		Source: discovery.Source{ClaudePath: fakeclaude.Path(), ClaudeDir: f.sample},
+		Source: discovery.Source{ClaudePath: claude, ClaudeDir: f.sample},
 		Push:   agent.PusherFunc(func(e protocol.Envelope) { f.events <- e }),
 		Attach: attach.Options{
 			Command: fakeattach.Command,
@@ -282,6 +283,7 @@ func (f *fixture) keyLog() string {
 }
 
 func TestOpenLatestPageAndFollow(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	var res protocol.ChatOpenResponse
 	if err := json.Unmarshal(f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID}), &res); err != nil {
@@ -325,6 +327,7 @@ func TestOpenLatestPageAndFollow(t *testing.T) {
 // A queued message goes to the phone marked queued; its formal entry then
 // replaces it under the same seq without the mark.
 func TestQueuedItemIsMarkedUntilItsEntry(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
 	next := func() protocol.ChatItem {
@@ -346,6 +349,7 @@ func TestQueuedItemIsMarkedUntilItsEntry(t *testing.T) {
 }
 
 func TestOpenUnknownSession(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	res := f.call(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: "zzz99999"})
 	if res.Error == nil || res.Error.Code != protocol.CodeSessionNotFound {
@@ -354,6 +358,7 @@ func TestOpenUnknownSession(t *testing.T) {
 }
 
 func TestSendClearsInputThenPastes(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "第一行\n第二行"})
 	if got, want := f.keyLog(), "\x15\x1b[200~第一行\n第二行\x1b[201~\r"; got != want {
@@ -364,6 +369,7 @@ func TestSendClearsInputThenPastes(t *testing.T) {
 // A busy session takes the message right away; Claude Code queues it and
 // writes an enqueue record, which counts as delivered.
 func TestSendWhileBusyIsDeliveredByEnqueue(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "busy", state: "working", attachEnv: []string{fakeattach.DeliverEnv("enqueue")}})
 	f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "排队的消息"})
 	if got, want := f.keyLog(), "\x15\x1b[200~排队的消息\x1b[201~\r"; got != want {
@@ -378,6 +384,7 @@ func TestSendWhileBusyIsDeliveredByEnqueue(t *testing.T) {
 // Claude Code queues a slash command with an enqueue record that has no
 // text; for a slash command that counts as delivered, and queued.
 func TestSendCommandWhileBusyIsDeliveredByBareEnqueue(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "busy", state: "working", attachEnv: []string{fakeattach.DeliverEnv("enqueue")}})
 	body := f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "/todolist-workflow 先用这个"})
 	if got, want := string(body), `{"queued":true}`; got != want {
@@ -387,6 +394,7 @@ func TestSendCommandWhileBusyIsDeliveredByBareEnqueue(t *testing.T) {
 
 // A "!" command shows up as a command item, not as the text sent.
 func TestSendBashCommandIsDelivered(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	body := f.ok(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "!ls"})
 	if got, want := string(body), `{}`; got != want {
@@ -396,6 +404,7 @@ func TestSendBashCommandIsDelivered(t *testing.T) {
 
 // An enqueue without text is never taken for a plain message.
 func TestSendTextNotDeliveredByBareEnqueue(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "busy", state: "working", attachEnv: []string{fakeattach.DeliverEnv("enqueue-bare")}})
 	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "你好"})
 	if res.Error == nil || res.Error.Code != protocol.CodeNotDelivered {
@@ -407,6 +416,7 @@ func TestSendTextNotDeliveredByBareEnqueue(t *testing.T) {
 // typed second gets no credit for the record of the first, whatever
 // Claude Code writes a moment after an Enter.
 func TestSendsAtOnceConfirmedEachByItsOwn(t *testing.T) {
+	t.Parallel()
 	const user = `{"type":"user","message":{"role":"user","content":"same"}}`
 	const enqueue = `{"type":"queue-operation","operation":"enqueue"}`
 	cases := []struct {
@@ -449,6 +459,7 @@ func TestSendsAtOnceConfirmedEachByItsOwn(t *testing.T) {
 }
 
 func TestSendNotDelivered(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{attachEnv: []string{fakeattach.DeliverEnv("none")}})
 	start := time.Now()
 	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "lost"})
@@ -480,6 +491,7 @@ func (k *forker) Fork(_ context.Context, id, instruction string) error {
 // so the agent forks it itself instead of typing it; other sessions get
 // /fork typed as before.
 func TestSendForkWhereClaudeRefusesIt(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name   string
 		flags  []string
@@ -517,6 +529,7 @@ func TestSendForkWhereClaudeRefusesIt(t *testing.T) {
 // shows it taken: gone from the input box with a status line up. Without
 // the status line, or for plain text, it stays not delivered.
 func TestSendCommandScreen(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name, deliver, text string
 		ok                  bool
@@ -542,6 +555,7 @@ func TestSendCommandScreen(t *testing.T) {
 // personal skill in a session that does not load them, is reported as
 // unknown at once instead of as not delivered.
 func TestSendUnknownCommand(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{attachEnv: []string{fakeattach.DeliverEnv("unknown")}})
 	start := time.Now()
 	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "/todolist-workflow 先用这个"})
@@ -557,6 +571,7 @@ func TestSendUnknownCommand(t *testing.T) {
 }
 
 func TestSendImages(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	png := []byte("\x89PNG fake")
 	jpg := []byte("\xff\xd8\xff fake")
@@ -598,6 +613,7 @@ func TestSendImages(t *testing.T) {
 
 // There is no count limit; only the total size is checked.
 func TestSendManyImages(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	six := make([]protocol.Image, 6)
 	for i := range six {
@@ -613,6 +629,7 @@ func TestSendManyImages(t *testing.T) {
 // files older than 24 hours are removed, anything else in the directory
 // is left alone.
 func TestSendRemovesOldUploads(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	if err := os.MkdirAll(f.uploads, 0o700); err != nil {
 		t.Fatal(err)
@@ -653,6 +670,7 @@ func TestSendRemovesOldUploads(t *testing.T) {
 }
 
 func TestSendRejects(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	big := make([]byte, protocol.MaxImageBytes+1)
 	half := make([]byte, 6<<20)
@@ -682,6 +700,7 @@ func TestSendRejects(t *testing.T) {
 // and a bare /model opens the picker where the next Enter does the same
 // (RESULTS.md), so neither is typed.
 func TestSendRefusesModelCommand(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	for _, text := range []string{"/model sonnet", "/model", "  /model  opus\n", "\n/model\tsonnet", "/MODEL sonnet"} {
 		res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: text})
@@ -701,6 +720,7 @@ func TestSendRefusesModelCommand(t *testing.T) {
 // Waking a stopped session belongs to chat.send later (task 8.2); until
 // then it is refused without touching the session.
 func TestSendToStoppedSession(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "idle", state: "done", pid: "null"})
 	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "继续"})
 	if res.Error == nil || res.Error.Code != protocol.CodeInvalidParams {
@@ -712,6 +732,7 @@ func TestSendToStoppedSession(t *testing.T) {
 }
 
 func TestPendingIsPushedAndCleared(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
 	f.appendTranscript(t, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_p1","name":"Bash","input":{"command":"touch marker.txt"}}]}}`+"\n")
@@ -750,6 +771,7 @@ func (w *fakeWaker) Wake(ctx context.Context, sessionID string, hold func(contex
 }
 
 func TestSendWakesStoppedSession(t *testing.T) {
+	t.Parallel()
 	w := &fakeWaker{}
 	f := newFixture(t, setup{status: "idle", state: "done", pid: "null", opts: func(o *chat.Options) { o.Waker = w }})
 	w.wake = func() error {
@@ -791,7 +813,9 @@ func wakeWith(t *testing.T, attached func() []string) func(*chat.Options) {
 		}
 		src := o.Source
 		src.ClaudePath = filepath.Join(t.TempDir(), "claude")
-		script := "#!/bin/sh\n" + `if [ "$1" = stop ]; then cp "$FAKE_CLAUDE_DIR/agents.stopped.json" "$FAKE_CLAUDE_DIR/agents.json"; fi` + "\nexec " + strconv.Quote(fakeclaude.Path()) + ` "$@"` + "\n"
+		script := "#!/bin/sh\n" + `if [ "$1" = stop ]; then cp ` +
+			strconv.Quote(filepath.Join(src.ClaudeDir, "agents.stopped.json")) + " " + strconv.Quote(filepath.Join(src.ClaudeDir, "agents.json")) +
+			"; fi\nexec " + strconv.Quote(o.Source.ClaudePath) + ` "$@"` + "\n"
 		if err := os.WriteFile(src.ClaudePath, []byte(script), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -803,6 +827,7 @@ func wakeWith(t *testing.T, attached func() []string) func(*chat.Options) {
 // also while an open chat holds its attach from before the session stopped;
 // the message then goes into that held attach.
 func TestSendWakesThroughAttach(t *testing.T) {
+	t.Parallel()
 	var f *fixture
 	var mu sync.Mutex
 	attaches := 0
@@ -843,6 +868,7 @@ func TestSendWakesThroughAttach(t *testing.T) {
 // A copy that shows up while waking is stopped and removed, and chat.send
 // says the session did not wake because of it.
 func TestSendWakeRemovesCopy(t *testing.T) {
+	t.Parallel()
 	var f *fixture
 	f = newFixture(t, setup{status: "idle", state: "done", pid: "null", cwd: t.TempDir(), opts: wakeWith(t, func() []string {
 		f.writeAgents(t, "agents.json", f.agent(shortID, sessionID, "idle", "done", "null"), f.agent("cpy00001", "uuid-copy", "idle", "blocked", "8"))
@@ -859,6 +885,7 @@ func TestSendWakeRemovesCopy(t *testing.T) {
 }
 
 func TestSendWakeFails(t *testing.T) {
+	t.Parallel()
 	w := &fakeWaker{wake: func() error { return errors.New("resume failed") }}
 	f := newFixture(t, setup{status: "idle", state: "done", pid: "null", opts: func(o *chat.Options) { o.Waker = w }})
 	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "继续"})
@@ -874,6 +901,7 @@ func TestSendWakeFails(t *testing.T) {
 }
 
 func TestSendWakeFailsWithCode(t *testing.T) {
+	t.Parallel()
 	w := &fakeWaker{wake: func() error {
 		return &protocol.Error{Code: protocol.CodeDirNotFound, Message: "会话的工作目录已不存在：/w/gone"}
 	}}
@@ -887,6 +915,7 @@ func TestSendWakeFailsWithCode(t *testing.T) {
 // Control bytes in a message would end the paste early and turn the rest
 // into keys; they are dropped before the /model check and typing.
 func TestSendCleansControlBytes(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	// What is left after cleaning starts with /model, so it is refused.
 	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "\x1b/model opus"})
@@ -906,6 +935,7 @@ func TestSendCleansControlBytes(t *testing.T) {
 
 // A custom answer is typed key by key; Shift+Tab and Ctrl+C in it are not.
 func TestAnswerCustomCleansControlBytes(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{screen: questionScreen("颜色？")})
 	f.blockedOn(t, "toolu_q1", "AskUserQuestion", `{"questions":[{"question":"颜色？","header":"颜色","multiSelect":false,"options":[{"label":"红","description":""},{"label":"绿","description":""}]}]}`)
 	f.ok(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_q1", Answers: []protocol.Answer{{Custom: "都\x1b[Z不\x03要"}}})
@@ -921,6 +951,7 @@ func TestAnswerCustomCleansControlBytes(t *testing.T) {
 // Design D5: blocked without an unanswered tool call falls through to the
 // status, so a busy session is working and can be interrupted.
 func TestBlockedButBusyIsWorking(t *testing.T) {
+	t.Parallel()
 	// Interrupt first: chat.open starts an attach that types Ctrl+L.
 	f := newFixture(t, setup{status: "busy", state: "blocked"})
 	f.ok(t, "c1", protocol.MethodChatInterrupt, protocol.ChatInterruptRequest{SessionID: shortID})
@@ -953,6 +984,7 @@ func TestBlockedButBusyIsWorking(t *testing.T) {
 
 // The phone shows error messages as they are, so they are Chinese.
 func TestErrorMessagesAreChinese(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{attachEnv: []string{fakeattach.ModesEnv("default")}})
 	big := make([]byte, protocol.MaxImageBytes+1)
 	half := make([]byte, 6<<20)
@@ -1023,6 +1055,7 @@ const twoQuestionInputForMessages = twoQuestionInput
 // own conversation starts names the source. The transcript is the real
 // fork in discovery's v2327 sample.
 func TestForkStartsWithSourceLine(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	raw, err := os.ReadFile(filepath.Join("..", "discovery", "testdata", "v2327", "projects", "-w-repo", "9a1c2a5e-0000-4000-8000-0000000000a2.jsonl"))
 	if err != nil {
@@ -1060,6 +1093,7 @@ func TestForkStartsWithSourceLine(t *testing.T) {
 }
 
 func TestNoSourceLineWithoutFork(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	var res protocol.ChatOpenResponse
 	if err := json.Unmarshal(f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID}), &res); err != nil {
@@ -1077,6 +1111,7 @@ func TestNoSourceLineWithoutFork(t *testing.T) {
 // what the phone already has, and a permission prompt after the move
 // still reaches it.
 func TestChatFollowsMovedTranscript(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
 	moved := filepath.Join(f.sample, "projects", "-w-x--claude-worktrees-fox", sessionID+".jsonl")
@@ -1127,6 +1162,7 @@ func TestChatFollowsMovedTranscript(t *testing.T) {
 // open chat's new records nor a subagent chat's: they still reach the
 // phone within a second.
 func TestSlowSessionListDoesNotHoldItems(t *testing.T) {
+	t.Parallel()
 	const text = "列表慢时的新消息"
 	for _, sub := range []bool{false, true} {
 		name := "session"

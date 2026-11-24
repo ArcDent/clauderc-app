@@ -42,6 +42,7 @@ func (f *fixture) nextState(t *testing.T, timeout time.Duration, match func(prot
 // While the session works, chat.state carries the status line and the
 // reply drawn so far; the reply goes once the transcript has it.
 func TestActivityWhileWorking(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "busy", state: "working", screen: workingScreen(t)})
 	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
 	ev := f.nextState(t, 5*time.Second, func(e protocol.ChatStateEvent) bool { return e.Activity != "" })
@@ -61,6 +62,7 @@ func TestActivityWhileWorking(t *testing.T) {
 
 // An idle session, or one without an attach, has no activity.
 func TestNoActivity(t *testing.T) {
+	t.Parallel()
 	for name, s := range map[string]setup{
 		"idle": {status: "idle", state: "done", screen: workingScreen(t)},
 		"no attach": {status: "busy", state: "working", opts: func(o *chat.Options) {

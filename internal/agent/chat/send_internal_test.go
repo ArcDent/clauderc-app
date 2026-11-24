@@ -3,6 +3,7 @@ package chat
 import "testing"
 
 func TestInputLine(t *testing.T) {
+	t.Parallel()
 	rule := "──────────────────────────────── e2e-probe ─"
 	// As Claude Code 2.1.326 draws it: an earlier /mcp in the conversation,
 	// then the input box with a no-break space after its ❯.
