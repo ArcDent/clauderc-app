@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -76,6 +78,66 @@ func TestRunTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "git push") {
 		t.Errorf("message %q does not name the command", err)
+	}
+}
+
+// termTestTimeout leaves the stand-in git time to set its trap, even on a
+// busy machine where starting a new script can take a few hundred ms.
+const termTestTimeout = 2 * time.Second
+
+// On timeout the process group gets SIGTERM first, which git answers by
+// removing its lock files, and is not killed while it stops on its own.
+func TestRunTimeoutTerminatesFirst(t *testing.T) {
+	rec := t.TempDir()
+	t.Setenv("REC", rec)
+	g := Git{Path: fakeGit(t, `trap 'touch "$REC/term"; exit 1' TERM
+sleep 30 &
+wait
+`), Timeout: termTestTimeout}
+	start := time.Now()
+	_, err := g.Run(context.Background(), t.TempDir(), "commit")
+	wantCode(t, err, protocol.CodeTimeout)
+	if _, err := os.Stat(filepath.Join(rec, "term")); err != nil {
+		t.Errorf("git got no SIGTERM: %v", err)
+	}
+	if d := time.Since(start); d >= killGrace {
+		t.Errorf("Run took %v although git stopped on SIGTERM", d)
+	}
+}
+
+// What ignores SIGTERM is killed killGrace later, children included.
+func TestRunTimeoutKillsWhatIgnoresTerm(t *testing.T) {
+	old := killGrace
+	killGrace = 300 * time.Millisecond
+	t.Cleanup(func() { killGrace = old })
+	rec := t.TempDir()
+	t.Setenv("REC", rec)
+	g := Git{Path: fakeGit(t, `trap '' TERM
+sleep 30 &
+echo $! >"$REC/pid"
+wait
+`), Timeout: termTestTimeout}
+	start := time.Now()
+	_, err := g.Run(context.Background(), t.TempDir(), "push")
+	wantCode(t, err, protocol.CodeTimeout)
+	if d := time.Since(start); d < termTestTimeout+killGrace || d > termTestTimeout+killGrace+3*time.Second {
+		t.Errorf("Run took %v, want the timeout plus the %v grace", d, killGrace)
+	}
+	raw, err := os.ReadFile(filepath.Join(rec, "pid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatal("the child that ignores SIGTERM survived")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

@@ -24,6 +24,11 @@ import (
 // give up after 30 seconds).
 const DefaultTimeout = 30 * time.Second
 
+// killGrace is how long a git call that ran out of time or was cancelled
+// gets after SIGTERM, to remove its lock files, before its process group
+// is killed.
+var killGrace = 5 * time.Second
+
 // Git runs git commands.
 type Git struct {
 	// Path is the git executable; empty means "git" from PATH.
@@ -67,13 +72,25 @@ func (g Git) exec(ctx context.Context, dir string, args ...string) (result, erro
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, append([]string{"-C", dir}, args...)...)
 	cmd.Env = environ()
-	// git may leave ssh or a credential helper behind; kill the group.
+	// git may leave ssh or a credential helper behind, so signals go to the
+	// whole group: SIGTERM first, which git answers by removing its lock
+	// files, and SIGKILL for whatever still runs killGrace later.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = time.Second
+	var kill *time.Timer
+	cmd.Cancel = func() error {
+		pgid := cmd.Process.Pid
+		kill = time.AfterFunc(killGrace, func() { syscall.Kill(-pgid, syscall.SIGKILL) })
+		return syscall.Kill(-pgid, syscall.SIGTERM)
+	}
+	cmd.WaitDelay = killGrace
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
+	// Run waits for a Cancel call to finish, so kill is safe to read. git
+	// has exited; its helpers go with it instead of waiting out the grace.
+	if kill != nil && kill.Stop() {
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 	if ctx.Err() == context.DeadlineExceeded {
 		return result{}, &protocol.Error{Code: protocol.CodeTimeout, Message: fmt.Sprintf("git %s 超过 %d 秒未完成", subcommand(args), int(timeout.Seconds()))}
 	}
