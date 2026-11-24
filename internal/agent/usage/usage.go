@@ -77,6 +77,8 @@ type Handler struct {
 	answer protocol.UsageResponse
 	// last is the latest successful read, kept to show while the login is expired.
 	last *protocol.UsageResponse
+	// reading is closed when the read in progress ends; nil while none runs.
+	reading chan struct{}
 }
 
 // New returns a Handler.
@@ -115,36 +117,73 @@ func (h *Handler) Handle(ctx context.Context, req protocol.Envelope) protocol.En
 }
 
 // Get answers from the last read when it is younger than the TTL, and
-// reads again otherwise.
+// reads again otherwise. One read runs at a time, without holding the
+// lock: other callers wait for it, each giving up when its own ctx ends.
+// A read whose caller's ctx ended is not kept, as the failure may be only
+// that; the next caller reads again.
 func (h *Handler) Get(ctx context.Context) protocol.UsageResponse {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	now := h.opts.Now()
-	if !h.asked.IsZero() && now.Sub(h.asked) < h.opts.TTL {
-		return h.answer
+	for {
+		now := h.opts.Now()
+		if !h.asked.IsZero() && now.Sub(h.asked) < h.opts.TTL {
+			return h.answer
+		}
+		reading := h.reading
+		if reading == nil {
+			return h.refresh(ctx, now)
+		}
+		h.mu.Unlock()
+		select {
+		case <-reading:
+			h.mu.Lock()
+		case <-ctx.Done():
+			h.mu.Lock()
+			return h.stale(protocol.UsageFailed)
+		}
 	}
-	h.asked = now
-	h.answer = h.read(ctx, now)
-	return h.answer
 }
 
-func (h *Handler) read(ctx context.Context, now time.Time) protocol.UsageResponse {
+// refresh reads with h.mu, which the caller holds, released meanwhile.
+func (h *Handler) refresh(ctx context.Context, now time.Time) protocol.UsageResponse {
+	done := make(chan struct{})
+	h.reading = done
+	h.mu.Unlock()
+	answer, why := h.read(ctx, now)
+	h.mu.Lock()
+	h.reading = nil
+	close(done)
+	if why != "" {
+		answer = h.stale(why)
+	} else if answer.Available {
+		h.last = &answer
+	}
+	// A read whose caller gave up may have failed only for that.
+	if ctx.Err() == nil {
+		h.asked, h.answer = now, answer
+	}
+	return answer
+}
+
+// read asks the endpoint once. It returns the answer, or why there is
+// none, which refresh shows with the last successful read.
+func (h *Handler) read(ctx context.Context, now time.Time) (protocol.UsageResponse, protocol.UsageStale) {
 	cred, err := h.opts.Credential(ctx)
 	if errors.Is(err, ErrNoLogin) || (err == nil && len(cred.Scopes) > 0 && !slices.Contains(cred.Scopes, "user:profile")) {
-		return protocol.UsageResponse{}
+		return protocol.UsageResponse{}, ""
 	}
 	if err != nil {
 		h.opts.Logger.Warn("usage: reading the Claude login failed", "err", err)
-		return h.stale(protocol.UsageFailed)
+		return protocol.UsageResponse{}, protocol.UsageFailed
 	}
 	if !cred.ExpiresAt.IsZero() && !now.Before(cred.ExpiresAt) {
-		return h.stale(protocol.UsageExpired)
+		return protocol.UsageResponse{}, protocol.UsageExpired
 	}
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.opts.Endpoint, nil)
 	if err != nil {
-		return h.stale(protocol.UsageFailed)
+		return protocol.UsageResponse{}, protocol.UsageFailed
 	}
 	req.Header.Set("Authorization", "Bearer "+cred.AccessToken)
 	req.Header.Set("anthropic-beta", betaHeader)
@@ -155,27 +194,24 @@ func (h *Handler) read(ctx context.Context, now time.Time) protocol.UsageRespons
 	res, err := h.opts.HTTPClient.Do(req)
 	if err != nil {
 		h.opts.Logger.Warn("usage: request failed", "err", err)
-		return h.stale(protocol.UsageFailed)
+		return protocol.UsageResponse{}, protocol.UsageFailed
 	}
 	defer res.Body.Close()
 	switch res.StatusCode {
 	case http.StatusOK:
 	case http.StatusUnauthorized:
-		return h.stale(protocol.UsageExpired)
+		return protocol.UsageResponse{}, protocol.UsageExpired
 	default:
 		// The body is not logged: it is Anthropic's, and it is never needed to tell what went wrong.
 		h.opts.Logger.Warn("usage: unexpected response", "status", res.StatusCode)
-		return h.stale(protocol.UsageFailed)
+		return protocol.UsageResponse{}, protocol.UsageFailed
 	}
 	answer, err := decode(io.LimitReader(res.Body, 1<<20), now)
 	if err != nil {
 		h.opts.Logger.Warn("usage: unreadable response", "err", err)
-		return h.stale(protocol.UsageFailed)
+		return protocol.UsageResponse{}, protocol.UsageFailed
 	}
-	if answer.Available {
-		h.last = &answer
-	}
-	return answer
+	return answer, ""
 }
 
 // stale answers with the last successful read, marked with why it is old.
