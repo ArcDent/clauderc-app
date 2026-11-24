@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;700&display=swap">
 <!-- 第九轮：公式用 KaTeX 画，APP 里的库用的也是 KaTeX 字体 -->
 <!-- 第十轮：任务清单条放在输入框上方（2026-11-22 已批准） -->
+<!-- 第十一轮：全屏看图保存到相册，用户消息里的图能点开，回溯钮四版对比（待批） -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300..500,0..1,0&icon_names=account_tree,add,alt_route,animation,arrow_back,arrow_upward,backspace,battery_full,call_split,check,check_box,check_box_outline_blank,chevron_right,close,cloud_off,computer,content_copy,contrast,delete,description,dns,download,edit,error,expand_more,folder,forum,history,image,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,keyboard_return,keyboard_tab,lock,mail,more_vert,open_in_browser,palette,photo_camera,power_settings_new,radio_button_checked,radio_button_unchecked,refresh,sell,settings,signal_cellular_alt,stop,style,terminal,upload,visibility,visibility_off,wallpaper,warning,wifi&display=block">
@@ -478,6 +479,18 @@ textarea.input { resize: none; line-height: 1.5; }
 .v-note .ms { font-size: 16px; }
 .v-wait { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); font-size: var(--fs-caption); opacity: 0.7; }
 .v-wait .spin { width: 24px; height: 24px; }
+/* 第十一轮：顶栏右边的保存按钮，标题占满中间，长文件名不挤它。原图没到时下载图标是暗的；点了图标缩小淡出、换成转圈；
+   存好后转圈淡出、对勾一笔画出来，留到关掉查看器；存不了时转圈淡出、下载图标放大回来 */
+.v-title { flex: 1; }
+.v-bar .icon-btn:disabled { color: color-mix(in srgb, var(--c-on-camera) 38%, transparent); }
+.v-save { transition: color var(--dur-s) var(--ease-emph); }
+.v-save > * { grid-area: 1 / 1; }
+.v-save .spin { width: 18px; height: 18px; opacity: 0; }
+.v-ok { width: 24px; height: 24px; opacity: 0; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+[data-dir="sticker"] .v-ok { stroke-width: 2.4; }
+.v-bar .v-save.done:disabled { color: var(--c-on-camera); cursor: default; }
+/* 查看器开着时提示条压在黑底上，不跟主题走，固定浅灰底黑字 */
+#snack.on-camera { background: #E6E6E6; color: #111111; }
 .v-wait .ms { font-size: 32px; }
 .composer-wrap { flex: none; display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3) var(--sp-3); background: var(--c-bg); position: relative; }
 /* 第三轮：整块升起的几条带上输入区的底色，左右补满内边距，升起时盖住下面的消息 */
@@ -982,7 +995,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   --k-drop: rgba(0, 0, 0, 0.6); --k-sheen: rgba(255, 255, 255, 0.07);
   --k-backdrop: radial-gradient(75% 42% at 0% 0%, color-mix(in srgb, var(--c-accent) 34%, transparent), transparent 72%), radial-gradient(65% 38% at 100% 44%, rgba(255, 92, 154, 0.2), transparent 72%), radial-gradient(75% 40% at 0% 100%, rgba(31, 203, 158, 0.18), transparent 72%);
 }
-/* ---------- 贴纸：米色点点纸，粗墨线描边加错位硬阴影，图标是歪着贴的彩色贴纸，按下陷进去 ---------- */
+/* ---------- 贴纸：米色点点纸，粗墨线描边不加阴影，图标是歪着贴的彩色贴纸，按下按东西分开做 ---------- */
 :root[data-dir="sticker"][data-mode="light"] {
   --c-bg: #FFF6E9; --c-sheet: #FFFDF8; --c-card: #FFFFFF;
   --c-surface: #FFFFFF; --c-surface-2: rgba(30, 27, 46, 0.14); --c-line: rgba(30, 27, 46, 0.12);
@@ -991,7 +1004,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   --c-inverse: #1E1B2E; --c-on-inverse: #FFF6E9; --c-lane-1: #1E1B2E; --c-lane-3: #B9B2C4;
   --k-ink: #1E1B2E; --k-p2: #FFD84D; --k-p3: #FF9EC4; --k-p4: #8EE3C8; --k-p5: #C7B2FF;
   --k-glass: rgba(255, 255, 255, 0.9); --k-float: rgba(255, 255, 255, 0.82);
-  --k-backdrop: radial-gradient(circle at 1px 1px, rgba(30, 27, 46, 0.11) 1.1px, transparent 1.6px) 0 0 / 18px 18px, radial-gradient(60% 34% at 100% 0%, color-mix(in srgb, var(--c-accent) 20%, transparent), transparent 72%), radial-gradient(60% 30% at 0% 100%, rgba(255, 216, 77, 0.28), transparent 72%);
+  --k-dot: rgba(30, 27, 46, 0.075); --k-glow-1: color-mix(in srgb, var(--c-accent) 12%, transparent); --k-glow-2: rgba(255, 216, 77, 0.16);
+  --k-backdrop: radial-gradient(circle at 1px 1px, var(--k-dot) var(--k-dot-r), transparent calc(var(--k-dot-r) + 0.5px)) 0 0 / var(--k-dot-gap) var(--k-dot-gap), radial-gradient(60% 34% at 100% 0%, var(--k-glow-1), transparent 72%), radial-gradient(60% 30% at 0% 100%, var(--k-glow-2), transparent 72%);
 }
 :root[data-dir="sticker"][data-mode="dark"] {
   --c-bg: #1C1A27; --c-sheet: #2E2A3E; --c-card: #353048;
@@ -1001,7 +1015,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   --c-inverse: #F6F1FF; --c-on-inverse: #15131D; --c-lane-1: #F6F1FF; --c-lane-3: #6E6782;
   --k-ink: #000000; --k-p2: #FFD84D; --k-p3: #FF8DBA; --k-p4: #74D9B8; --k-p5: #B9A0FF;
   --k-glass: rgba(53, 48, 72, 0.96); --k-float: rgba(53, 48, 72, 0.9);
-  --k-backdrop: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.07) 1.1px, transparent 1.6px) 0 0 / 18px 18px, radial-gradient(60% 34% at 100% 0%, color-mix(in srgb, var(--c-accent) 22%, transparent), transparent 72%);
+  --k-dot: rgba(255, 255, 255, 0.05); --k-glow-1: color-mix(in srgb, var(--c-accent) 14%, transparent);
+  --k-backdrop: radial-gradient(circle at 1px 1px, var(--k-dot) var(--k-dot-r), transparent calc(var(--k-dot-r) + 0.5px)) 0 0 / var(--k-dot-gap) var(--k-dot-gap), radial-gradient(60% 34% at 100% 0%, var(--k-glow-1), transparent 72%);
 }
 /* ---------- 泡泡：鲜亮的天空渐变，通透的肥皂泡玻璃，顶上一道弯弯的高光，会话状态是会动的小泡泡脸 ---------- */
 :root[data-dir="bubble"][data-mode="light"] {
@@ -1032,7 +1047,9 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 /* ---------- 三个卡片方向共用的结构 ---------- */
 :root[data-style="glass"] { --k-r: 26px; --k-p1: var(--c-accent); }
 [data-dir="jelly"] { --k-card: inset 0 1px 0 var(--k-hi), inset 0 0 0 1px var(--k-edge), 0 14px 30px -16px var(--k-drop); }
-[data-dir="sticker"] { --k-r: 22px; --k-card: 0 4px 0 var(--k-ink); --k-border: 2px solid var(--k-ink); --ci-w: 2.2; }
+[data-dir="sticker"] { --k-r: 22px; --k-card: none; --k-border: 2px solid var(--k-ink); --ci-w: 2.2; }
+/* 点点纸：24 一格，点半径 1、边缘再虚 0.5 */
+:root[data-dir="sticker"] { --k-dot-gap: 24px; --k-dot-r: 1px; }
 [data-dir="bubble"] { --k-r: 30px; --k-card: var(--k-rim), 0 20px 40px -20px var(--k-drop); }
 [data-style="glass"] .screen { background: var(--k-backdrop), var(--c-bg); }
 [data-style="glass"] .pane { background: transparent; }
@@ -1055,10 +1072,6 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-style="glass"] .hero { padding: var(--sp-2) calc(var(--sp-4) + var(--sp-2)) var(--sp-4); }
 [data-style="glass"] .hero h1 { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; }
 [data-dir="sticker"] .hero h1 { font-weight: 900; }
-/* 荧光笔：深色下压暗一半，白字压在上面还看得清 */
-:root[data-dir="sticker"] { --k-hl: color-mix(in srgb, var(--k-p2) 80%, transparent); }
-:root[data-dir="sticker"][data-mode="dark"] { --k-hl: color-mix(in srgb, var(--k-p2) 36%, transparent); }
-[data-dir="sticker"] .hero h1 span.hl { background: linear-gradient(transparent 58%, var(--k-hl) 58%, var(--k-hl) 92%, transparent 92%); padding: 0 2px; }
 [data-style="glass"] .row { padding-left: var(--sp-4); }
 [data-style="glass"] .gh { padding: var(--sp-5) var(--sp-2) var(--sp-2) calc(var(--sp-4) + var(--sp-2)); }
 [data-style="glass"] .gh-name { font-weight: 700; }
@@ -1080,7 +1093,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   box-shadow: inset 0 -3px 6px rgba(0, 0, 0, 0.14), inset 0 1.5px 1px rgba(255, 255, 255, 0.6), 0 8px 16px -8px var(--hue, var(--k-p1));
 }
 [data-dir="sticker"] .row > .ci:first-of-type, [data-dir="sticker"] .k-sum .ci {
-  color: #1E1B2E; border-radius: 50%; background: var(--hue, var(--k-p2)); border: 2px solid var(--k-ink); box-shadow: 0 2px 0 var(--k-ink); transform: rotate(-7deg); padding: 8px;
+  color: #1E1B2E; border-radius: 50%; background: var(--hue, var(--k-p2)); border: 2px solid var(--k-ink); box-shadow: none; transform: rotate(-7deg); padding: 8px;
 }
 [data-dir="sticker"] .mlist > .row:nth-child(even) > .ci:first-of-type { transform: rotate(6deg); }
 [data-dir="bubble"] .row > .ci:first-of-type, [data-dir="bubble"] .k-sum .ci {
@@ -1106,8 +1119,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-dir="jelly"] .mlist .row-title, [data-dir="bubble"] .mlist .row-title { font-weight: 700; white-space: normal; }
 [data-dir="jelly"] .mlist .chev, [data-dir="bubble"] .mlist .chev { position: absolute; right: var(--sp-3); top: var(--sp-4); margin: 0; }
 [data-dir="sticker"] .mlist { display: flex; flex-direction: column; gap: var(--sp-4); background: none; border: 0; box-shadow: none; overflow: visible; isolation: auto; }
-[data-dir="sticker"] .mlist > .row { align-items: center; padding: var(--sp-4); background: var(--k-glass); border: 2px solid var(--k-ink); border-radius: var(--k-r); box-shadow: 0 4px 0 var(--k-ink); }
-[data-dir="sticker"] .mlist > * + * { box-shadow: 0 4px 0 var(--k-ink); }
+[data-dir="sticker"] .mlist > .row { align-items: center; padding: var(--sp-4); background: var(--k-glass); border: 2px solid var(--k-ink); border-radius: var(--k-r); box-shadow: none; }
+[data-dir="sticker"] .mlist > * + * { box-shadow: none; }
 [data-dir="sticker"] .mlist .row-title { font-weight: 800; }
 
 /* 状态符号：果冻是带高光的小圆点和渐变转圈，贴纸是墨线描边，泡泡是会动的小泡泡脸 */
@@ -1139,29 +1152,30 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 @keyframes mascot-nap { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.05, 0.93) translateY(0.5px); } }
 @media (prefers-reduced-motion: reduce) { [data-dir="bubble"] .glyph::before { animation: none !important; } }
 
-/* 按钮：果冻是有光泽的软糖，贴纸是描边加硬阴影，泡泡是通透的气泡 */
+/* 按钮：果冻是有光泽的软糖，贴纸只描墨线，泡泡是通透的气泡 */
 [data-style="glass"] .btn { font-weight: 700; }
 [data-dir="jelly"] .btn.ink, [data-dir="jelly"] .btn.accent, [data-dir="jelly"] .send, [data-dir="bubble"] .btn.ink, [data-dir="bubble"] .btn.accent, [data-dir="bubble"] .send {
   color: var(--c-on-accent); background: radial-gradient(60% 40% at 30% 18%, rgba(255, 255, 255, 0.55), transparent), linear-gradient(170deg, color-mix(in srgb, var(--c-accent) 72%, #FFFFFF), var(--c-accent));
   box-shadow: inset 0 -3px 6px rgba(0, 0, 0, 0.16), inset 0 1.5px 1px rgba(255, 255, 255, 0.55), 0 10px 20px -10px var(--c-accent);
 }
 [data-dir="jelly"] .btn.tonal, [data-dir="bubble"] .btn.tonal { background: var(--k-glass); box-shadow: var(--k-card); }
-[data-dir="sticker"] .btn, [data-dir="sticker"] .send { border: 2px solid var(--k-ink); box-shadow: 0 3px 0 var(--k-ink); transition: transform var(--dur-s) var(--ease-spring), box-shadow var(--dur-s) var(--ease-spring); }
+[data-dir="sticker"] .btn, [data-dir="sticker"] .send { border: 2px solid var(--k-ink); box-shadow: none; transition: transform var(--dur-s) var(--ease-spring), box-shadow var(--dur-s) var(--ease-spring); }
 [data-dir="sticker"] .btn.ink, [data-dir="sticker"] .btn.accent, [data-dir="sticker"] .send { background: var(--c-accent); color: var(--c-on-accent); }
 [data-dir="sticker"] .btn.tonal { background: var(--c-card); color: var(--c-fg); }
 [data-dir="sticker"] :is(.icon-btn, .nav-item, .tbtn, .mlist > .row, .key, .sw, .opt, .thumb-add, .gh-name, .branch-btn) { transition: transform var(--dur-s) var(--ease-spring), box-shadow var(--dur-s) var(--ease-spring); }
-[data-dir="sticker"] .is-pressed { transform: translateY(3px) !important; box-shadow: 0 0 0 var(--k-ink) !important; }
+/* 贴纸的按压兜底：轻轻缩一下；按钮、发送、图标、卡片这些在第十二轮那段按东西分开做 */
+[data-dir="sticker"] .is-pressed { transform: scale(0.95) !important; box-shadow: none !important; }
 [data-style="glass"] .empty .ci { width: 52px; height: 52px; color: var(--c-fg-3); --ci-w: 1.6; }
 [data-style="glass"] .btn:disabled, [data-style="glass"] .send:disabled { background: var(--c-surface-2); color: var(--c-fg-3); box-shadow: none; }
 [data-dir="sticker"] .btn:disabled, [data-dir="sticker"] .send:disabled { border-color: var(--c-fg-3); }
 [data-style="glass"] .snackbar { border-radius: 18px; -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); background: color-mix(in srgb, var(--c-inverse) 88%, transparent); }
-[data-dir="sticker"] .snackbar { border: 2px solid var(--k-ink); box-shadow: 0 4px 0 var(--k-ink); }
+[data-dir="sticker"] .snackbar { border: 2px solid var(--k-ink); box-shadow: none; }
 
 /* 导航栏：浮着的玻璃胶囊，选中块是一团会拉长的果冻 */
 [data-style="glass"] .navbar { height: 66px; border-radius: 33px; background: var(--k-float); -webkit-backdrop-filter: blur(26px) saturate(1.9); backdrop-filter: blur(26px) saturate(1.9); }
 [data-dir="jelly"] .navbar { box-shadow: inset 0 1px 1px var(--k-hi), inset 0 0 0 1px var(--k-edge), 0 18px 36px -14px var(--k-drop); }
 [data-dir="bubble"] .navbar { box-shadow: var(--k-rim), 0 20px 40px -18px var(--k-drop); }
-[data-dir="sticker"] .navbar { background: var(--k-float); border: 2px solid var(--k-ink); box-shadow: 0 4px 0 var(--k-ink); }
+[data-dir="sticker"] .navbar { background: var(--k-float); border: 2px solid var(--k-ink); box-shadow: none; }
 [data-style="glass"] .navbar::before { display: none; }
 [data-style="glass"] .nav-ind { border-radius: 27px; }
 [data-dir="jelly"] .nav-ind { background: radial-gradient(50% 30% at 35% 18%, rgba(255, 255, 255, 0.6), transparent), color-mix(in srgb, var(--c-accent) 22%, transparent); box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.7), inset 0 -2px 4px color-mix(in srgb, var(--c-accent) 18%, transparent); }
@@ -1204,7 +1218,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-style="glass"] .u-bar { height: 7px; border-radius: 4px; background: var(--c-surface-2); }
 [data-style="glass"] .u-bar i { border-radius: 4px; background: linear-gradient(90deg, var(--c-accent), color-mix(in srgb, var(--c-accent) 60%, var(--k-p2))); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45); }
 /* 贴纸的用量条和按钮一个画法：2 像素墨线圈住的胶囊，里面平涂主题色，填到哪里用一道墨线收口，不用渐变和高光 */
-[data-dir="sticker"] .u-bar { box-sizing: border-box; height: 14px; border-radius: 7px; border: 2px solid var(--k-ink); background: var(--c-bg); box-shadow: 0 2px 0 var(--k-ink); }
+[data-dir="sticker"] .u-bar { box-sizing: border-box; height: 14px; border-radius: 7px; border: 2px solid var(--k-ink); background: var(--c-bg); box-shadow: none; }
 [data-dir="sticker"] .u-bar i { border-radius: 0; background: var(--c-accent); box-shadow: 2px 0 0 var(--k-ink); }
 [data-dir="sticker"] .usage b { font-weight: 800; }
 [data-style="glass"] .usage.stale .u-bar i { background: var(--c-fg-3); }
@@ -1214,7 +1228,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-style="glass"] .bubble.ai { border-bottom-left-radius: 8px; background: var(--k-glass); box-shadow: var(--k-card); border: var(--k-border, 0); }
 [data-style="glass"] .bubble.me { border-bottom-right-radius: 8px; color: var(--c-on-accent); }
 [data-dir="jelly"] .bubble.me, [data-dir="bubble"] .bubble.me { background: radial-gradient(60% 50% at 28% 14%, rgba(255, 255, 255, 0.4), transparent), linear-gradient(170deg, color-mix(in srgb, var(--c-accent) 74%, #FFFFFF), var(--c-accent)); box-shadow: inset 0 -3px 6px rgba(0, 0, 0, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.5), 0 10px 18px -12px var(--c-accent); }
-[data-dir="sticker"] .bubble.me { background: var(--c-accent); border: 2px solid var(--k-ink); box-shadow: 0 3px 0 var(--k-ink); }
+[data-dir="sticker"] .bubble.me { background: var(--c-accent); border: 2px solid var(--k-ink); box-shadow: none; }
 [data-style="glass"] .bubble.queued { background: none; color: var(--c-fg-2); box-shadow: inset 0 0 0 1.5px var(--c-surface-2); border: 0; }
 [data-style="glass"] .tool-detail { background: var(--k-glass); border-radius: 14px; }
 [data-dir="sticker"] .tool-detail { border: 1.5px solid var(--k-ink); }
@@ -1224,12 +1238,13 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-style="glass"] .composer { background: var(--k-float); -webkit-backdrop-filter: blur(22px) saturate(1.8); backdrop-filter: blur(22px) saturate(1.8); box-shadow: var(--k-card); border: var(--k-border, 0); }
 [data-style="glass"] .working { min-height: 40px; padding: 0 var(--sp-1) 0 var(--sp-4); border-radius: var(--r-pill); background: var(--k-float); -webkit-backdrop-filter: blur(22px) saturate(1.8); backdrop-filter: blur(22px) saturate(1.8); box-shadow: var(--k-card); border: var(--k-border, 0); }
 [data-style="glass"] .thumb-add { background: var(--k-glass); box-shadow: var(--k-card); }
+[data-dir="sticker"] .thumb-add { border: 2px solid var(--k-ink); }
 [data-style="glass"] .offline-line { background: var(--k-float); }
 [data-style="glass"] .panel { background: var(--c-sheet); -webkit-backdrop-filter: blur(30px) saturate(1.8); backdrop-filter: blur(30px) saturate(1.8); border-radius: 30px 30px 0 0; box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), 0 -16px 40px -20px var(--k-drop, rgba(0, 0, 0, 0.3)); }
-[data-dir="sticker"] .panel { border: 2px solid var(--k-ink); border-bottom: 0; box-shadow: 0 -4px 0 var(--k-ink); }
+[data-dir="sticker"] .panel { border: 2px solid var(--k-ink); border-bottom: 0; box-shadow: none; }
 [data-style="glass"] .panel .code, [data-style="glass"] .sheet .code { background: var(--c-surface); border-radius: 14px; }
 [data-style="glass"] .slash { background: var(--c-sheet); -webkit-backdrop-filter: blur(30px) saturate(1.8); backdrop-filter: blur(30px) saturate(1.8); border-radius: 22px; }
-[data-dir="sticker"] .slash { border: 2px solid var(--k-ink); box-shadow: 0 4px 0 var(--k-ink); }
+[data-dir="sticker"] .slash { border: 2px solid var(--k-ink); box-shadow: none; }
 [data-style="glass"] .form { padding: 0 0 var(--sp-8); gap: var(--sp-3); }
 [data-style="glass"] .field { padding: var(--sp-3) var(--sp-4) var(--sp-2); }
 [data-style="glass"] .input { border-bottom-color: var(--c-line); }
@@ -1238,10 +1253,10 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-style="glass"] .sheet { background: var(--c-sheet); -webkit-backdrop-filter: blur(30px) saturate(1.8); backdrop-filter: blur(30px) saturate(1.8); border-radius: 32px 32px 0 0; box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.55); }
 [data-style="glass"] .dialog { background: var(--c-sheet); -webkit-backdrop-filter: blur(30px) saturate(1.8); backdrop-filter: blur(30px) saturate(1.8); border-radius: 32px; box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.55), 0 30px 60px -20px rgba(0, 0, 0, 0.35); }
 [data-dir="sticker"] .sheet { border: 2px solid var(--k-ink); border-bottom: 0; }
-[data-dir="sticker"] .dialog { border: 2px solid var(--k-ink); box-shadow: 0 6px 0 var(--k-ink); }
-/* 贴纸的弹层按钮和别处的按钮一路：墨线描边加硬阴影，最后一个是主操作平涂主题色，危险操作平涂红色；「恢复默认」这类次要操作仍是文字 */
+[data-dir="sticker"] .dialog { border: 2px solid var(--k-ink); box-shadow: none; }
+/* 贴纸的弹层按钮和别处的按钮一路：只描墨线，最后一个是主操作平涂主题色，危险操作平涂红色；「恢复默认」这类次要操作仍是文字 */
 [data-dir="sticker"] :is(.dialog, .sheet) .btns { gap: var(--sp-2); margin-right: 0; padding-bottom: 4px; }
-[data-dir="sticker"] :is(.dialog, .sheet) .btns .tbtn:not(.quiet) { height: 38px; padding: 0 var(--sp-4); font-weight: 800; color: var(--c-fg); background: var(--c-card); border: 2px solid var(--k-ink); box-shadow: 0 3px 0 var(--k-ink); }
+[data-dir="sticker"] :is(.dialog, .sheet) .btns .tbtn:not(.quiet) { height: 38px; padding: 0 var(--sp-4); font-weight: 800; color: var(--c-fg); background: var(--c-card); border: 2px solid var(--k-ink); box-shadow: none; }
 [data-dir="sticker"] :is(.dialog, .sheet) .btns .tbtn:not(.quiet):last-child { background: var(--c-accent); color: var(--c-on-accent); }
 [data-dir="sticker"] :is(.dialog, .sheet) .btns .tbtn.danger { background: var(--c-danger); color: #FFFFFF; }
 [data-style="glass"] .scrim { background: color-mix(in srgb, var(--c-scrim) 80%, transparent); }
@@ -1253,24 +1268,22 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-style="glass"] .opt[aria-checked="true"] { color: var(--c-accent); }
 [data-style="glass"] .sw-name { padding: var(--sp-4) var(--sp-2) 0; }
 [data-style="glass"] .sw { box-shadow: inset 0 -3px 5px rgba(0, 0, 0, 0.14), inset 0 1.5px 1px rgba(255, 255, 255, 0.5); }
-[data-dir="sticker"] .sw { box-shadow: 0 0 0 2px var(--k-ink), 0 3px 0 2px var(--k-ink); }
-/* 贴纸的选中：不用主题色光圈，选中的缩略图描墨线加硬阴影、名字下面一道荧光笔；选中的主题色往上抬起 */
+[data-dir="sticker"] .sw { box-shadow: 0 0 0 2px var(--k-ink); }
+/* 贴纸的选中：不用主题色光圈，选中的缩略图描一圈墨线，名字只加粗；主题色不抬起，选中的外面再套一圈墨线 */
 [data-dir="sticker"] .mini { box-shadow: 0 0 0 2px color-mix(in srgb, var(--k-ink) 18%, transparent); }
 [data-dir="sticker"] .opt[aria-checked="true"] { color: var(--c-fg); font-weight: 800; }
-[data-dir="sticker"] .opt[aria-checked="true"] .mini { box-shadow: 0 0 0 2px var(--k-ink), 0 4px 0 2px var(--k-ink); }
+[data-dir="sticker"] .opt[aria-checked="true"] .mini { box-shadow: 0 0 0 2px var(--k-ink); }
 [data-dir="sticker"] .opt > span:last-child { padding: 0 3px; }
-[data-dir="sticker"] .opt[aria-checked="true"] > span:last-child { background: linear-gradient(transparent 55%, var(--k-hl) 55%, var(--k-hl) 92%, transparent 92%); }
 /* 顶栏里的主操作（新建会话的「启动」）也是一枚小贴纸按钮 */
-[data-dir="sticker"] .appbar .tbtn:not(.quiet) { height: 36px; margin-right: var(--sp-2); padding: 0 var(--sp-4); font-weight: 800; background: var(--c-accent); color: var(--c-on-accent); border: 2px solid var(--k-ink); box-shadow: 0 3px 0 var(--k-ink); }
-[data-dir="sticker"] .sw::after { display: none; }
-[data-dir="sticker"] .sw[aria-checked="true"] { transform: translateY(-3px); box-shadow: 0 0 0 2px var(--k-ink), 0 6px 0 2px var(--k-ink); }
+[data-dir="sticker"] .appbar .tbtn:not(.quiet) { height: 36px; margin-right: var(--sp-2); padding: 0 var(--sp-4); font-weight: 800; background: var(--c-accent); color: var(--c-on-accent); border: 2px solid var(--k-ink); box-shadow: none; }
+[data-dir="sticker"] .sw::after { inset: -6px; box-shadow: 0 0 0 2px var(--k-ink); }
 
 /* 终端 */
 [data-style="glass"] .term { margin-top: var(--sp-1); margin-bottom: var(--sp-3); padding: var(--sp-3) 0; }
 [data-style="glass"] .term-in { padding: 0 var(--sp-3); }
 [data-style="glass"] .keys { box-shadow: none; padding-top: 0; }
 [data-style="glass"] .key { background: var(--k-glass); border-radius: 12px; box-shadow: var(--k-card); border: var(--k-border, 0); font-weight: 600; }
-[data-dir="sticker"] .key { border-width: 1.5px; box-shadow: 0 2px 0 var(--k-ink); }
+[data-dir="sticker"] .key { border-width: 1.5px; box-shadow: none; }
 
 /* ---------- 纸面：米白纸张，大号细体标题，序号和细线排版，AI 回复不套气泡，像读一篇文章 ---------- */
 :root[data-dir="paper"][data-mode="light"] {
@@ -1416,7 +1429,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 .mini.glass .m-t { width: 46%; height: 8px; opacity: 1; }
 .mini.glass .m-n { border-radius: 8px; background: var(--m-card); }
 .mini.glass .m-n b { background: var(--m-acc); opacity: 0.3; }
-.mini.sticker .m-r, .mini.sticker .m-n { box-shadow: 0 0 0 1.2px var(--m-fg), 0 1.5px 0 1.2px var(--m-fg); }
+.mini.sticker .m-r, .mini.sticker .m-n { box-shadow: 0 0 0 1.2px var(--m-fg); }
 
 /* ================= 第四轮：加载时的占屏动画（用户已挑定：启动连线、聊天骨架气泡、会话列表发牌、git 描线、终端光标打字、子代理方块填格） ================= */
 /* 盖住内容区的一层，底色和页面一样；超过 300 毫秒还没加载完才出现，加载完淡出，内容错开升起。
@@ -1587,12 +1600,12 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-dir="grid"] .swrow[aria-checked="true"] .switch { background: var(--c-fg); }
 [data-dir="grid"] .swrow[aria-checked="true"] .switch i { background: var(--c-bg); transform: translateX(20px); }
 [data-dir="grid"] .swrow-body small { font-family: var(--font-mono); font-size: 11.5px; }
-/* 贴纸：墨线描边加硬阴影，打开时填主题色，圆钮带墨线 */
-[data-dir="sticker"] .switch { width: 52px; height: 30px; border-radius: 15px; background: var(--c-card); box-shadow: inset 0 0 0 2px var(--k-ink), 0 3px 0 var(--k-ink); }
+/* 贴纸：墨线描边，打开时填主题色，圆钮带墨线；按下轻轻缩一下 */
+[data-dir="sticker"] .switch { width: 52px; height: 30px; border-radius: 15px; background: var(--c-card); box-shadow: inset 0 0 0 2px var(--k-ink); }
 [data-dir="sticker"] .switch i { top: 5px; left: 5px; width: 20px; height: 20px; background: var(--c-card); box-shadow: inset 0 0 0 2px var(--k-ink); }
 [data-dir="sticker"] .swrow[aria-checked="true"] .switch { background: var(--c-accent); }
 [data-dir="sticker"] .swrow[aria-checked="true"] .switch i { transform: translateX(22px) rotate(-8deg); }
-[data-dir="sticker"] .swrow:active .switch { transform: translateY(3px); box-shadow: inset 0 0 0 2px var(--k-ink), 0 0 0 var(--k-ink); }
+[data-dir="sticker"] .swrow:active .switch { transform: scale(0.94); box-shadow: inset 0 0 0 2px var(--k-ink); }
 [data-style="glass"] .swrow { padding-left: var(--sp-2); padding-right: var(--sp-2); }
 [data-dir="grid"] .swrow { padding-left: var(--sp-4); padding-right: var(--sp-4); }
 /* 工具视图 A：一行总述，点开是一次次调用，内容在限高能滚动的框里 */
@@ -1618,7 +1631,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-dir="grid"] .pmenu { border-radius: 0; padding: 0; background: var(--c-bg); box-shadow: none; border: 2px solid var(--c-fg); }
 [data-dir="grid"] .pmenu .mi { font-family: var(--font-mono); font-size: 14px; }
 [data-dir="grid"] .pmenu .mi + .mi { box-shadow: inset 0 1px 0 var(--c-line); }
-[data-dir="sticker"] .pmenu { border-radius: 18px; border: 2px solid var(--k-ink); box-shadow: 0 5px 0 var(--k-ink); }
+[data-dir="sticker"] .pmenu { border-radius: 18px; border: 2px solid var(--k-ink); box-shadow: none; }
 [data-dir="sticker"] .pmenu .mi { font-weight: 700; }
 /* Fork、Worktree 对话框：两个输入框之间留一点距离，说明文字在输入框下面 */
 .dialog .field + .field { margin-top: var(--sp-1); }
@@ -1639,7 +1652,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-dir="grid"] .limit { border-radius: 6px; font-family: var(--font-mono); font-size: 12px; }
 [data-dir="grid"] .lim-lab { font-size: 13px; }
 [data-dir="grid"] .lim-in { border-radius: 0; font-family: var(--font-mono); font-size: 14px; box-shadow: inset 0 0 0 1px var(--c-fg); }
-[data-dir="sticker"] .limit { background: var(--c-card); border: 2px solid var(--k-ink); box-shadow: 0 4px 0 var(--k-ink); }
+[data-dir="sticker"] .limit { background: var(--c-card); border: 2px solid var(--k-ink); box-shadow: none; }
 [data-dir="sticker"] .lim-lab { font-weight: 700; }
 [data-dir="sticker"] .lim-in { border: 2px solid var(--k-ink); border-radius: 12px; background: var(--c-card); }
 /* 左滑：状态圆点和 fork 连线不动，圆点右边的内容跟着手指往左走，右边露出「停止」或「移出」，松手过一半就停在打开的位置 */
@@ -1649,13 +1662,15 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 .srow.sw-anim .row-body > *, .srow.sw-anim > :not(.row) { transition: transform var(--dur-m) var(--ease-emph); }
 /* 行尾没有按钮了，时间离右边留出页边距 */
 .srow > .row:last-child { padding-right: calc(var(--sp-page) - var(--sp-2)); }
-/* 露出的是一枚 40dp 的小圆钮，下面一行小字，不占满整行；格栅是直角小方块，贴纸描墨线加硬阴影 */
+/* 露出的是一枚危险红的钮，不带小字，不占满整行；三套各照选定的回溯钮画：清玻只露红图标，格栅是 40 的直角红细线框，
+   贴纸是白卡片底加 2 的墨线圈、红图标，没有阴影 */
 .swipe-act { position: absolute; top: 0; right: 0; bottom: 0; width: 76px; border: 0; padding: 0; background: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--c-danger); font-size: 11px; transform: translateX(calc(100% + var(--sw))); }
 .swipe-act .ms { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--c-danger); color: #FFFFFF; font-size: 20px; }
 [data-dir="grid"] .swipe-act { font-family: var(--font-mono); }
-[data-dir="grid"] .swipe-act .ms { width: 36px; height: 36px; border-radius: 0; }
+[data-dir="clear"] .swipe-act .ms { width: auto; height: auto; border-radius: 0; background: none; color: var(--c-danger); font-size: 24px; }
+[data-dir="grid"] .swipe-act .ms { box-sizing: border-box; width: 40px; height: 40px; border-radius: 0; background: none; border: 1.5px solid var(--c-danger); color: var(--c-danger); }
 [data-dir="sticker"] .swipe-act { font-weight: 800; }
-[data-dir="sticker"] .swipe-act .ms { border: 2px solid var(--k-ink); box-shadow: 0 3px 0 var(--k-ink); }
+[data-dir="sticker"] .swipe-act .ms { box-sizing: border-box; background: var(--c-card); border: 2px solid var(--k-ink); box-shadow: none; color: var(--c-danger); }
 
 /* ================= 第七轮：新建会话填接口地址、API key 和各档模型（待批） ================= */
 /* key 和眼睛按钮同一行，眼睛只占右边一点 */
@@ -1692,7 +1707,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 .fnote .ms { color: var(--c-danger); font-size: 22px; font-variation-settings: "FILL" 1; }
 [data-dir="clear"] .fnote { background: color-mix(in srgb, var(--c-danger) 12%, var(--k-pane)); -webkit-backdrop-filter: blur(22px) saturate(1.8); backdrop-filter: blur(22px) saturate(1.8); box-shadow: inset 0 1px 1px var(--k-rimc), 0 0 0 0.5px color-mix(in srgb, var(--c-danger) 40%, transparent), 0 10px 22px -10px rgba(0, 0, 0, 0.3); }
 [data-dir="grid"] .fnote { border-radius: 0; font-family: var(--font-mono); box-shadow: 0 0 0 1px var(--c-danger), 4px 4px 0 color-mix(in srgb, var(--c-danger) 35%, transparent); }
-[data-dir="sticker"] .fnote { border-radius: var(--k-r); border: 2px solid var(--k-ink); box-shadow: 0 4px 0 var(--k-ink); font-weight: 700; background: color-mix(in srgb, var(--c-danger) 18%, var(--c-sheet)); }
+[data-dir="sticker"] .fnote { border-radius: var(--k-r); border: 2px solid var(--k-ink); box-shadow: none; font-weight: 700; background: color-mix(in srgb, var(--c-danger) 18%, var(--c-sheet)); }
 
 /* ================= 第八轮：回复的 Markdown、链接、代码块复制和长按选字（2026-11-21 已批准） ================= */
 /* 分块的回复：块之间 8px，标题上面多留一点；单个换行照旧换行 */
@@ -1746,12 +1761,13 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-dir="grid"] .md ul { list-style: none; }
 [data-dir="grid"] .md ul > li::before { content: "-"; display: inline-block; width: 1.4em; margin-left: -1.4em; font-family: var(--font-mono); color: var(--c-fg-3); }
 [data-dir="grid"] .md blockquote { box-shadow: inset 2px 0 0 var(--c-fg-3); }
-[data-dir="grid"] .cb { border-radius: 0; background: var(--c-surface); margin: 0; }
+/* 代码块加 1 的正文色细框，灰底在白底上也分得清 */
+[data-dir="grid"] .cb { border-radius: 0; background: var(--c-surface); margin: 0; border: 1px solid var(--c-fg); }
 [data-dir="grid"] .cb-copy { border-radius: 0; }
 [data-dir="grid"] .tb { margin: 0; }
 [data-dir="grid"] .tb table { font-family: var(--font-mono); font-size: 12px; }
 [data-dir="grid"] .tb thead th { color: var(--c-fg); box-shadow: inset 0 -2px 0 var(--c-fg); }
-/* 贴纸：代码块和表格描一圈墨线，不加硬阴影；表头平涂一层淡主题色 */
+/* 贴纸：代码块和表格描一圈墨线；表头平涂一层淡主题色 */
 [data-dir="sticker"] .md .md-h { font-weight: 800; }
 [data-dir="sticker"] .md blockquote { box-shadow: inset 3px 0 0 var(--c-accent); }
 [data-dir="sticker"] .cb { border: 2px solid var(--k-ink); }
@@ -1781,14 +1797,49 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-dir="grid"] .mx { margin: 0; padding: 2px 0; }
 [data-dir="grid"] .mx .katex-display, [data-dir="grid"] .mx .katex-display > .katex { text-align: left; }
 /* 用户消息整行左滑：气泡跟着手指往左走，右边露出 60dp 宽的回溯小圆钮，松手过一半停住 */
-.mrow { --sw: 0px; position: relative; display: flex; justify-content: flex-end; margin-top: var(--sp-2); overflow-x: clip; touch-action: pan-y; }
+/* --swp 是左滑进度，0 收起、1 完全露出，rwSet 跟 --sw 一起写，回溯钮的放大、淡入、转动都跟着它走 */
+.mrow { --sw: 0px; --swp: 0; --pic: 96px; --pic-gap: 6px; position: relative; display: flex; justify-content: flex-end; margin-top: var(--sp-2); overflow-x: clip; touch-action: pan-y; }
 .mrow > .bubble.me { margin-top: 0; transform: translateX(var(--sw)); }
-.mrow.sw-anim > .bubble.me, .mrow.sw-anim > .rw-act { transition: transform var(--dur-m) var(--ease-emph); }
-/* 只有圆钮，不带小字；和单行气泡一样高，对着气泡竖直居中，单行消息时上下边齐平 */
-.rw-act { position: absolute; top: 50%; right: 0; width: 60px; border: 0; padding: 0; background: none; display: grid; place-items: center; transform: translate(calc(100% + var(--sw)), -50%); }
+.mrow.sw-anim > .bubble.me, .mrow.sw-anim > .rw-act, .mrow.sw-anim > .me-col { transition: transform var(--dur-m) var(--ease-emph); }
+/* 第十一轮：用户消息带的图，96px 方块排在气泡上面，点开进全屏看图；左滑回溯时和气泡一起走 */
+.me-col { max-width: 82%; display: flex; flex-direction: column; align-items: flex-end; gap: var(--pic-gap); transform: translateX(var(--sw)); }
+.me-col > .bubble.me { margin-top: 0; max-width: 100%; }
+.me-pics { display: flex; gap: 6px; }
+.mpic { flex: none; width: var(--pic); height: var(--pic); padding: 0; border: 0; border-radius: 16px; overflow: hidden; background: var(--c-surface); }
+.mpic img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; -webkit-user-drag: none; }
+/* 只有圆钮，不带小字；和单行气泡一样高，对着气泡竖直居中，单行消息时上下边齐平。
+   第十一轮：回溯钮只对着文字气泡。它占满要对齐的那一段的高度，圆钮在里面居中：纯文字消息就是整行；
+   带图又带字时从图下面开始，只占气泡那一段；只有图没有字时就是图那一行 */
+.rw-act { position: absolute; top: 0; bottom: 0; right: 0; width: 60px; border: 0; padding: 0; background: none; display: grid; place-items: center; transform: translateX(calc(100% + var(--sw))); }
+.mrow:has(> .me-col > .bubble) > .rw-act { top: calc(var(--pic) + var(--pic-gap)); }
 .rw-act .ms { box-sizing: border-box; width: calc(15px * 1.55 + 20px); height: calc(15px * 1.55 + 20px); border-radius: 50%; display: grid; place-items: center; background: var(--c-fg); color: var(--c-bg); font-size: 20px; }
 [data-dir="grid"] .rw-act .ms { border-radius: 0; }
 [data-dir="sticker"] .rw-act .ms { width: calc(15px * 1.55 + 24px); height: calc(15px * 1.55 + 24px); background: var(--c-accent); color: var(--c-on-accent); border: 2px solid var(--k-ink); box-shadow: 0 3px 0 var(--k-ink); }
+/* 第十一轮：回溯钮对比稿（待批）。侧栏切四版，挂在 <html data-rw> 上：now 现状（就是上面这几条）、soft 浅底小圆、ring 细线圈、bare 只露图标。
+   每版都把上面现状的尺寸、底色、描边重设一遍。松手后跟着行一起过渡，用 --dur-m、--ease-emph；按下变色用 --dur-s */
+.rw-act .ms { transition: color var(--dur-s) linear, background-color var(--dur-s) linear, border-color var(--dur-s) linear; }
+.mrow.sw-anim > .rw-act .ms { transition: transform var(--dur-m) var(--ease-emph), opacity var(--dur-m) var(--ease-emph), color var(--dur-s) linear, background-color var(--dur-s) linear, border-color var(--dur-s) linear; }
+/* 浅底小圆：直径 36 的浅灰圆，图标正文色 20；跟着左滑从 0.6 放大到 1 并淡入，收回时缩小淡出；按下底色深一级 */
+[data-rw="soft"] .rw-act .ms { width: 36px; height: 36px; border-radius: 50%; border: 0; box-shadow: none; background: var(--c-surface); color: var(--c-fg); font-size: 20px; font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24; opacity: var(--swp); transform: scale(calc(0.6 + 0.4 * var(--swp))); }
+[data-rw="soft"] .rw-act:active .ms { background: var(--c-surface-2); }
+[data-rw="soft"][data-dir="grid"] .rw-act .ms { border-radius: 0; }
+/* 贴纸：白卡片底加 2 的墨线，不要硬投影；按下染一点强调色 */
+[data-rw="soft"][data-dir="sticker"] .rw-act .ms { background: var(--c-card); border: 2px solid var(--k-ink); }
+[data-rw="soft"][data-dir="sticker"] .rw-act:active .ms { background: color-mix(in srgb, var(--c-accent) 18%, var(--c-card)); }
+/* 细线圈：和单行气泡一样高的空心圈，1.5 的 surface-2 细线，图标二级灰，线和图标都用细的；按下圈和图标一起变成正文色 */
+[data-rw="ring"] .rw-act .ms { width: calc(15px * 1.55 + 20px); height: calc(15px * 1.55 + 20px); border-radius: 50%; border: 1.5px solid var(--c-surface-2); box-shadow: none; background: none; color: var(--c-fg-2); font-size: 20px; }
+[data-rw="ring"] .rw-act:active .ms { border-color: var(--c-fg); color: var(--c-fg); }
+[data-rw="ring"][data-dir="grid"] .rw-act .ms { border-radius: 0; }
+/* 贴纸：2 的墨线圈，图标强调色，和贴纸气泡一样高 */
+[data-rw="ring"][data-dir="sticker"] .rw-act .ms { width: calc(15px * 1.55 + 24px); height: calc(15px * 1.55 + 24px); border: 2px solid var(--k-ink); color: var(--c-accent); font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24; }
+[data-rw="ring"][data-dir="sticker"] .rw-act:active .ms { color: var(--c-fg); }
+/* 只露图标：没有底也没有圈，history 22、二级灰。滑出时像时钟往回拨，逆时针转 120° 回正并淡入，收回时顺时针转走并淡出。
+   CSS 的角度顺时针为正，所以起点写 rotate(120deg)；按下变成正文色 */
+[data-rw="bare"] .rw-act .ms { width: auto; height: auto; border-radius: 0; border: 0; box-shadow: none; background: none; color: var(--c-fg-2); font-size: 22px; font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24; opacity: var(--swp); transform: rotate(calc(120deg * (1 - var(--swp)))); }
+[data-rw="bare"] .rw-act:active .ms { color: var(--c-fg); }
+/* 贴纸：图标强调色，粗一级 */
+[data-rw="bare"][data-dir="sticker"] .rw-act .ms { color: var(--c-accent); font-variation-settings: "FILL" 0, "wght" 500, "GRAD" 0, "opsz" 24; }
+[data-rw="bare"][data-dir="sticker"] .rw-act:active .ms { color: var(--c-fg); }
 /* 回溯面板：先引用那条消息，最多三行；改过文件的一轮再给三种回去的方式 */
 .rw-quote { margin: 0 var(--sp-page) var(--sp-2); padding-left: 12px; box-shadow: inset 2px 0 0 var(--c-surface-2); color: var(--c-fg-2); font-size: 14px; line-height: 1.55; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .rw-files { font-family: var(--font-mono); }
@@ -1828,11 +1879,62 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
 [data-dir="grid"] .tk-n { font-size: 12px; }
 [data-dir="grid"] .tasks.at-top { box-shadow: 0 2px 0 var(--c-fg); }
 [data-dir="grid"] .tasks.at-dock { border-radius: 6px; background: var(--c-bg); box-shadow: inset 0 0 0 1px var(--c-fg); }
-/* 贴纸：粗字，输入框版是带墨线和落影的贴纸，进行中的符号用强调色 */
+/* 贴纸：粗字，输入框版是带墨线的贴纸，进行中的符号用强调色 */
 [data-dir="sticker"] .tasks { font-weight: 700; }
 [data-dir="sticker"] .tasks.at-top { box-shadow: 0 2px 0 var(--k-ink); }
-[data-dir="sticker"] .tasks.at-dock { border-radius: 18px; background: var(--c-card); border: 2px solid var(--k-ink); box-shadow: 0 4px 0 var(--k-ink); }
+[data-dir="sticker"] .tasks.at-dock { border-radius: 18px; background: var(--c-card); border: 2px solid var(--k-ink); box-shadow: none; }
 [data-dir="sticker"] .tk-head > .tk-g, [data-dir="sticker"] .tk-list li.on .tk-g { color: var(--c-accent); }
+
+/* ================= 第十二轮：贴纸更清爽、贴纸按压、左滑钮、格栅代码块（2026-11-23 已批准） ================= */
+/* 贴纸去掉阴影、去掉荧光笔、点格 C、左滑钮和格栅代码块都已并进上面各自的规则；这里只留新加的按压样子 */
+/* 主题色：按下像把贴纸按在纸上：压扁、往左歪；点中的那一枚（.pop）像盖章一样落定，先冲大一点、往右回摆，外圈从里面弹出来 */
+:root[data-dir="sticker"] .sw.is-pressed { transform: scale(0.82) rotate(-10deg) !important; box-shadow: 0 0 0 2px var(--k-ink) !important; }
+:root[data-dir="sticker"] .sw.pop { animation: sw-stamp var(--dur-l) var(--ease-emph) both; }
+:root[data-dir="sticker"] .sw.pop::after { animation: sw-ring var(--dur-l) var(--ease-spring) both; }
+:root[data-dir="sticker"] .sw.pop .ms { animation: sw-tick var(--dur-l) var(--ease-spring) both; }
+@keyframes sw-stamp { 0% { transform: scale(0.82) rotate(-10deg); } 45% { transform: scale(1.12) rotate(6deg); } 72% { transform: scale(0.96) rotate(-2deg); } 100% { transform: none; } }
+@keyframes sw-ring { 0%, 30% { opacity: 0; transform: scale(0.7); } 100% { opacity: 1; transform: none; } }
+@keyframes sw-tick { 0%, 25% { opacity: 0; transform: scale(0.4) rotate(-40deg); } 100% { opacity: 1; transform: none; } }
+/* 终端按键：按下像打字机敲下一个键，整颗瞬间反成墨色、往下沉 2，松手再淡回来 */
+:root[data-dir="sticker"] .key { transition: transform var(--dur-s) var(--ease-spring), background-color var(--dur-s) linear, color var(--dur-s) linear; }
+:root[data-dir="sticker"] .key.is-pressed { transform: translateY(2px) !important; box-shadow: none !important; background: var(--k-ink); color: var(--c-sheet); transition-duration: 0s; }
+:root[data-dir="sticker"][data-mode="dark"] .key.is-pressed { color: var(--c-fg); }
+/* 贴纸的按压：没有落影以后不再整块往下陷，按东西分开做，一眼分得出按的是什么；松手都用回弹曲线弹回去。兜底的轻轻缩一下在上面 .is-pressed */
+/* 文字按钮：像橡皮章压下去，墨线压粗一倍，整块缩一点、往左歪一点 */
+:root[data-dir="sticker"] :is(.btn, .tbtn:not(.quiet)).is-pressed { transform: scale(0.96) rotate(-1.5deg) !important; box-shadow: inset 0 0 0 2px var(--k-ink) !important; }
+/* 发送：像拉弓，往后仰 14° 再缩小 */
+:root[data-dir="sticker"] .send.is-pressed { transform: scale(0.84) rotate(-14deg) !important; }
+/* 顶栏图标：图标往左歪，周围浮出一圈墨线 */
+:root[data-dir="sticker"] .icon-btn.is-pressed { transform: scale(0.88) rotate(-10deg) !important; box-shadow: inset 0 0 0 2px var(--k-ink) !important; }
+/* 导航：整格不动，只有贴纸图标压扁歪一下 */
+:root[data-dir="sticker"] .nav-item.is-pressed { transform: none !important; }
+:root[data-dir="sticker"] .nav-item .ci { transition: transform var(--dur-s) var(--ease-spring); }
+:root[data-dir="sticker"] .nav-item.is-pressed .ci { transform: scale(0.82) rotate(-12deg); }
+/* 目标机卡片：整张微微歪、缩一点，角上的圆贴纸歪得更厉害 */
+:root[data-dir="sticker"] .mlist > .row.is-pressed { transform: scale(0.985) rotate(-0.8deg) !important; }
+:root[data-dir="sticker"] .mlist > .row > .ci:first-of-type { transition: transform var(--dur-s) var(--ease-spring); }
+:root[data-dir="sticker"] .mlist > .row.is-pressed > .ci:first-of-type { transform: rotate(-18deg) scale(0.9); }
+:root[data-dir="sticker"] .mlist > .row:nth-child(even).is-pressed > .ci:first-of-type { transform: rotate(17deg) scale(0.9); }
+/* 设置里的样式、深浅色：整行不动，缩略图歪一下 */
+:root[data-dir="sticker"] .opt.is-pressed { transform: none !important; }
+:root[data-dir="sticker"] .opt .mini { transition: transform var(--dur-s) var(--ease-spring), box-shadow var(--dur-s) var(--ease-spring); }
+:root[data-dir="sticker"] .opt.is-pressed .mini { transform: scale(0.93) rotate(-4deg); }
+/* 左滑露出的停止、移出：按下三套各有各的样子，按住就看得出按到了；按下立刻变，松手回弹 */
+:root .swipe-act .ms { transition: transform var(--dur-s) var(--ease-spring), background-color var(--dur-s) linear, color var(--dur-s) linear; }
+:root .swipe-act:active .ms { transition-duration: 0s; }
+/* 清玻：红图标往左拧一下、缩小，像拧开关 */
+:root[data-dir="clear"] .swipe-act:active .ms { transform: scale(0.82) rotate(-24deg); }
+/* 格栅：红框整块填满，图标反白 */
+:root[data-dir="grid"] .swipe-act:active .ms { background: var(--c-danger); color: #FFFFFF; }
+/* 贴纸：白圈填成红色、图标反白，同时缩一点往左歪 */
+:root[data-dir="sticker"] .swipe-act:active .ms { background: var(--c-danger); color: #FFFFFF; transform: scale(0.9) rotate(-10deg); }
+/* 回溯钮（第十一轮那段 CSS 一个字没动，这里只加按下的样子）：滑动时它的大小、角度跟着手指走，所以按下只换颜色不加形变 */
+/* 清玻：图标后面浮出一枚浅灰圆 */
+:root[data-dir="clear"] .rw-act:active .ms { color: var(--c-fg); border-radius: 50%; background: color-mix(in srgb, var(--c-fg) 10%, transparent); box-shadow: 0 0 0 8px color-mix(in srgb, var(--c-fg) 10%, transparent); }
+/* 格栅：细线框整块填成正文色，图标反白 */
+:root[data-dir="grid"] .rw-act:active .ms { background: var(--c-fg); border-color: var(--c-fg); color: var(--c-bg); }
+/* 贴纸：白圈填成主题色，图标换成主题色上的字色 */
+:root[data-dir="sticker"] .rw-act:active .ms { background: var(--c-accent); color: var(--c-on-accent); }
 </style>
 
 <!-- 第四轮：卡通图标（24 格，2 像素圆头线，APP 里照这些路径画） -->
@@ -1866,12 +1968,13 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     </div>
     <div class="themes" role="group" aria-label="样式" id="styleSet"></div>
 
-    <section class="knob" id="r10">
-      <h2>第十轮：任务清单条（2026-11-22 已批准）</h2>
-      <p class="desk-note" style="margin:0">Claude Code 建了任务清单时，聊天页多一条。收起时一行：状态符号、进行中那条的标题、完成数/总数；点一下展开整张清单，◼ 进行中、◻ 没开始、✔ 做完（变淡），最多 6 行，多了在里面滚。任务状态变了，条跟着变。全部做完先显示「✔ 全部完成」，Claude Code 清掉清单后条退场。条上只写标题，进行中的动词已经在状态行里。</p>
-      <p class="desk-note" style="margin:0">放在输入框上方，挨着状态行，展开时清单往上长。</p>
-      <div class="knob-btns"><button type="button" class="desk-btn" data-r10="show">打开带清单的会话</button><button type="button" class="desk-btn" data-r10="toggle">展开 / 收起</button><button type="button" class="desk-btn" data-r10="step">推进一条</button><button type="button" class="desk-btn" data-r10="long">清单有 9 条</button><button type="button" class="desk-btn" data-r10="finish">全部做完后退场</button></div>
+    <section class="knob" id="r12">
+      <h2>第十二轮：贴纸更清爽（2026-11-23 已批准）</h2>
+      <p class="desk-note" style="margin:0">贴纸的硬阴影全部去掉，只留墨线。大标题和设置里选中项的黄线都去掉。点格淡一些、稀一些，角上光晕也收淡了。</p>
+      <p class="desk-note" style="margin:0">贴纸的按压按东西分开做：按钮墨线压粗，发送往后仰，图标歪一下，卡片上的贴纸歪得更狠，主题色压扁后盖章落定，终端按键反成墨色。</p>
+      <p class="desk-note" style="margin:0">左滑的停止、移出去掉小字，三套各照回溯钮画。按下时清玻拧一下，格栅、贴纸填满；回溯钮按下也换了颜色。格栅的代码块加一圈细框。</p>
       <label class="check"><input type="checkbox" data-k="slow">慢放 5 倍</label>
+      <div class="knob-btns"><button type="button" class="desk-btn" data-r12="home">打开主页看大标题</button><button type="button" class="desk-btn" data-r12="chat">打开一段聊天</button><button type="button" class="desk-btn" data-r12="palette">设置里的主题色</button><button type="button" class="desk-btn" data-r12="term">打开终端</button><button type="button" class="desk-btn" data-r12="swipe">左滑露出停止</button><button type="button" class="desk-btn" data-r12="code">格栅代码块</button></div>
     </section>
   </aside>
 
@@ -2219,11 +2322,13 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     old: { name: "chat.png", w: 720, h: 1560, type: "PNG", size: "212 KB", thumb: svgUrl(phoneInner({ me: "#2E8B7A" }), 360, 780, 166, 360), full: svgUrl(phoneInner({ me: "#2E8B7A" }), 360, 780, 720, 1560) },
     dark: { name: "chat-dark.png", w: 720, h: 1560, type: "PNG", size: "198 KB", thumb: svgUrl(phoneInner({ dark: true, me: "#8395FF" }), 360, 780, 166, 360), full: svgUrl(phoneInner({ dark: true, me: "#8395FF" }), 360, 780, 720, 1560) },
     webp: { name: "hero-draft.webp", w: 2400, h: 1350, type: "WebP", size: "1.2 MB", thumb: null, full: svgUrl(heroInner(), 1440, 810, 2400, 1350) },
-    hero: { name: "readme-hero.png", w: 1440, h: 810, type: "PNG", size: "486 KB", thumb: svgUrl(heroInner(), 1440, 810, 360, 203), full: svgUrl(heroInner(), 1440, 810, 1440, 810) }
+    hero: { name: "readme-hero.png", w: 1440, h: 810, type: "PNG", size: "486 KB", thumb: svgUrl(heroInner(), 1440, 810, 360, 203), full: svgUrl(heroInner(), 1440, 810, 1440, 810) },
+    // 第十一轮：用户自己发的图。图就在手机上，点开不用取原图；没有文件名，标题写格式
+    mine: { name: null, w: 1080, h: 2340, type: "PNG", size: "640 KB", local: true, thumb: svgUrl(phoneInner({ me: "#111111" }), 360, 780, 166, 360), full: svgUrl(phoneInner({ me: "#111111" }), 360, 780, 1080, 2340) }
   };
   var README_MSGS = [
     { k: "day", text: "今天 15:02" },
-    { k: "me", text: "把 README 顶部的截图换成新的聊天页" },
+    { k: "me", text: "把 README 顶部的截图换成新的聊天页，照手机上这张", imgs: ["mine"] },
     { k: "ai", text: "我先看一下现在用的是哪张。" },
     // 带图的工具行不参与合并，缩略图直接露在行下面
     { k: "tool", verb: "读取", arg: "chat.png", img: "old" },
@@ -2863,6 +2968,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   function toast(text) {
     clearTimeout(snackTimer);
     snack.textContent = text;
+    // 第十一轮：查看器开着时提示条画在它上面，换成浅灰底黑字
+    snack.classList.toggle("on-camera", top().route.name === "image");
     lift(snack, true, 16);
     snackTimer = setTimeout(function () { lift(snack, false, 16); }, 4000);
   }
@@ -3034,6 +3141,10 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   var CARD_DIRS = [["sticker", "贴纸"]];
   var MIN_DIRS = [["clear", "清玻"], ["grid", "格栅"]];
   var PICKS = [["clear", "清玻", "minimal", "clear"], ["grid", "格栅", "minimal", "grid"], ["sticker", "贴纸", "card", "sticker"]];
+  // 第十一轮已定：回溯钮按样式写死在 <html data-rw> 上，贴纸浅底小圆、格栅细线圈、清玻只露图标
+  var RW_BY_DIR = { sticker: "soft", grid: "ring", clear: "bare" };
+  // 第十二轮：刚点中的主题色，renderSettings 给它挂一次 pop 后清掉
+  var swPop = null;
   function pickOf() { var d = curDir(); return d === "now" ? (look.style === "card" ? "cardnow" : "minnow") : d; }
   function setPick(k) {
     var p = PICKS.filter(function (x) { return x[0] === k; })[0];
@@ -3044,7 +3155,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   }
   var DIR_NOTE = {
     jelly: "彩色雾面底上铺奶白半透明玻璃，图标装在带高光的软糖里，每台目标机一个颜色。主页是总览加两列小方块。按下压扁再抖两下弹回，导航栏选中块像果冻一样拉长。",
-    sticker: "米色点点纸，粗墨线描边加错位硬阴影，图标是歪着贴的圆贴纸，大标题下面一道荧光笔。主页是一张张贴纸卡片。按下整块陷进去，阴影跟着消失。",
+    sticker: "米色点点纸，粗墨线描边，不加阴影，图标是歪着贴的圆贴纸。主页是一张张贴纸卡片。按下按东西分开做：按钮墨线压粗，发送往后仰，图标和卡片上的贴纸歪一下，终端按键反成墨色。",
     bubble: "鲜亮的天空渐变，通透的肥皂泡玻璃，顶上一道弯弯的高光。会话状态是会动的小泡泡脸：等你时蹦、工作时晃、空闲时打盹。按下像泡泡一样回弹。",
     cardnow: "改之前的卡片样式。",
     paper: "米白纸张，44 号细体大标题，列表用序号和细线，AI 回复不套气泡，读起来像文章。导航栏贴底，全稿只有一种朱红色。",
@@ -3090,6 +3201,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       ["--c-accent", "--c-on-accent", "--c-lane-2"].forEach(function (k) { r.style.removeProperty(k); });
     }
     if (d === "now") r.removeAttribute("data-dir"); else r.setAttribute("data-dir", d);
+    if (RW_BY_DIR[d]) r.setAttribute("data-rw", RW_BY_DIR[d]); else r.removeAttribute("data-rw");
     syncMode();
     renderSettings();
     renderDirDesk();
@@ -3151,8 +3263,10 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     if (look.style === "card") {
       html += setGroup("palette", "主题色", '<div class="swatches" role="radiogroup" aria-label="主题色">' + ACCENTS.map(function (a) {
         var hex = a.hex || a.v, wall = a.v === "wall";
-        return '<button type="button" class="sw' + (wall ? " wall" : "") + '" role="radio" aria-checked="' + (a.v === look.accent) + '" aria-label="' + a.name + '" title="' + a.name + '" data-act="set-accent" data-v="' + a.v + '" style="--sw:' + hex + ";--sw-on:" + onAccent(hex) + '"><span class="ms">' + (wall && a.v !== look.accent ? "wallpaper" : "check") + "</span></button>";
+        // 第十二轮：刚点中的那一枚带 pop，贴纸下像盖章一样落定，别的时候重画不播
+        return '<button type="button" class="sw' + (wall ? " wall" : "") + (a.v === swPop && a.v === look.accent ? " pop" : "") + '" role="radio" aria-checked="' + (a.v === look.accent) + '" aria-label="' + a.name + '" title="' + a.name + '" data-act="set-accent" data-v="' + a.v + '" style="--sw:' + hex + ";--sw-on:" + onAccent(hex) + '"><span class="ms">' + (wall && a.v !== look.accent ? "wallpaper" : "check") + "</span></button>";
       }).join("") + '</div><p class="sw-name">' + cur.name + "</p>");
+      swPop = null;
     }
     // 第五轮待批：加载动画开关
     html += setGroup("animation", "动画", '<button type="button" class="swrow" role="switch" aria-checked="' + !!look.alwaysLd + '" data-act="set-always-ld"><span class="swrow-body"><span>总是播放加载动画</span><small>每次打开 APP，各页第一次加载都放一遍</small></span><span class="switch"><i></i></span></button>');
@@ -3222,8 +3336,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     var l3 = s.state === "need" && s.l3 ? '<span class="row-l3 need"' + (s.pending === "question" || s.pending === "dialog" ? ' style="font-family:var(--font-ui);font-size:13px"' : "") + ">" + esc(s.l3) + "</span>" : "";
     var fold = o.forks ? '<button type="button" class="icon-btn sm ffold" data-act="fork-fold" data-id="' + s.id + '" aria-expanded="' + !S.forkFold[s.id] + '" aria-label="收起 ' + o.forks + ' 个 fork"><span class="ms">expand_more</span></button>' : "";
     // 第六轮：左滑露出的按钮，运行中是「停止」，停了是「移出」
-    var swipe = s.state === "stop" ? '<button type="button" class="swipe-act" data-act="sw-act" data-k="remove" data-v="' + s.id + '" tabindex="-1"><span class="ms">delete</span>移出</button>'
-      : '<button type="button" class="swipe-act" data-act="sw-act" data-k="stop" data-v="' + s.id + '" tabindex="-1"><span class="ms">power_settings_new</span>停止</button>';
+    var swipe = s.state === "stop" ? '<button type="button" class="swipe-act" data-act="sw-act" data-k="remove" data-v="' + s.id + '" tabindex="-1" aria-label="移出"><span class="ms">delete</span></button>'
+      : '<button type="button" class="swipe-act" data-act="sw-act" data-k="stop" data-v="' + s.id + '" tabindex="-1" aria-label="停止"><span class="ms">power_settings_new</span></button>';
     // 第六轮：行尾的 ⋮ 菜单去掉了：点行打开，左滑停止或移出，git 从聊天页顶栏进
     return '<div class="srow' + (s.state === "stop" ? " dim" : "") + (o.fork ? " fork" : "") + (o.last ? " last" : "") + (o.forks ? " has-forks" + (S.forkFold[s.id] ? " forks-folded" : "") : "") + '" data-sid="' + s.id + '">' + swipe + '<button type="button" class="row" data-act="open-chat" data-id="' + s.id + '">' + glyphHtml(s) + '<span class="row-body"><span class="row-l1"><span class="row-title">' + esc(s.title) + "</span><time>" + esc(s.time) + '</time></span><span class="row-l2">' + st + "</span>" + l3 + "</span></button>" + fold + "</div>" + agentRowsHtml(s);
   }
@@ -3778,6 +3892,12 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   function meRowHtml(it) {
     var b = '<div class="bubble me' + (it.sending ? " sending" : "") + (it.queued ? " queued" : "") + '">' + meHtml(it.text) + "</div>";
     var act = it.queued || it.sending ? "" : '<button type="button" class="rw-act" data-act="rw-open" tabindex="-1" aria-label="回溯"><span class="ms">history</span></button>';
+    // 第十一轮：带图的消息，图排在气泡上面，点开进全屏看图；只有图没有字时不画气泡，回溯钮对着图那一行
+    if (it.imgs && it.imgs.length) {
+      b = '<div class="me-col"><div class="me-pics">' + it.imgs.map(function (id) {
+        return '<button type="button" class="mpic" data-act="img" data-v="' + id + '" aria-label="查看图片"><img src="' + IMGS[id].thumb + '" alt=""></button>';
+      }).join("") + "</div>" + (it.text ? b : "") + "</div>";
+    }
     return '<div class="mrow">' + b + act + "</div>";
   }
   // 工具跑完：现状直接换掉；待选「转圈淡出收起」让转圈 durS 淡出并收起它占的宽度，再换成结果
@@ -4659,14 +4779,20 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   // 图从缩略图的位置放大到全屏，黑底和顶栏同时淡入；关掉时缩回缩略图。原图第一次打开时用 chat.image 取：
   // 有缩略图就先把它放大顶着，底下一行「正在取原图」，取到后原图淡入盖上；没有缩略图的在中间转圈。
   // 取过的存在 ImageCache，再开不发请求；取不到时那一行换成「图片取不到」
-  var imgCache = {}, failNext = false;
+  var imgCache = {}, failNext = false, saveFailNext = false;
+  var SAVE_BTN = '<button type="button" class="icon-btn v-save" data-act="v-save" aria-label="保存到相册"><span class="ms">download</span><span class="spin"></span>' +
+    '<svg class="v-ok" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.6l4.6 4.6L19.2 7.6"/></svg></button>';
   function picHtml(m, src) { return '<div class="v-pic" style="--ar:' + (m.w / m.h).toFixed(4) + '"><img src="' + src + '" alt="' + esc(m.name) + '"></div>'; }
   function buildImage(page) {
-    var id = page.route.img, m = IMGS[id];
+    var id = page.route.img, m = IMGS[id], ready = !!(imgCache[id] || m.local);
+    // 用户发的图没有文件名，标题写格式，下面一行不再重复格式
+    var sub = [m.w + " × " + m.h, m.name ? m.type : "", m.size].filter(Boolean).join(" · ");
     page.el.innerHTML = '<div class="viewer"><header class="v-bar"><button type="button" class="icon-btn" data-act="back" aria-label="关闭"><span class="ms">close</span></button>' +
-      '<div class="v-title"><b>' + esc(m.name) + "</b><span>" + m.w + " × " + m.h + " · " + esc(m.type) + " · " + esc(m.size) + '</span></div></header><div class="v-stage"></div></div>';
+      '<div class="v-title"><b>' + esc(m.name || m.type) + "</b><span>" + esc(sub) + "</span></div>" + SAVE_BTN + '</header><div class="v-stage"></div></div>';
     var stage = $(".v-stage", page.el), timer = null;
-    if (imgCache[id]) stage.innerHTML = picHtml(m, m.full);
+    // 第十一轮：原图没到时保存按钮是暗的，到了才能点
+    $(".v-save", page.el).disabled = !ready;
+    if (ready) stage.innerHTML = picHtml(m, m.full);
     else {
       var fail = failNext;
       failNext = false;
@@ -4675,6 +4801,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
         var note = $(".v-note, .v-wait", stage);
         if (fail) { note.innerHTML = '<span class="ms">error</span>图片取不到'; return; }
         imgCache[id] = true;
+        saveReady(page);
         if (m.thumb) {
           var full = make('<img src="' + m.full + '" alt="">');
           $(".v-pic", stage).appendChild(full);
@@ -4686,7 +4813,8 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
         }
       }, 700 * slowK());
     }
-    page.dispose = function () { clearTimeout(timer); };
+    // 关掉后正在存的那一张照样存完，存好后在聊天页弹提示
+    page.dispose = function () { clearTimeout(timer); page.gone = true; };
     // 缩略图在屏幕上的位置；它不在了（比如聊天页已经滚走重画）就退回淡入淡出
     function thumb() { var s = page.route.src, img = m.thumb && s && s.isConnected && s.querySelector("img"); return img ? { el: s, r: img.getBoundingClientRect() } : null; }
     function from(pic, r) {
@@ -5070,7 +5198,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     "git-tab": function (t) { switchGitTab(t.dataset.v); },
     "set-style": function (t) { if (pickOf() !== t.dataset.v) reveal(centerOf(t), function () { setPick(t.dataset.v); }); },
     "set-mode": function (t) { if (themeMode() !== t.dataset.v) reveal(centerOf(t), function () { setTheme(t.dataset.v); }); },
-    "set-accent": function (t) { if (look.accent !== t.dataset.v) reveal(centerOf(t), function () { setLook("accent", t.dataset.v); }); },
+    "set-accent": function (t) { if (look.accent !== t.dataset.v) reveal(centerOf(t), function () { swPop = t.dataset.v; setLook("accent", t.dataset.v); }); },
     branches: function () {
       openOverlay(sheet("<h2>切换分支</h2>", '<div class="sheet-sec">本地</div>' +
         ["dev", "main", "feat-relay"].map(function (b) { return mi({ act: "pick-branch", v: b, html: '<span class="mono-name">' + b + "</span>", radio: true, tick: S.git.branch === b }); }).join("") +
@@ -5338,6 +5466,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     bindDirDesk();
     bindR9();
     bindR10();
+    bindR12();
   }
 
   // ---------- 第六轮：git 入口、Fork、Worktree ----------
@@ -5566,8 +5695,47 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
     link: function (t, e) { openLink(t.dataset.v, t, e ? { x: e.clientX, y: e.clientY } : null); },
     "lk-open": function (t) { var u = t.dataset.v; closeOverlay(); toast(/^mailto:/i.test(u) ? "已交给邮件 App" : "已在浏览器中打开 " + hostOf(u)); },
     "lk-copy": function (t) { closeOverlay(); copyText(t.dataset.v, "已复制链接"); },
-    "cb-copy": function (t) { copyCode(t.closest(".cb")); }
+    "cb-copy": function (t) { copyCode(t.closest(".cb")); },
+    "v-save": function (t) { saveImage(t); }
   });
+  // ---------- 第十一轮：存进相册 ----------
+  // 原图到了，下载图标从暗变亮
+  function saveReady(page) {
+    var b = $(".v-save", page.el);
+    if (!b) return;
+    b.disabled = false;
+    note("原图到了：下载按钮亮起来", dur("durS"), ez("emph"));
+  }
+  // 下载图标缩小淡出、转圈淡入；存好后转圈淡出，对勾一笔画出来、轻轻弹一下，留到关掉查看器，再打开又是下载图标。
+  // 存不了时转圈淡出、下载图标放大回来，弹「保存失败」。保存途中关掉查看器照样存完，存好后在聊天页弹「已保存到相册」
+  function saveImage(btn) {
+    var page = pageOf(btn);
+    if (!page || btn.disabled || page.saving) return;
+    var a = $(".ms", btn), sp = $(".spin", btn), c = $(".v-ok", btn), path = $("path", c), len = path.getTotalLength(), s = dur("durS"), m = dur("durM"), fail = saveFailNext;
+    saveFailNext = false;
+    page.saving = true;
+    [a, sp, c, path].forEach(function (n) { n.getAnimations().forEach(function (x) { x.cancel(); }); });
+    a.animate([{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(0.4)" }], { duration: s, easing: ez("emphIn"), fill: "forwards" });
+    sp.animate([{ opacity: 0 }, { opacity: 1 }], { duration: s, delay: s * 0.5, easing: ez("emph"), fill: "both" });
+    note("下载图标缩小淡出，换成转圈", s, ez("emphIn"));
+    setTimeout(function () {
+      page.saving = false;
+      sp.animate([{ opacity: 1 }, { opacity: 0 }], { duration: s, easing: ez("emphIn"), fill: "forwards" });
+      if (fail) {
+        a.animate([{ opacity: 0, transform: "scale(0.6)" }, { opacity: 1, transform: "scale(1)" }], { duration: m, delay: s * 0.5, easing: ez("emph"), fill: "both" });
+        toast("保存失败");
+        note("存不了：转圈淡出，下载图标放大回来", m, ez("emph"));
+        return;
+      }
+      if (page.gone) { toast("已保存到相册"); note("查看器已经关了：在聊天页弹「已保存到相册」"); return; }
+      btn.disabled = true;
+      btn.classList.add("done");
+      path.style.strokeDasharray = len;
+      path.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: m, delay: s * 0.5, easing: ez("emph"), fill: "both" });
+      c.animate([{ opacity: 0, transform: "scale(0.7)" }, { opacity: 1, transform: "scale(1)" }], { duration: m, delay: s * 0.5, easing: ez("spring"), fill: "both" });
+      note("存好了：转圈淡出，对勾一笔画出来，留到关掉查看器", m, ez("emph"));
+    }, 900 * slowK());
+  }
 
   // 长按选字：按住 480 毫秒不动，选中手指下的那个词，弹出系统的选字工具栏；松手后不再算点击
   var LP = null, lpUntil = 0, selTb = null;
@@ -5672,6 +5840,7 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   function rwSet(row, x, anim) {
     row.classList.toggle("sw-anim", !!anim);
     row.style.setProperty("--sw", x + "px");
+    row.style.setProperty("--swp", Math.min(1, Math.max(0, -x / RW_W)).toFixed(3));
   }
   function rwClose() {
     var r = rwOpen;
@@ -5809,8 +5978,9 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
   });
   // 侧栏：先打开示例会话，再找「把退避上限改成 60 秒」那一行
   function rwRow(p) { var it = p.s.msgs.filter(function (m) { return m.k === "me" && m.text === "把退避上限改成 60 秒"; })[0]; return it && it.el; }
-  function rwSlide(p, then) {
-    var row = rwRow(p);
+  function rwSlide(p, then) { rwShow(rwRow(p), then); }
+  // 把这一行左滑到打开的位置，露出回溯钮
+  function rwShow(row, then) {
     if (!row) return;
     row.scrollIntoView({ block: "center" });
     if (rwBusy(row)) { note("会话在工作或等你确认，不能回溯"); return; }
@@ -5961,6 +6131,47 @@ button.more-link { border: 0; background: none; text-align: left; align-self: fl
       });
     }
   };
+  // ---------- 第十二轮：侧栏 ----------
+  // 已批准，点格写死成 C；侧栏只留看样子的入口
+  function toSticker() { if (pickOf() !== "sticker") setPick("sticker"); }
+  var R12A = {
+    // 主页：目标机「工作室 Mac mini」的会话页，大标题在最上面
+    home: function () { toSticker(); toSessions(); var c = $(".content", pane("sessions")); if (c) c.scrollTop = 0; },
+    // 「退避说明」：几条你发的消息和 Claude 的回复，气泡都在第一屏
+    chat: function () { toSticker(); inMd(noop); },
+    // 左滑露出的钮三套都改了，留在当前样式：把第一行会话滑到打开的位置
+    swipe: function () {
+      toSessions();
+      var row = $('.srow[data-sid="s1"]', pane("sessions"));
+      if (!row) return;
+      if (swOpen && swOpen !== row) swClose();
+      swSet(row, -SW_W, true);
+      swOpen = row;
+      swEndAt = Date.now() + 400;
+      note("左滑：停在打开的位置", dur("durM"), ez("emph"));
+    },
+    // 设置页的主题色：点一枚色块看按压和盖章
+    palette: function () {
+      toSticker();
+      goHome();
+      if (S.tab !== "settings") switchTab("settings", false);
+      var g = $(".swatches", pane("settings"));
+      if (g) g.scrollIntoView({ block: "center" });
+    },
+    // 终端：底部一排按键，按一下看打字机那样的反色
+    term: function () { toSticker(); toSessions(); push({ name: "term", id: "s1" }); },
+    // 格栅的代码块：换到格栅，打开「退避说明」，把第一个代码块滚到中间
+    code: function () {
+      if (pickOf() !== "grid") setPick("grid");
+      inMd(function (p) { var c = $(".cb", p.el); if (c) c.scrollIntoView({ block: "center" }); });
+    }
+  };
+  function bindR12() {
+    $(".desk").addEventListener("click", function (e) {
+      var b = e.target.closest("[data-r12]");
+      if (b) R12A[b.dataset.r12]();
+    });
+  }
   function bindR10() {
     $(".desk").addEventListener("click", function (e) {
       var b = e.target.closest("[data-r10]");
