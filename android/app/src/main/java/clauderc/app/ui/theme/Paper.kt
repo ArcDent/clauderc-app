@@ -24,9 +24,9 @@ import clauderc.app.data.UiStyle
 import kotlin.math.roundToInt
 
 /**
- * The page under everything (--k-backdrop over --c-bg). 贴纸: cream paper dotted every 18dp, with a
- * soft wash of the accent from the top right and, in light, of yellow from the bottom left. The other
- * styles are the plain page colour.
+ * The page under everything (--k-backdrop over --c-bg). 贴纸: cream paper dotted every [StickerDotGap],
+ * with a soft glow of the accent from the top right and, in light, of yellow from the bottom left. The
+ * other styles are the plain page colour.
  */
 @Composable
 fun Modifier.page(): Modifier {
@@ -34,10 +34,13 @@ fun Modifier.page(): Modifier {
     if (Clauderc.style != UiStyle.Sticker) return background(c.bg)
     val density = LocalDensity.current
     val dots = remember(c.dot, density) {
-        val cell = with(density) { 18.dp.toPx() }.roundToInt().coerceAtLeast(2)
+        val cell = with(density) { StickerDotGap.toPx() }.roundToInt().coerceAtLeast(2)
         val tile = ImageBitmap(cell, cell)
         val paint = Paint().apply { color = c.dot; isAntiAlias = true }
-        Canvas(tile).drawCircle(Offset(with(density) { 1.dp.toPx() }, with(density) { 1.dp.toPx() }), with(density) { 1.3.dp.toPx() }, paint)
+        // radial-gradient(circle at 1px 1px, dot r, transparent r + 0.5px): solid to r and faded out 0.5px
+        // further; drawn solid to the middle of that fade.
+        val at = with(density) { 1.dp.toPx() }
+        Canvas(tile).drawCircle(Offset(at, at), with(density) { (StickerDotRadius + 0.25.dp).toPx() }, paint)
         ShaderBrush(ImageShader(tile, TileMode.Repeated, TileMode.Repeated))
     }
     // The paper is drawn once into a layer of its own, kept as a picture until the size or the colours
@@ -49,10 +52,10 @@ fun Modifier.page(): Modifier {
             record {
                 drawRect(c.bg)
                 drawRect(dots)
-                // radial-gradient(60% 34% at 100% 0%, accent 20%, transparent 72%)
-                wash(Offset(size.width, 0f), 0.6f, 0.34f, c.accent.copy(alpha = if (c.isDark) 0.22f else 0.2f))
-                // radial-gradient(60% 30% at 0% 100%, yellow 28%, transparent 72%), light only
-                if (!c.isDark) wash(Offset(0f, size.height), 0.6f, 0.3f, Color(0x47FFD84D))
+                // radial-gradient(60% 34% at 100% 0%, --k-glow-1, transparent 72%)
+                wash(Offset(size.width, 0f), 0.6f, 0.34f, c.accent.copy(alpha = c.glow1))
+                // radial-gradient(60% 30% at 0% 100%, --k-glow-2, transparent 72%), light only
+                if (c.glow2.alpha > 0f) wash(Offset(0f, size.height), 0.6f, 0.3f, c.glow2)
             }
         }
         onDrawBehind { drawLayer(paper) }

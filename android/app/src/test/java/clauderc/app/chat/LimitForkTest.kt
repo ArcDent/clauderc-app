@@ -134,7 +134,8 @@ class LimitForkTest {
         vm.state.first { it.session != null }
         vm.createWorktree("wt-1119-1530", " 先跑测试 ")
         val req = relay.sent(Method.SESSION_CREATE).single().decode(SessionCreateRequest.serializer())
-        assertEquals(SessionCreateRequest("/Users/me/github/clauderc-app", prompt = "先跑测试", worktree = "wt-1119-1530", fromSession = "s-need"), req)
+        assertTrue("worktree create carries clientReqId", !req.clientReqId.isNullOrEmpty())
+        assertEquals(SessionCreateRequest("/Users/me/github/clauderc-app", prompt = "先跑测试", worktree = "wt-1119-1530", fromSession = "s-need"), req.copy(clientReqId = null))
         assertEquals("s-wt", withTimeout(1_000) { vm.created.first() })
         assertEquals(false, vm.state.value.creatingWorktree)
     }
@@ -157,5 +158,48 @@ class LimitForkTest {
         assertEquals("wt-0102-0905", worktreeName(LocalDateTime.of(2027, 1, 2, 9, 5)))
         assertTrue(WORKTREE_NAME.matches("wt-0102-0905"))
         listOf("a b", "a/b", "-x", ".x", "x".repeat(65)).forEach { assertTrue(it, !WORKTREE_NAME.matches(it)) }
+    }
+
+    @Test fun rapidAutoResumeTextEditsAreNotOverwrittenByStaleReply() = runTest(dispatcher) {
+        val vm = viewModel()
+        answerAutoResume("继续")
+        vm.setAutoResume(true)
+
+        val gates = mutableListOf<kotlinx.coroutines.CompletableDeferred<Unit>>()
+        val sentTexts = mutableListOf<String?>()
+        relay.on(Method.CHAT_AUTO_RESUME) { sent ->
+            val req = sent.decode(ChatAutoResumeRequest.serializer())
+            sentTexts += req.text
+            val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+            gates += gate
+            gate.await()
+            val out = limit.copy(autoResume = req.text?.let { AutoResume(it, resets.plusSeconds(60)) })
+            clauderc.app.protocol.ProtocolJson.encodeToJsonElement(ChatAutoResumeResponse.serializer(), ChatAutoResumeResponse(out))
+        }
+
+        // First edit goes out after the debounce pause.
+        vm.typedResume("先跑单元测试")
+        advanceTimeBy(DRAFT_SAVE_MILLIS + 1)
+        assertEquals(listOf("先跑单元测试"), sentTexts)
+
+        // Second edit starts debouncing while the first reply is still in flight; stale reply must not overwrite input.
+        vm.typedResume("只跑协议包测试")
+        gates[0].complete(Unit)
+        assertEquals("stale reply while typing must not overwrite resumeText", "只跑协议包测试", vm.state.value.resumeText)
+
+        // Second edit goes out, then a third edit queues behind it before the second answers.
+        advanceTimeBy(DRAFT_SAVE_MILLIS + 1)
+        assertEquals(listOf("先跑单元测试", "只跑协议包测试"), sentTexts)
+        vm.typedResume("跑完顺便发报告")
+        advanceTimeBy(DRAFT_SAVE_MILLIS + 1)
+
+        // Second reply arrives late: input and autoResume keep the final text.
+        gates[1].complete(Unit)
+        assertEquals("跑完顺便发报告", vm.state.value.resumeText)
+        assertEquals("跑完顺便发报告", vm.state.value.limit?.autoResume?.text)
+        assertEquals(listOf("先跑单元测试", "只跑协议包测试", "跑完顺便发报告"), sentTexts)
+        gates[2].complete(Unit)
+        assertEquals("跑完顺便发报告", vm.state.value.resumeText)
+        assertEquals("跑完顺便发报告", vm.state.value.limit?.autoResume?.text)
     }
 }

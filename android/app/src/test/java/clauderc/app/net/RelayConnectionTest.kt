@@ -41,7 +41,7 @@ import org.junit.Test
 class RelayConnectionTest {
 
     /** The relay side of one WebSocket. */
-    private class Peer : WebSocketListener() {
+    private class Peer(private val autoClose: Boolean = true) : WebSocketListener() {
         val opened = LinkedBlockingQueue<WebSocket>()
         val messages = LinkedBlockingQueue<Envelope>()
         val closed = LinkedBlockingQueue<Int>()
@@ -54,7 +54,7 @@ class RelayConnectionTest {
             messages.add(Envelope.decode(text))
         }
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-            webSocket.close(1000, null)
+            if (autoClose) webSocket.close(1000, null)
             closed.add(code)
         }
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -238,5 +238,111 @@ class RelayConnectionTest {
         assertEquals("wss://relay.example.com/ws/app", wss.appSocketUrl)
         assertEquals("https://relay.example.com/api/pair", wss.pairUrl)
         assertEquals("wss://relay.example.com/ws/app", RelayAddress.parse("https://relay.example.com").appSocketUrl)
+    }
+
+    @Test fun messagesFromAnOldConnectionAfterReconnectAreDropped() = runBlocking {
+        val first = Peer(autoClose = false)
+        val second = Peer()
+        server.enqueue(upgrade(first))
+        server.enqueue(upgrade(second))
+        val conn = connection()
+        connected(conn)
+        first.awaitOpen()
+
+        // Switch credential to reconnect while the old peer's socket is still open and able to send a late frame.
+        conn.setCredential(address, "device-token-2")
+        conn.awaitState { it == ConnectionState.Connected }
+        second.awaitOpen()
+
+        val got = async(Dispatchers.Default) { withTimeout(5_000) { conn.events.first() } }
+        delay(100)
+        first.socket.send(Envelope(kind = Kind.EVENT, method = "stale.event", body = JsonPrimitive("old")).encode())
+        delay(100)
+        second.socket.send(Envelope(kind = Kind.EVENT, method = "fresh.event", body = JsonPrimitive("new")).encode())
+        assertEquals("fresh.event", got.await().method)
+        first.socket.close(1000, null)
+        Unit
+    }
+
+    @Test fun backgroundDisconnectWaitsForInflightWriteAndClosesOnReply() = runBlocking {
+        assertEquals(10_000L, BACKGROUND_GRACE_MILLIS)
+        val peer = Peer()
+        server.enqueue(upgrade(peer))
+        val conn = RelayConnection(client, scope, reconnectDelaysMillis = listOf(50, 100), requestTimeoutMillis = 5_000, backgroundGraceMillis = 2_000)
+        connected(conn)
+        peer.awaitOpen()
+
+        val send = async(Dispatchers.Default) { conn.request("chat.send", "m-1", JsonPrimitive("hi")) }
+        val req = peer.nextMessage()
+        // Going to background while chat.send is in flight keeps the socket open.
+        conn.setForeground(false)
+        delay(150)
+        assertEquals(ConnectionState.Connected, conn.state.value)
+        assertEquals(null, peer.closed.poll())
+
+        peer.socket.send(Envelope(kind = Kind.RESPONSE, id = req.id, method = req.method, body = buildJsonObject { put("queued", false) }).encode())
+        assertEquals(false, send.await().jsonObject["queued"]!!.jsonPrimitive.content.toBoolean())
+        conn.awaitState { it == ConnectionState.Idle }
+        assertEquals(1000, peer.closed.poll(5, TimeUnit.SECONDS))
+    }
+
+    @Test fun backgroundDisconnectForcesCloseAfterGraceTimeout() = runBlocking {
+        val peer = Peer()
+        server.enqueue(upgrade(peer))
+        val conn = RelayConnection(client, scope, reconnectDelaysMillis = listOf(50, 100), requestTimeoutMillis = 5_000, backgroundGraceMillis = 250)
+        connected(conn)
+        peer.awaitOpen()
+
+        val send = async(Dispatchers.Default) { runCatching { conn.request("chat.send", "m-1", JsonPrimitive("slow")) } }
+        peer.nextMessage()
+        conn.setForeground(false)
+        delay(80)
+        assertEquals("still connected before grace timeout", ConnectionState.Connected, conn.state.value)
+
+        conn.awaitState { it == ConnectionState.Idle }
+        assertEquals(1000, peer.closed.poll(5, TimeUnit.SECONDS))
+        assertTrue(send.await().exceptionOrNull() is NotConnectedException)
+    }
+
+    @Test fun backgroundDisconnectClosesImmediatelyWithOnlyReadOnlyInflight() = runBlocking {
+        val peer = Peer()
+        server.enqueue(upgrade(peer))
+        val conn = RelayConnection(client, scope, reconnectDelaysMillis = listOf(50, 100), requestTimeoutMillis = 5_000, backgroundGraceMillis = 5_000)
+        connected(conn)
+        peer.awaitOpen()
+
+        val read = async(Dispatchers.Default) { runCatching { conn.request("git.status", "m-1", buildJsonObject { put("dir", "/a") }) } }
+        peer.nextMessage()
+        conn.setForeground(false)
+
+        conn.awaitState { it == ConnectionState.Idle }
+        assertEquals(1000, peer.closed.poll(2, TimeUnit.SECONDS))
+        assertTrue(read.await().exceptionOrNull() is NotConnectedException)
+    }
+
+    @Test fun networkChangeClosesOldSocketFailsReadOnlyAndReconnectsImmediately() = runBlocking {
+        val first = Peer()
+        val second = Peer()
+        server.enqueue(upgrade(first))
+        server.enqueue(upgrade(second))
+        val conn = RelayConnection(client, scope, reconnectDelaysMillis = listOf(30_000), requestTimeoutMillis = 5_000)
+        connected(conn)
+        first.awaitOpen()
+
+        val watcher = NetworkWatcher { conn.onNetworkChanged() }
+        // Initial registration callback does not disrupt the active connection.
+        watcher.onAvailable("wifi")
+        assertEquals(1, server.requestCount)
+
+        val inflightRead = async(Dispatchers.Default) { runCatching { conn.request("git.status", "m-1", buildJsonObject { put("dir", "/a") }) } }
+        first.nextMessage()
+
+        // Network switches to cellular: old socket closes, read fails immediately, new socket connects immediately.
+        watcher.onAvailable("cellular")
+        assertEquals(1000, first.closed.poll(2, TimeUnit.SECONDS))
+        assertTrue(inflightRead.await().exceptionOrNull() is NotConnectedException)
+        conn.awaitState { it == ConnectionState.Connected }
+        second.awaitOpen()
+        assertEquals(2, server.requestCount)
     }
 }

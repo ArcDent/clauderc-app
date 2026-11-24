@@ -126,10 +126,10 @@ fun Hero(
             UiStyle.Clear -> Text(title, m.semantics { heading() }, fontSize = 34.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.02).em, lineHeight = 1.2.em)
             // 28sp bold, a little tighter.
             UiStyle.Grid -> Text(title, m.semantics { heading() }, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.01).em, lineHeight = 1.2.em)
-            // 34sp black, over a yellow highlighter stroke.
+            // 34sp black.
             UiStyle.Sticker -> Text(
                 title,
-                m.semantics { heading() }.highlighter(c.highlight).padding(horizontal = 2.dp),
+                m.semantics { heading() },
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Black,
                 letterSpacing = (-0.02).em,
@@ -160,9 +160,9 @@ fun Hero(
         return
     }
     val sticker = ui == UiStyle.Sticker
-    Column(modifier.fillMaxWidth().padding(start = sp.page - if (sticker) 2.dp else 0.dp, end = sp.page, top = sp.sp2, bottom = if (sticker) minOf(bottom, sp.sp4) else bottom)) {
+    Column(modifier.fillMaxWidth().padding(start = sp.page, end = sp.page, top = sp.sp2, bottom = if (sticker) minOf(bottom, sp.sp4) else bottom)) {
         heading(Modifier)
-        for (more in lines) line(more, Modifier.padding(top = sp.sp2, start = if (sticker) 2.dp else 0.dp), false)
+        for (more in lines) line(more, Modifier.padding(top = sp.sp2), false)
     }
 }
 

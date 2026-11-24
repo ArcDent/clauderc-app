@@ -164,7 +164,8 @@
 /* 三套样式（第四轮，操作稿 demo.html 已批准）：清玻、格栅、贴纸。没列出的 --c- 变量沿用上面极简样式同深浅的值。
    清玻：颜色就是极简的，只多出浮在内容上的玻璃顶栏、输入框和弹层用的 --k- 变量。
    格栅：更硬的黑白灰，粗黑分隔线、直角、等宽字。
-   贴纸：米色点点纸（--k-dot 是 18px 一格的小点），粗墨线（--k-ink）描边加错位硬阴影；--k-p2 到 --k-p5 是图标贴纸的颜色，
+   贴纸：米色点点纸，--k-dot 是点的颜色，每 --k-dot-gap 一个点，点半径 --k-dot-r；右上角一团主题色的淡光晕 --k-glow-1，
+   浅色下左下角再一团黄色的 --k-glow-2，深色下没有。粗墨线（--k-ink）描边，不加阴影；--k-p2 到 --k-p5 是图标贴纸的颜色，
    第一种是主题色；--k-glass 是卡片底色，--k-float 是导航栏和输入框的底色。--c-accent 是默认的蓝色，APP 里换成「设置」选的主题色，
    --c-lane-2 跟着一起换。 */
 :root[data-style="clear"] {
@@ -257,7 +258,11 @@
   --k-p5: #C7B2FF;
   --k-glass: rgba(255, 255, 255, 0.9);
   --k-float: rgba(255, 255, 255, 0.82);
-  --k-dot: rgba(30, 27, 46, 0.11);
+  --k-dot: rgba(30, 27, 46, 0.075);
+  --k-dot-gap: 24px;
+  --k-dot-r: 1px;
+  --k-glow-1: color-mix(in srgb, var(--c-accent) 12%, transparent);
+  --k-glow-2: rgba(255, 216, 77, 0.16);
 }
 @media (prefers-color-scheme: dark) {
   :root[data-style="sticker"]:not([data-theme="light"]) {
@@ -289,7 +294,11 @@
     --k-p5: #B9A0FF;
     --k-glass: rgba(53, 48, 72, 0.96);
     --k-float: rgba(53, 48, 72, 0.9);
-    --k-dot: rgba(255, 255, 255, 0.07);
+    --k-dot: rgba(255, 255, 255, 0.05);
+    --k-dot-gap: 24px;
+    --k-dot-r: 1px;
+    --k-glow-1: color-mix(in srgb, var(--c-accent) 14%, transparent);
+    --k-glow-2: transparent;
   }
 }
 :root[data-style="sticker"][data-theme="dark"] {
@@ -321,7 +330,11 @@
   --k-p5: #B9A0FF;
   --k-glass: rgba(53, 48, 72, 0.96);
   --k-float: rgba(53, 48, 72, 0.9);
-  --k-dot: rgba(255, 255, 255, 0.07);
+  --k-dot: rgba(255, 255, 255, 0.05);
+  --k-dot-gap: 24px;
+  --k-dot-r: 1px;
+  --k-glow-1: color-mix(in srgb, var(--c-accent) 14%, transparent);
+  --k-glow-2: transparent;
 }
 
 * { box-sizing: border-box; }

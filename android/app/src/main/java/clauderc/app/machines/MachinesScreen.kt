@@ -6,6 +6,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.LocalIndication
 import clauderc.app.ui.theme.pressShrink
+import clauderc.app.ui.theme.StickerPress
 import clauderc.app.ui.components.StickerCorner
 import clauderc.app.ui.components.sticker
 import clauderc.app.data.UiStyle
@@ -76,6 +77,7 @@ fun MachinesScreen(
     onAdd: () -> Unit,
     onClearAll: () -> Unit = {},
     snack: SnackState = remember { SnackState() },
+    onRetry: () -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
     val sp = Clauderc.spacing
@@ -93,6 +95,7 @@ fun MachinesScreen(
                 val rows = state.rows
                 when {
                     !paired -> item { EmptyMachines(onAdd) }
+                    rows == null && state.loadFailed -> item { FailedMachines(onRetry) }
                     rows == null -> item { Spinner(Modifier.padding(start = sp.page), size = 16.dp, color = Clauderc.colors.fg3) }
                     else -> {
                         if (own) item { MachineSummary(rows) }
@@ -139,6 +142,20 @@ private fun EmptyMachines(onAdd: () -> Unit) {
     }
 }
 
+/** Shown when the first machines.list failed, once the startup cover steps aside. */
+@Composable
+private fun FailedMachines(onRetry: () -> Unit) {
+    val sp = Clauderc.spacing
+    Column(
+        Modifier.fillMaxWidth().padding(sp.sp8),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(sp.sp3),
+    ) {
+        Text("读不到目标机列表", fontSize = Clauderc.fontSizes.title)
+        PillButton("重试", onClick = onRetry, style = PillStyle.Tonal)
+    }
+}
+
 /** One relay under the title: its host when connected, otherwise how the reconnect goes. */
 @Composable
 private fun RelayLine(link: RelayLink) {
@@ -178,13 +195,13 @@ private fun MachineRowView(row: MachineRow, index: Int, modifier: Modifier = Mod
     Row(
         modifier
             .fillMaxWidth()
-            // 贴纸: the row is its own sticker and sinks onto its shadow when pressed.
-            .then(if (card) Modifier.pressShrink(press).sticker(c.panel, c.ink, StickerCorner, source = press) else Modifier)
+            // 贴纸: the row is its own sticker; pressed, it tilts a hair and its round sticker turns further.
+            .then(if (card) Modifier.pressShrink(press, StickerPress.Card).sticker(c.panel, c.ink, StickerCorner) else Modifier)
             .clickable(press, LocalIndication.current, role = Role.Button, onClick = onClick)
             .padding(start = Clauderc.look.rowStart, top = if (card) sp.sp4 else if (grid) 12.dp else 14.dp, bottom = if (card) sp.sp4 else if (grid) 12.dp else 14.dp),
         horizontalArrangement = Arrangement.spacedBy(if (grid) sp.sp3 else sp.sp4),
     ) {
-        RowIcon(Symbols.Computer, index, off = !m.online, tint = if (m.online) c.fg2 else c.fg3, modifier = if (card) Modifier.align(Alignment.CenterVertically) else Modifier)
+        RowIcon(Symbols.Computer, index, off = !m.online, tint = if (m.online) c.fg2 else c.fg3, modifier = if (card) Modifier.align(Alignment.CenterVertically) else Modifier, press = press)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(m.name, fontSize = Clauderc.fontSizes.body, fontWeight = if (card) FontWeight.ExtraBold else null, color = if (m.online) c.fg else c.fg3, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(

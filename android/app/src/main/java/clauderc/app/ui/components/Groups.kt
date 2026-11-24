@@ -27,8 +27,8 @@ val GridRule = 1.5.dp
 
 /**
  * One item of a list the style groups together (.list). 贴纸: an ink-outlined card 16dp in from the
- * page edges, rounded and outlined at the top of the [first] item and the bottom of the [last], on a
- * hard shadow under the last. 格栅: 16dp in, under a heavy rule. Both draw a hairline between items
+ * page edges, rounded and outlined at the top of the [first] item and the bottom of the [last].
+ * 格栅: 16dp in, under a heavy rule. Both draw a hairline between items
  * unless [divider] is off. 清玻 leaves the item as it is.
  */
 @Composable

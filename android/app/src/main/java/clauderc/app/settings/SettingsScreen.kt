@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -65,7 +64,6 @@ import clauderc.app.data.UiStyle
 import clauderc.app.machines.NavClearance
 import clauderc.app.ui.components.AppBar
 import clauderc.app.ui.components.Hero
-import clauderc.app.ui.components.highlighter
 import clauderc.app.ui.components.inkFrame
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercColors
@@ -74,6 +72,16 @@ import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.accentColor
 import clauderc.app.ui.theme.palette
 import clauderc.app.ui.theme.pressShrink
+import clauderc.app.ui.theme.ClaudercMotion
+import clauderc.app.ui.theme.StickerPress
+import clauderc.app.ui.theme.stickerPushed
+import clauderc.app.ui.components.track
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.graphicsLayer
 
 /** Names of the accents, in the order of the swatches. */
 val AccentChoice.label: String
@@ -225,11 +233,13 @@ private fun RowScope.Option(
     val corner = miniCorner(Clauderc.style)
     var center by remember { mutableStateOf(Offset.Zero) }
     val press = remember { MutableInteractionSource() }
+    // 贴纸 keeps a pressed option where it is and squashes and tilts only its thumbnail.
+    val pushed by stickerPushed(press)
     Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
         Column(
             Modifier
                 .onGloballyPositioned { center = it.boundsInRoot().center }
-                .pressShrink(press)
+                .pressShrink(press, StickerPress.Still)
                 .clip(RoundedCornerShape(Clauderc.radii.md))
                 .selectable(selected, press, PressIndication(c.fg), role = Role.RadioButton) { onClick(center) }
                 .padding(Clauderc.spacing.sp1),
@@ -237,12 +247,17 @@ private fun RowScope.Option(
             verticalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp2),
         ) {
             val frame = when {
-                // 贴纸: a faint ink ring; the picked one gets a full ink ring and a hard shadow below it.
-                sticker && selected -> Modifier.inkFrame(c.ink, corner, ring = 2.dp, drop = 4.dp)
-                sticker -> Modifier.inkFrame(c.ink.copy(alpha = 0.18f), corner, ring = 2.dp, drop = 0.dp)
+                // 贴纸: a faint ink ring; the picked one gets a full ink ring.
+                sticker && selected -> Modifier.inkFrame(c.ink, corner, ring = 2.dp)
+                sticker -> Modifier.inkFrame(c.ink.copy(alpha = 0.18f), corner, ring = 2.dp)
                 else -> Modifier.border(if (selected) 2.dp else 1.dp, if (selected) c.accent else c.line, RoundedCornerShape(corner))
             }
-            Box(Modifier.size(84.dp, 116.dp).then(frame)) { preview() }
+            val tilt = if (sticker) Modifier.graphicsLayer {
+                scaleX = 1f - 0.07f * pushed
+                scaleY = scaleX
+                rotationZ = -4f * pushed
+            } else Modifier
+            Box(tilt.size(84.dp, 116.dp).then(frame)) { preview() }
             Text(
                 label,
                 fontSize = Clauderc.fontSizes.label,
@@ -252,8 +267,6 @@ private fun RowScope.Option(
                     else -> FontWeight.Normal
                 },
                 color = if (selected) c.fg else c.fg2,
-                // 贴纸 marks the picked name with a highlighter stroke across its lower half.
-                modifier = if (selected && sticker) Modifier.highlighter(c.highlight, from = 0.55f).padding(horizontal = 3.dp) else Modifier,
             )
         }
     }
@@ -293,12 +306,10 @@ private fun DrawScope.drawMini(style: UiStyle, p: ClaudercColors) {
     val width = size.width - 18 * u
     // 格栅 rules its rows in black; the other two use the hairline colour.
     val rule = if (style == UiStyle.Grid) p.fg else p.line
-    // 贴纸 outlines its rows and nav bar in ink 1.2dp wide, with a 1.5dp hard shadow below.
+    // 贴纸 outlines its rows and nav bar in ink 1.2dp wide.
     fun inked(topLeft: Offset, box: Size, radius: Float) {
         val o = 1.2f * u
-        val r = CornerRadius(radius + o)
-        drawRoundRect(p.fg, Offset(topLeft.x - o, topLeft.y - o + 1.5f * u), Size(box.width + 2 * o, box.height + 2 * o), r)
-        drawRoundRect(p.fg, Offset(topLeft.x - o, topLeft.y - o), Size(box.width + 2 * o, box.height + 2 * o), r)
+        drawRoundRect(p.fg, Offset(topLeft.x - o, topLeft.y - o), Size(box.width + 2 * o, box.height + 2 * o), CornerRadius(radius + o))
         drawRoundRect(p.card, topLeft, box, CornerRadius(radius))
     }
     var y = 13 * u
@@ -362,34 +373,80 @@ private fun Swatch(choice: AccentChoice, selected: Boolean, dark: Boolean, onPic
     val on = palette(UiStyle.Sticker, dark, color).onAccent
     var center by remember { mutableStateOf(Offset.Zero) }
     val press = remember { MutableInteractionSource() }
+    val sticker = Clauderc.style == UiStyle.Sticker
+    // 贴纸: pressed, the dot squashes and tilts left (.sw.is-pressed); picked, it lands like a stamp (.sw.pop),
+    // overshooting and swinging back right before it settles, while its outer ring and tick spring in.
+    val pushed by stickerPushed(press)
+    val stamp = remember { Animatable(1f) }
+    var was by remember { mutableStateOf(selected) }
+    val durL = Clauderc.motion.durL
+    LaunchedEffect(selected) {
+        if (selected && !was && sticker) {
+            stamp.snapTo(0f)
+            stamp.animateTo(1f, tween(durL, easing = LinearEasing))
+        }
+        was = selected
+    }
     Box(
         Modifier
             .size(54.dp)
             .onGloballyPositioned { center = it.boundsInRoot().center }
             .semantics { contentDescription = choice.label }
-            .pressShrink(press)
+            .pressShrink(press, StickerPress.Still)
             .selectable(selected, press, indication = null, role = Role.RadioButton) { onPick(choice, center) },
         contentAlignment = Alignment.Center,
     ) {
-        // 贴纸 rings each dot in ink on a hard shadow and lifts the picked one 3dp higher onto a longer shadow.
-        // Elsewhere the picked one gets a ring 5dp outside the dot. A pick spreads the new theme out from
-        // here, so neither needs an animation of its own.
-        val sticker = Clauderc.style == UiStyle.Sticker
-        if (selected && !sticker) {
-            Canvas(Modifier.fillMaxSize()) { drawCircle(color, radius = size.minDimension / 2 - 1.dp.toPx(), style = Stroke(2.dp.toPx())) }
-        }
-        val dot = if (sticker) {
-            Modifier.offset(y = if (selected) (-3).dp else 0.dp).inkFrame(Clauderc.colors.ink, 22.dp, ring = 2.dp, drop = if (selected) 6.dp else 3.dp)
-        } else {
-            Modifier
-        }
-        Box(Modifier.size(44.dp).then(dot).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
-            val icon = when {
-                selected -> Symbols.Check
-                choice == AccentChoice.Wallpaper -> Symbols.Wallpaper
-                else -> null
+        Box(
+            Modifier.fillMaxSize().then(
+                if (sticker) Modifier.graphicsLayer {
+                    val t = stamp.value
+                    val (scale, turn) = if (t < 1f) {
+                        track(t, Emph, 0f to 0.82f, 0.45f to 1.12f, 0.72f to 0.96f, 1f to 1f) to track(t, Emph, 0f to -10f, 0.45f to 6f, 0.72f to -2f, 1f to 0f)
+                    } else {
+                        1f - 0.18f * pushed to -10f * pushed
+                    }
+                    scaleX = scale
+                    scaleY = scale
+                    rotationZ = turn
+                } else Modifier,
+            ).testTag("swatchFace"),
+            contentAlignment = Alignment.Center,
+        ) {
+            // 贴纸 rings each dot in ink, and the picked one in a second ink ring 6dp outside the first (.sw::after).
+            // Elsewhere the picked one gets a ring in its own colour 5dp outside the dot, and a pick has no
+            // animation of its own: the new theme spreading out from here is enough.
+            if (selected) {
+                val ink = Clauderc.colors.ink
+                Canvas(Modifier.fillMaxSize().graphicsLayer { if (sticker) springIn(stamp.value, 0.3f, 0.7f) }) {
+                    val w = 2.dp.toPx()
+                    if (sticker) drawCircle(ink, radius = 22.dp.toPx() + 6.dp.toPx() + w / 2, style = Stroke(w))
+                    else drawCircle(color, radius = size.minDimension / 2 - 1.dp.toPx(), style = Stroke(w))
+                }
             }
-            if (icon != null) Icon(icon, contentDescription = null, tint = on, modifier = Modifier.size(20.dp))
+            val dot = if (sticker) Modifier.inkFrame(Clauderc.colors.ink, 22.dp, ring = 2.dp) else Modifier
+            Box(Modifier.size(44.dp).then(dot).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
+                val icon = when {
+                    selected -> Symbols.Check
+                    choice == AccentChoice.Wallpaper -> Symbols.Wallpaper
+                    else -> null
+                }
+                val tick = if (selected && sticker) Modifier.graphicsLayer { springIn(stamp.value, 0.25f, 0.4f, turn = -40f) } else Modifier
+                if (icon != null) Icon(icon, contentDescription = null, tint = on, modifier = tick.size(20.dp))
+            }
         }
     }
+}
+
+private val Emph = ClaudercMotion().easeEmph
+private val Spring = ClaudercMotion().easeSpring
+
+/**
+ * A part of the swatch's stamp that springs in late (sw-ring, sw-tick): hidden at [from] of its size and
+ * turned [turn]° until [hold] of the way through [t], then growing, turning back and fading in on the spring curve.
+ */
+private fun GraphicsLayerScope.springIn(t: Float, hold: Float, from: Float, turn: Float = 0f) {
+    alpha = track(t, Spring, 0f to 0f, hold to 0f, 1f to 1f)
+    scaleX = track(t, Spring, 0f to from, hold to from, 1f to 1f)
+    scaleY = scaleX
+    rotationZ = track(t, Spring, 0f to turn, hold to turn, 1f to 0f)
 }

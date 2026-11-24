@@ -12,6 +12,8 @@ forum image more_vert palette photo_camera power_settings_new radio_button_check
 refresh settings style upload wallpaper warning terminal keyboard_arrow_left keyboard_arrow_up keyboard_arrow_down
 keyboard_arrow_right backspace keyboard_return call_split visibility visibility_off content_copy open_in_browser mail history""".split()
 FILLED = ["computer", "forum", "account_tree", "settings", "error"]
+# Outlines at weight 400, the font's default, where the mockup sets "wght" 400.
+REGULAR = ["history"]
 
 
 def camel(name: str) -> str:
@@ -32,7 +34,8 @@ lines = [
     "package clauderc.app.ui.theme",
     "",
     "// Generated from Material Symbols Outlined (Apache 2.0) by gen_icons.py; do not edit by hand.",
-    "// Outline icons use weight 300 like the mockup; *Filled use FILL 1 weight 400 for the selected nav item.",
+    "// Outline icons use weight 300 like the mockup; *Filled use FILL 1 weight 400 for the selected nav item;",
+    "// *Regular are outlines at weight 400 where the mockup sets it.",
     "internal object SymbolPaths {",
 ]
 for name in OUTLINE:
@@ -41,8 +44,11 @@ for name in OUTLINE:
 for name in FILLED:
     paths = fetch(name, "fill1")
     lines.append(f'    const val {camel(name)}Filled = "{"|".join(paths)}"')
+for name in REGULAR:
+    paths = fetch(name, "default")
+    lines.append(f'    const val {camel(name)}Regular = "{"|".join(paths)}"')
 lines.append("}")
 lines.append("")
 with open(OUT, "w") as f:
     f.write("\n".join(lines))
-print("wrote", OUT, len(OUTLINE) + len(FILLED), "icons")
+print("wrote", OUT, len(OUTLINE) + len(FILLED) + len(REGULAR), "icons")

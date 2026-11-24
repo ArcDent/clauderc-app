@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import clauderc.app.data.Fleet
 import clauderc.app.data.ProfileNameStore
+import clauderc.app.net.ConnectionState
+import clauderc.app.net.NotConnectedException
 import clauderc.app.net.Relay
 import clauderc.app.net.RemoteException
 import clauderc.app.net.call
@@ -18,6 +20,10 @@ import clauderc.app.protocol.SessionCreateRequest
 import clauderc.app.protocol.SessionCreateResponse
 import clauderc.app.protocol.SessionList
 import clauderc.app.ui.profileTitle
+import java.io.IOException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,10 +31,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+/** How long session.create waits: creating a session or answering a trust prompt can exceed the usual 30 s. */
+const val CREATE_SESSION_TIMEOUT_MILLIS = 120_000L
 
 /** The profile the account login's sessions fall into; as a preset it means the account login (design D8). */
 const val ACCOUNT_PRESET = "api.anthropic.com"
@@ -111,6 +121,9 @@ class CreateSessionViewModel(
     private val fleet: Fleet,
     private val relay: Relay,
     private val names: ProfileNameStore,
+    /** Outlives the page so a session.create already sent finishes and reports through [onNotice]. */
+    private val appScope: CoroutineScope? = null,
+    private val onNotice: (String) -> Unit = {},
 ) : ViewModel() {
     private val _state = MutableStateFlow(CreateUiState())
     val state: StateFlow<CreateUiState> = _state.asStateFlow()
@@ -120,6 +133,7 @@ class CreateSessionViewModel(
     val created: Flow<String> = _created.receiveAsFlow()
 
     private var noteSerial = 0
+    @Volatile private var cleared = false
 
     init {
         presetsChanged(presetOptions(fleet.sessions.value[machineId], emptyMap()))
@@ -205,19 +219,23 @@ class CreateSessionViewModel(
         create(s, trust = false)
     }
 
-    /** The sheet's 「信任并新建」: the same session.create with trust set; the sheet stays, working, until it answers. */
+    /**
+     * The sheet's 「信任并新建」: the same session.create with trust set; the sheet stays, working, until it answers.
+     * The form's own button is starting too meanwhile, so a tap on it sends no second session.create.
+     */
     fun trustAndCreate() {
         val s = _state.value
         if (s.untrusted == null || s.trusting) return
-        _state.update { it.copy(trusting = true, note = null) }
+        _state.update { it.copy(trusting = true, submitting = true, note = null) }
         create(s, trust = true)
     }
 
-    /** The sheet's 「取消」: nothing more is sent. */
-    fun dismissTrust() = _state.update { if (it.trusting) it else it.copy(untrusted = null) }
+    /** Closes the trust sheet; a trust request already in flight keeps [submitting] true until it answers. */
+    fun dismissTrust() = _state.update { it.copy(untrusted = null) }
 
     private fun create(s: CreateUiState, trust: Boolean) {
-        viewModelScope.launch {
+        val existingIds = fleet.sessions.value[machineId]?.sessions?.mapTo(HashSet()) { it.id }.orEmpty()
+        (appScope ?: viewModelScope).launch {
             val request = SessionCreateRequest(
                 cwd = s.untrusted ?: s.dir.trim(),
                 name = s.name.trim().ifEmpty { null },
@@ -227,13 +245,26 @@ class CreateSessionViewModel(
                 models = s.filledModels.ifEmpty { null },
                 prompt = s.prompt.trim().ifEmpty { null },
                 trust = true.takeIf { trust },
+                clientReqId = java.util.UUID.randomUUID().toString(),
             )
             try {
-                val res = relay.call(Method.SESSION_CREATE, machineId, request, SessionCreateRequest.serializer(), SessionCreateResponse.serializer())
+                val res = relay.call(
+                    Method.SESSION_CREATE, machineId, request, SessionCreateRequest.serializer(), SessionCreateResponse.serializer(),
+                    timeoutMillis = CREATE_SESSION_TIMEOUT_MILLIS,
+                )
                 fleet.refresh(machineId)
                 _state.update { it.copy(submitting = false, untrusted = null, trusting = false) }
-                _created.send(res.sessionId)
+                if (cleared) onNotice("已新建会话") else _created.send(res.sessionId)
             } catch (e: RemoteException) {
+                if (e.code == ErrorCode.MACHINE_OFFLINE) {
+                    reconcileCreate(request, existingIds)
+                    return@launch
+                }
+                val msg = when (e.code) {
+                    ErrorCode.NOT_TRUSTED -> e.message ?: "目标目录还没被信任"
+                    ErrorCode.DIR_NOT_FOUND -> "目标机上没有这个目录"
+                    else -> e.message ?: "启动失败"
+                }
                 _state.update {
                     val done = it.copy(submitting = false, untrusted = null, trusting = false)
                     when (e.code) {
@@ -242,10 +273,50 @@ class CreateSessionViewModel(
                         else -> done.copy(note = note(e.message ?: "启动失败"))
                     }
                 }
+                if (cleared) onNotice(msg)
+            } catch (e: TimeoutCancellationException) {
+                reconcileCreate(request, existingIds)
+            } catch (e: NotConnectedException) {
+                reconcileCreate(request, existingIds)
+            } catch (e: IOException) {
+                reconcileCreate(request, existingIds)
             } catch (e: Exception) {
-                _state.update { it.copy(submitting = false, untrusted = null, trusting = false, note = note("启动失败：${e.message}")) }
+                if (e is CancellationException) throw e
+                val msg = "启动失败：${e.message}"
+                _state.update { it.copy(submitting = false, untrusted = null, trusting = false, note = note(msg)) }
+                if (cleared) onNotice(msg)
             }
         }
+    }
+
+    /**
+     * When the connection drops or times out while session.create is in flight, wait until the machine is
+     * reachable again, resubscribe its session list, and treat a newly listed matching session as success.
+     */
+    private suspend fun reconcileCreate(request: SessionCreateRequest, existingIds: Set<String>) {
+        combine(relay.stateOf(machineId), fleet.machines) { conn, machines ->
+            conn == ConnectionState.Connected && machines?.firstOrNull { it.id == machineId }?.online != false
+        }.first { it }
+        fleet.refresh(machineId)
+        val sessions = fleet.sessions.value[machineId]?.sessions.orEmpty()
+        val match = sessions.firstOrNull { cand ->
+            cand.id !in existingIds &&
+                (request.name == null || cand.name == request.name) &&
+                (request.worktree == null || cand.worktree?.name == request.worktree) &&
+                (cand.dir == request.cwd || cand.cwd == request.cwd)
+        }
+        if (match != null) {
+            _state.update { it.copy(submitting = false, untrusted = null, trusting = false) }
+            if (cleared) onNotice("已新建会话") else _created.send(match.id)
+        } else {
+            val msg = "连接已断开，没有找到新建的会话，请重试"
+            _state.update { it.copy(submitting = false, untrusted = null, trusting = false, note = note(msg)) }
+            if (cleared) onNotice(msg)
+        }
+    }
+
+    override fun onCleared() {
+        cleared = true
     }
 
     private companion object {

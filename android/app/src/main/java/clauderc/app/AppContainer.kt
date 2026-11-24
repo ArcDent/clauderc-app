@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Build
 import androidx.datastore.preferences.preferencesDataStore
 import clauderc.app.chat.ChatCache
+import clauderc.app.chat.GallerySaver
+import clauderc.app.chat.ImageSaver
 import clauderc.app.data.CredentialStore
 import clauderc.app.data.DraftStore
 import clauderc.app.data.Fleet
@@ -15,6 +17,7 @@ import clauderc.app.net.RelayConnection
 import clauderc.app.net.RelayHub
 import clauderc.app.pair.OkHttpPairingApi
 import clauderc.app.pair.PairingApi
+import clauderc.app.protocol.Machine
 import clauderc.app.ui.components.LoadingFirsts
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -52,6 +55,30 @@ class Selection {
         setGitDir(machineId, dir)
         tab.value = MainTab.Git
     }
+
+    /**
+     * The machine shown by the 会话 and git tabs: the fixed choice if it still exists in [machines],
+     * otherwise the first online machine.
+     */
+    fun effectiveMachine(machines: List<Machine>?): String? {
+        val current = machineId.value
+        if (current != null && (machines == null || machines.any { it.id == current })) return current
+        return machines?.firstOrNull { it.online }?.id
+    }
+
+    /**
+     * Fixes the automatically picked default machine once a machine-scoped tab is open, so that machine
+     * going offline does not switch the tab to another one; drops a choice whose machine was unpaired.
+     */
+    fun syncMachines(machines: List<Machine>?, onMachineTab: Boolean) {
+        val current = machineId.value
+        if (current != null && machines != null && machines.none { it.id == current }) {
+            machineId.value = null
+        }
+        if (machineId.value == null && onMachineTab) {
+            machines?.firstOrNull { it.online }?.id?.let { machineId.value = it }
+        }
+    }
 }
 
 /** Hand-wired dependencies for the whole app. */
@@ -76,6 +103,9 @@ class AppContainer(context: Context) {
     val fleet = Fleet(connection, scope)
     val selection = Selection()
     val chatCache = ChatCache()
+
+    /** Where the picture viewer saves pictures: the phone's gallery. */
+    val gallery: ImageSaver = GallerySaver(context.contentResolver)
 
     /** The places that showed their first load since this launch, for 「总是播放加载动画」. */
     val loadingFirsts = LoadingFirsts()

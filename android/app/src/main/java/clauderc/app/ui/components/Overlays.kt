@@ -62,6 +62,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.compositeOver
@@ -260,7 +261,7 @@ fun ClaudercDialog(
     val sp = Clauderc.spacing
     val ui = Clauderc.style
     val surface = when (ui) {
-        UiStyle.Sticker -> Modifier.sticker(c.sheet, c.ink, 32.dp, drop = 6.dp)
+        UiStyle.Sticker -> Modifier.sticker(c.sheet, c.ink, 32.dp)
         UiStyle.Grid -> Modifier.clip(RoundedCornerShape(6.dp)).background(c.sheet)
         UiStyle.Clear -> Modifier.clip(RoundedCornerShape(Clauderc.radii.lg)).background(c.pane.compositeOver(c.sheet)).topHighlight(c.rim)
     }
@@ -317,7 +318,7 @@ fun PopMenu(
                 if (it == EnterExitState.Visible) 1f else 0.86f
             }
             val surface = when (ui) {
-                UiStyle.Sticker -> Modifier.padding(bottom = 5.dp).sticker(c.sheet, c.ink, 18.dp, drop = 5.dp).padding(vertical = 6.dp)
+                UiStyle.Sticker -> Modifier.sticker(c.sheet, c.ink, 18.dp).padding(vertical = 6.dp)
                 UiStyle.Grid -> Modifier.background(c.bg).border(2.dp, c.fg)
                 UiStyle.Clear -> Modifier.shadow(18.dp, RoundedCornerShape(22.dp)).clip(RoundedCornerShape(22.dp)).background(c.pane.compositeOver(c.sheet)).topHighlight(c.rim).padding(vertical = 6.dp)
             }
@@ -396,11 +397,15 @@ class SnackState {
     internal val key get() = serial
 }
 
-/** .snackbar: inverse colors, 4dp corners (贴纸: an 18dp ink-outlined sticker), auto-dismissed after four seconds. */
+/**
+ * .snackbar: inverse colors, 4dp corners (贴纸: an 18dp ink-outlined sticker), auto-dismissed after four seconds.
+ * [onCamera] over the picture viewer's black: light grey with black text whatever the theme (#snack.on-camera).
+ */
 @Composable
-fun SnackHost(state: SnackState, modifier: Modifier = Modifier, bottom: Dp = Clauderc.spacing.sp3) {
+fun SnackHost(state: SnackState, modifier: Modifier = Modifier, bottom: Dp = Clauderc.spacing.sp3, onCamera: Boolean = false) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
+    val bg = if (onCamera) OnCameraSnack else c.inverse
     LaunchedEffect(state.key) {
         if (state.message != null) {
             delay(4000)
@@ -418,15 +423,18 @@ fun SnackHost(state: SnackState, modifier: Modifier = Modifier, bottom: Dp = Cla
                 .heightIn(min = 48.dp)
                 .then(
                     if (Clauderc.style == UiStyle.Sticker) {
-                        Modifier.sticker(c.inverse, c.ink, 18.dp)
+                        Modifier.sticker(bg, c.ink, 18.dp)
                     } else {
-                        Modifier.clip(RoundedCornerShape(4.dp)).background(c.inverse)
+                        Modifier.clip(RoundedCornerShape(4.dp)).background(bg)
                     },
                 )
                 .padding(horizontal = sp.sp4, vertical = sp.sp3),
             contentAlignment = Alignment.CenterStart,
         ) {
-            Text(shown, color = c.onInverse, fontSize = Clauderc.fontSizes.label, lineHeight = 1.45.em)
+            Text(shown, color = if (onCamera) OnCameraSnackText else c.onInverse, fontSize = Clauderc.fontSizes.label, lineHeight = 1.45.em)
         }
     }
 }
+
+private val OnCameraSnack = Color(0xFFE6E6E6)
+private val OnCameraSnackText = Color(0xFF111111)

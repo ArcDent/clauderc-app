@@ -34,6 +34,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.stickerPushed
+import androidx.compose.foundation.interaction.InteractionSource
 import clauderc.app.ui.theme.LocalLoopClock
 import clauderc.app.ui.theme.Motion
 
@@ -211,23 +213,29 @@ private fun CliSpinner(modifier: Modifier, color: Color) {
 
 /**
  * The icon that leads a row such as a machine's. 贴纸: a round sticker in the [index]th sticker
- * colour, outlined in ink on a hard shadow and stuck on a little askew, every other one leaning the
- * other way; an [off] one turns grey and faint. 格栅: the bare icon at 20dp. 清玻: the bare icon.
+ * colour, outlined in ink and stuck on a little askew, every other one leaning the other way; an
+ * [off] one turns grey and faint. While the row's [press] holds it turns further, to -18° or 17°, and
+ * shrinks to 90%. 格栅: the bare icon at 20dp. 清玻: the bare icon.
  */
 @Composable
-fun RowIcon(icon: ImageVector, index: Int, off: Boolean, tint: Color, modifier: Modifier = Modifier) {
+fun RowIcon(icon: ImageVector, index: Int, off: Boolean, tint: Color, modifier: Modifier = Modifier, press: InteractionSource? = null) {
     val c = Clauderc.colors
     when (Clauderc.style) {
         UiStyle.Sticker -> {
             val fill = if (off) c.surface2.compositeOver(c.card) else c.hue(index)
+            val pushed = press?.let { stickerPushed(it) }
+            val (rest, held) = if (index % 2 == 1) 6f to 17f else -7f to -18f
             Box(
                 modifier
                     .size(44.dp)
                     .graphicsLayer {
-                        rotationZ = if (index % 2 == 1) 6f else -7f
+                        val p = pushed?.value ?: 0f
+                        rotationZ = rest + (held - rest) * p
+                        scaleX = 1f - 0.1f * p
+                        scaleY = scaleX
                         alpha = if (off) 0.55f else 1f
                     }
-                    .sticker(fill, c.ink, 22.dp, drop = 2.dp),
+                    .sticker(fill, c.ink, 22.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(icon.styled, contentDescription = null, tint = StickerOnYellow, modifier = Modifier.size(24.dp))

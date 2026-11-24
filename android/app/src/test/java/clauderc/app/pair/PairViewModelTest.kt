@@ -6,6 +6,7 @@ import clauderc.app.protocol.PairRequest
 import clauderc.app.protocol.PairResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -70,6 +71,13 @@ class PairViewModelTest {
         assertEquals(PairUiState.Used, vm.state.value)
     }
 
+    @Test fun codeAlreadyRedeemed() = runTest {
+        val vm = viewModel(PairResult.Refused(ErrorBody("pairCodeUsed", "这个二维码已经配对过，请在目标机上重新生成")))
+        vm.onScanned(qr)
+        assertEquals(PairUiState.Redeemed, vm.state.value)
+        assertNull(saved)
+    }
+
     @Test fun plaintextAddressIsRefusedWithoutCallingTheRelay() = runTest {
         val vm = viewModel(PairResult.Paired(PairResponse("d", "t")))
         vm.onScanned("clauderc://pair?relay=ws://relay.example.com&code=abc")
@@ -92,5 +100,49 @@ class PairViewModelTest {
         assertEquals(PairLink("wss://relay.example.com", "9f2c"), PairLink.parse("clauderc://pair?relay=wss://relay.example.com&code=9f2c"))
         assertEquals(PairLink("wss://r.example.com/a?b", "c1"), PairLink.parse("clauderc://pair?relay=wss%3A%2F%2Fr.example.com%2Fa%3Fb&code=c1"))
         assertNull(PairLink.parse("clauderc://pair?code=1"))
+    }
+
+    @Test fun pairingGoingOnStillStoresTheCredentialAndListsMachinesAfterLeaving() = runTest {
+        val gate = kotlinx.coroutines.CompletableDeferred<PairResult>()
+        val dispatcher = UnconfinedTestDispatcher()
+        val appScope = kotlinx.coroutines.CoroutineScope(dispatcher + kotlinx.coroutines.Job())
+        val line = clauderc.app.testing.FakeRelay().apply {
+            respond(
+                clauderc.app.protocol.Method.MACHINES_LIST,
+                clauderc.app.protocol.MachinesListResponse.serializer(),
+                clauderc.app.protocol.MachinesListResponse(listOf(clauderc.app.testing.machine("m-1", "工作室 Mac mini"))),
+            )
+            respond(
+                clauderc.app.protocol.Method.SESSIONS_SUBSCRIBE,
+                clauderc.app.protocol.SessionList.serializer(),
+                clauderc.app.testing.sampleSessions,
+            )
+        }
+        val hub = clauderc.app.net.RelayHub(appScope) { line }
+        val fleet = clauderc.app.data.Fleet(hub, appScope)
+        val store = androidx.lifecycle.ViewModelStore()
+        try {
+            val vm = androidx.lifecycle.ViewModelProvider(store, object : androidx.lifecycle.ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = PairViewModel(
+                    api = { _, _ -> gate.await() },
+                    deviceName = "Pixel 9",
+                    onPaired = {
+                        saved = it
+                        hub.setCredentials(listOf(it))
+                    },
+                    appScope = appScope,
+                ) as T
+            })[PairViewModel::class.java]
+            vm.onScanned(qr)
+            assertEquals(PairUiState.Pairing, vm.state.value)
+            // The user goes back before the relay answers.
+            store.clear()
+            gate.complete(PairResult.Paired(PairResponse("d-9", "tok-9")))
+            assertEquals(Credential("wss://relay.example.com", "d-9", "tok-9"), saved)
+            assertEquals(listOf("m-1"), fleet.machines.value!!.map { it.id })
+        } finally {
+            appScope.cancel()
+        }
     }
 }

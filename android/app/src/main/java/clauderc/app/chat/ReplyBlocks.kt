@@ -31,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.movableContentOf
@@ -52,6 +53,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.AlignmentLine
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.Layout
@@ -84,6 +86,7 @@ import androidx.compose.ui.unit.sp
 import clauderc.app.data.UiStyle
 import clauderc.app.ui.components.LocalSnack
 import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.ClaudercMotion
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.Symbols
@@ -269,7 +272,8 @@ private fun Modifier.bleed(by: Dp) = layout { measurable, constraints ->
 /**
  * A code block (.cb): a 30dp head with the language, then the code in mono, unwrapped, scrolling
  * sideways inside the box. 清玻 a 14dp box of the page's colour 6dp past the text on each side,
- * 格栅 a square box of surface inside the text, 贴纸 清玻's box ringed in ink. Tabs are 4 wide.
+ * 格栅 a square box of surface inside the text in a 1dp text-coloured line, so the grey tells from a
+ * white page, 贴纸 清玻's box ringed in ink. Tabs are 4 wide.
  */
 @Composable
 private fun CodeBox(b: MdBlock.Code, shown: Int, modifier: Modifier) {
@@ -277,10 +281,10 @@ private fun CodeBox(b: MdBlock.Code, shown: Int, modifier: Modifier) {
     val shape = if (Clauderc.style == UiStyle.Grid) RectangleShape else RoundedCornerShape(14.dp)
     val box = when (Clauderc.style) {
         UiStyle.Clear -> Modifier.bleed(6.dp).clip(shape).background(c.bg)
-        UiStyle.Grid -> Modifier.clip(shape).background(c.surface)
+        UiStyle.Grid -> Modifier.clip(shape).background(c.surface).border(1.dp, c.fg, shape)
         UiStyle.Sticker -> Modifier.bleed(6.dp).clip(shape).background(c.bg).border(2.dp, c.ink, shape)
     }
-    Column(modifier.fillMaxWidth().then(box)) {
+    Column(modifier.fillMaxWidth().then(box).testTag("codeBlock")) {
         DisableSelection {
             Row(Modifier.fillMaxWidth().height(30.dp).padding(start = 12.dp, end = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(b.lang, Modifier.weight(1f), color = c.fg3, fontSize = 11.sp, fontFamily = MonoFamily, softWrap = false)
@@ -310,41 +314,23 @@ private fun CopyCodeButton(code: String) {
     val clipboard = LocalClipboard.current
     val press = remember { MutableInteractionSource() }
     val shape = if (Clauderc.style == UiStyle.Grid) RectangleShape else CircleShape
-    val copyAlpha = remember { Animatable(1f) }
-    val copyScale = remember { Animatable(1f) }
-    val tickAlpha = remember { Animatable(0f) }
-    val tickScale = remember { Animatable(0.7f) }
-    val drawn = remember { Animatable(0f) }
+    val swap = remember { TickSwap() }
     var done by remember { mutableStateOf(false) }
     var taps by remember { mutableIntStateOf(0) }
     LaunchedEffect(taps) {
         if (taps == 0) return@LaunchedEffect
         clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("代码", code)))
-        copyAlpha.snapTo(1f)
-        copyScale.snapTo(1f)
-        tickAlpha.snapTo(0f)
-        tickScale.snapTo(0.7f)
-        drawn.snapTo(0f)
+        swap.reset()
         done = true
-        val away = tween<Float>(m.durS, easing = m.easeEmphIn)
-        val late = (m.durS * 0.6f).toInt()
         coroutineScope {
-            launch { copyAlpha.animateTo(0f, away) }
-            launch { copyScale.animateTo(0.4f, away) }
-            launch { drawn.animateTo(1f, tween(m.durM, late, m.easeEmph)) }
-            launch { tickAlpha.animateTo(1f, tween(m.durM, late, m.easeSpring)) }
-            launch { tickScale.animateTo(1f, tween(m.durM, late, m.easeSpring)) }
+            launch { swap.iconOut(m) }
+            launch { swap.tickIn(m, (m.durS * 0.6f).toInt()) }
             delay(1_500)
             done = false
-            val back = tween<Float>(m.durM, (m.durS * 0.5f).toInt(), m.easeEmph)
-            launch { tickAlpha.animateTo(0f, away) }
-            launch { tickScale.animateTo(0.6f, away) }
-            launch { copyAlpha.animateTo(1f, back) }
-            launch { copyScale.animateTo(1f, back) }
+            swap.back(m)
         }
     }
     val tint = if (done) c.fg else c.fg2
-    val tick = if (Clauderc.style == UiStyle.Sticker) 2.4f else 1.9f
     Box(
         Modifier
             .pressShrink(press)
@@ -354,19 +340,78 @@ private fun CopyCodeButton(code: String) {
             .semantics { contentDescription = "复制代码" },
         contentAlignment = Alignment.Center,
     ) {
+        swap.Icons(Symbols.ContentCopy.styled, tint, iconSize = 17.dp, tickSize = 18.dp)
+    }
+}
+
+/**
+ * An icon that gives way to a tick, which draws itself left to right and springs to size, and comes back: the
+ * code block's copy button and the picture viewer's save button (.v-save). [iconShown] and [ticked] are how it starts.
+ */
+@Stable
+internal class TickSwap(iconShown: Boolean = true, ticked: Boolean = false) {
+    private val iconAlpha = Animatable(if (iconShown) 1f else 0f)
+    private val iconScale = Animatable(if (iconShown) 1f else 0.4f)
+    private val tickAlpha = Animatable(if (ticked) 1f else 0f)
+    private val tickScale = Animatable(if (ticked) 1f else 0.7f)
+    private val drawn = Animatable(if (ticked) 1f else 0f)
+
+    /** Back to the icon at once. */
+    suspend fun reset() {
+        iconAlpha.snapTo(1f)
+        iconScale.snapTo(1f)
+        tickAlpha.snapTo(0f)
+        tickScale.snapTo(0.7f)
+        drawn.snapTo(0f)
+    }
+
+    /** The icon shrinks and fades away (durS, leaving curve). */
+    suspend fun iconOut(m: ClaudercMotion) {
+        val away = tween<Float>(m.durS, easing = m.easeEmphIn)
+        coroutineScope {
+            launch { iconAlpha.animateTo(0f, away) }
+            launch { iconScale.animateTo(0.4f, away) }
+        }
+    }
+
+    /** The tick draws itself and springs to size (durM), [delay] ms in. */
+    suspend fun tickIn(m: ClaudercMotion, delay: Int) {
+        coroutineScope {
+            launch { drawn.animateTo(1f, tween(m.durM, delay, m.easeEmph)) }
+            launch { tickAlpha.animateTo(1f, tween(m.durM, delay, m.easeSpring)) }
+            launch { tickScale.animateTo(1f, tween(m.durM, delay, m.easeSpring)) }
+        }
+    }
+
+    /** The tick shrinks away while the icon grows back, from [iconFrom] of its size when that is given. */
+    suspend fun back(m: ClaudercMotion, iconFrom: Float? = null) {
+        iconFrom?.let { iconScale.snapTo(it) }
+        val away = tween<Float>(m.durS, easing = m.easeEmphIn)
+        val back = tween<Float>(m.durM, (m.durS * 0.5f).toInt(), m.easeEmph)
+        coroutineScope {
+            launch { tickAlpha.animateTo(0f, away) }
+            launch { tickScale.animateTo(0.6f, away) }
+            launch { iconAlpha.animateTo(1f, back) }
+            launch { iconScale.animateTo(1f, back) }
+        }
+    }
+
+    /** [icon] and over it the tick (.cb-i2, .v-ok): one stroke on a 24-unit grid, drawn as far as it has got. */
+    @Composable
+    fun Icons(icon: ImageVector, tint: Color, iconSize: Dp, tickSize: Dp) {
+        val stroke = if (Clauderc.style == UiStyle.Sticker) 2.4f else 1.9f
         Icon(
-            Symbols.ContentCopy.styled,
+            icon,
             contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(17.dp).graphicsLayer {
-                alpha = copyAlpha.value
-                scaleX = copyScale.value
-                scaleY = copyScale.value
+            modifier = Modifier.size(iconSize).graphicsLayer {
+                alpha = iconAlpha.value
+                scaleX = iconScale.value
+                scaleY = iconScale.value
             },
         )
-        // The tick (.cb-i2): one stroke on a 24-unit grid, drawn as far as [drawn] has got.
         Canvas(
-            Modifier.size(18.dp).graphicsLayer {
+            Modifier.size(tickSize).graphicsLayer {
                 alpha = tickAlpha.value.coerceIn(0f, 1f)
                 scaleX = tickScale.value
                 scaleY = tickScale.value
@@ -378,7 +423,7 @@ private fun CopyCodeButton(code: String) {
                 getSegment(0f, length * drawn.value, part, true)
             }
             scale(size.width / 24f, pivot = Offset.Zero) {
-                drawPath(part, tint, style = Stroke(width = tick, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                drawPath(part, tint, style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
         }
     }

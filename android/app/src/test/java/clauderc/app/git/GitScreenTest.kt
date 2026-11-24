@@ -101,7 +101,7 @@ class GitScreenTest {
 
     @Test fun busyAndUpstreamConfirmations() {
         var confirmed = 0
-        show(base.copy(tab = GitTab.Status, confirm = GitConfirm.Busy(GitOp.Commit("x"), "clauderc 协议")), GitActions(onConfirm = { confirmed++ }))
+        show(base.copy(tab = GitTab.Status, confirm = GitConfirm.Busy("/Users/me/github/clauderc-app", GitOp.Commit("x"), "clauderc 协议")), GitActions(onConfirm = { confirmed++ }))
         compose.onNodeWithText("claude 正在这个目录工作").assertIsDisplayed()
         compose.onNode(hasText("「clauderc 协议」正在改 clauderc-app", substring = true)).assertIsDisplayed()
         compose.onNodeWithText("仍然提交").performClick()
@@ -109,9 +109,28 @@ class GitScreenTest {
     }
 
     @Test fun upstreamConfirmation() {
-        show(base.copy(tab = GitTab.Status, confirm = GitConfirm.Upstream("feat-x")))
+        show(base.copy(tab = GitTab.Status, confirm = GitConfirm.Upstream("/Users/me/github/clauderc-app", "feat-x")))
         compose.onNodeWithText("feat-x 还没有上游").assertIsDisplayed()
         compose.onNode(hasText("origin/feat-x", substring = true)).assertIsDisplayed()
+    }
+
+    @Test fun fileStageActionsAreDisabledWhileAWriteIsRunning() {
+        show(base.copy(tab = GitTab.Status, running = true))
+        compose.onNodeWithText("取消暂存").assertIsNotEnabled()
+        for (node in compose.onAllNodesWithText("暂存").fetchSemanticsNodes().indices) {
+            compose.onAllNodesWithText("暂存")[node].assertIsNotEnabled()
+        }
+    }
+
+    @Test fun failedLoadMoreShowsAClickableRetryInsteadOfASpinner() {
+        var retried = 0
+        show(base.copy(moreFailed = true, loadingMore = false), GitActions(onLoadMore = { retried++ }))
+        compose.onNodeWithTag("timeline").performScrollToIndex(30)
+        compose.waitForIdle()
+        assertEquals("scrolling to a failed footer does not loop automatically", 0, retried)
+        compose.onNodeWithText("继续加载更早的提交").assertDoesNotExist()
+        compose.onNodeWithText("加载失败，点此重试").assertIsDisplayed().performClick()
+        assertEquals(1, retried)
     }
 
     @Test fun failureShowsGitsRawOutput() {

@@ -48,7 +48,7 @@ data class ClaudercColors(
     val glassShadow: Color,
     val isDark: Boolean,
     // The --k- variables of the three styles; a style that has no such variable leaves it transparent.
-    /** 贴纸: the ink of outlines and hard shadows (--k-ink). */
+    /** 贴纸: the ink of outlines (--k-ink). */
     val ink: Color = Color.Transparent,
     /** 贴纸: the sticker colours after the accent, one per row of icons (--k-p2 .. --k-p5). */
     val hue2: Color = Color.Transparent,
@@ -59,8 +59,12 @@ data class ClaudercColors(
     val panel: Color = Color.Transparent,
     /** 贴纸: the fill of the nav bar and the composer (--k-float). */
     val float: Color = Color.Transparent,
-    /** 贴纸: the dots of the paper, one every 18dp (--k-dot). */
+    /** 贴纸: the dots of the paper, one every [StickerDotGap] (--k-dot). */
     val dot: Color = Color.Transparent,
+    /** 贴纸: how much of the accent glows from the paper's top right corner (--k-glow-1, a share of --c-accent). */
+    val glow1: Float = 0f,
+    /** 贴纸: the glow from the paper's bottom left corner, yellow in light and none in dark (--k-glow-2). */
+    val glow2: Color = Color.Transparent,
     /** 清玻: the tint of the glass bars and sheets over the content (--k-pane). */
     val pane: Color = Color.Transparent,
     /** 清玻: the bright rim along the glass edges (--k-rimc). */
@@ -70,9 +74,6 @@ data class ClaudercColors(
     /** 清玻: the lens that marks the picked tab (--k-lens). */
     val lens: Color = Color.Transparent,
 ) {
-    /** 贴纸: the highlighter under titles, the second sticker colour dimmed in the dark (--k-hl). */
-    val highlight: Color get() = hue2.copy(alpha = if (isDark) 0.36f else 0.8f)
-
     /** 贴纸: the colour of the [index]th icon down a list: the accent, then the four sticker colours. */
     fun hue(index: Int): Color = when (index.mod(5)) {
         0 -> accent
@@ -210,8 +211,12 @@ val GridDarkColors = DarkColors.copy(
     lane3 = hex(0x5E5E5E),
 )
 
+/** 贴纸: the paper's dots sit one every [StickerDotGap], each [StickerDotRadius] round (--k-dot-gap, --k-dot-r). */
+val StickerDotGap = 24.dp
+val StickerDotRadius = 1.dp
+
 /**
- * 贴纸: dotted cream paper, ink outlines with hard offset shadows and round stickers for icons.
+ * 贴纸: dotted cream paper, ink outlines without shadows and round stickers for icons.
  * accent and lane2 are the default blue; the theme swaps in the colour picked in 设置.
  */
 val StickerLightColors = LightColors.copy(
@@ -243,7 +248,9 @@ val StickerLightColors = LightColors.copy(
     hue5 = hex(0xC7B2FF),
     panel = rgba(255, 255, 255, 0.9f),
     float = rgba(255, 255, 255, 0.82f),
-    dot = rgba(30, 27, 46, 0.11f),
+    dot = rgba(30, 27, 46, 0.075f),
+    glow1 = 0.12f,
+    glow2 = rgba(255, 216, 77, 0.16f),
 )
 
 val StickerDarkColors = DarkColors.copy(
@@ -275,7 +282,8 @@ val StickerDarkColors = DarkColors.copy(
     hue5 = hex(0xB9A0FF),
     panel = rgba(53, 48, 72, 0.96f),
     float = rgba(53, 48, 72, 0.9f),
-    dot = rgba(255, 255, 255, 0.07f),
+    dot = rgba(255, 255, 255, 0.05f),
+    glow1 = 0.14f,
 )
 
 /** --fs-* */

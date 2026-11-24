@@ -2,19 +2,24 @@ package clauderc.app.ui
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.data.UiStyle
@@ -29,6 +34,7 @@ import clauderc.app.ui.components.LoadingArtwork
 import clauderc.app.ui.components.LoadingCover
 import clauderc.app.ui.theme.ClaudercTheme
 import clauderc.app.ui.theme.page
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -50,7 +56,10 @@ class LoadingCoverTest {
     private var place by mutableStateOf(LoadingArt.Deal)
     private var visit by mutableStateOf(0)
 
-    /** A red page under the cover, so a corner pixel tells whether the page shows. */
+    /** Taps the button on the page under the cover got. */
+    private var taps = 0
+
+    /** A red page under the cover, so a corner pixel tells whether the page shows, with a button in its middle. */
     private fun show(policy: LoadingPolicy = LoadingPolicy()) {
         compose.mainClock.autoAdvance = false
         compose.setContent {
@@ -58,7 +67,9 @@ class LoadingCoverTest {
                 CompositionLocalProvider(LocalLoadingPolicy provides policy) {
                     key(place, visit) {
                         LoadingCover(loading, place, Modifier.fillMaxSize(), label = "正在读取会话") {
-                            Box(Modifier.fillMaxSize().background(Color.Red))
+                            Box(Modifier.fillMaxSize().background(Color.Red)) {
+                                Text("下面的按钮", Modifier.align(Alignment.Center).clickable { taps++ })
+                            }
                         }
                     }
                 }
@@ -115,6 +126,39 @@ class LoadingCoverTest {
         run(1_000)
         assertFalse("cover gone once loaded", covered())
         assertTrue("page shows once loaded", pageShows())
+    }
+
+    /** Up or fading out, the cover takes every touch: the button under it gets one only once it has gone. */
+    @Test fun theCoverTakesEveryTouchUntilItHasFaded() {
+        show()
+        run(2_000)
+        assertTrue("cover up at 2s", covered())
+        val button = compose.onNodeWithText("下面的按钮")
+        button.performClick()
+        compose.runOnUiThread { loading = false }
+        run(100)
+        button.performClick()
+        assertTrue("the second tap lands while the cover fades out", covered())
+        assertEquals("the button under the cover got no tap", 0, taps)
+        run(1_000)
+        assertFalse("cover gone once loaded", covered())
+        button.performClick()
+        assertEquals("once the cover has gone the button takes the tap", 1, taps)
+    }
+
+    /** The page is hidden as the load starts, before the cover comes up: the button under it gets no tap then either. */
+    @Test fun theHiddenPageTakesNoTouchBeforeTheCoverComesUp() {
+        show()
+        run(100)
+        assertFalse("no cover yet", covered())
+        compose.onNodeWithText("下面的按钮").performClick()
+        assertFalse("the tap lands before the cover", covered())
+        assertEquals("the hidden button got no tap", 0, taps)
+        // Done before the cover came up, the page shows at once and takes taps again.
+        compose.runOnUiThread { loading = false }
+        run(16)
+        compose.onNodeWithText("下面的按钮").performClick()
+        assertEquals("the shown button takes the tap", 1, taps)
     }
 
     /**
@@ -176,5 +220,44 @@ class LoadingCoverTest {
             run(950)
             assertFalse("$a in $s moves between 250ms and 1200ms", early.sameAs(frame()))
         }
+    }
+
+    @Test fun loadingAgainWhileFadingOutReturnsFromCurrentAlphaWithoutDisappearing() {
+        compose.mainClock.autoAdvance = false
+        loading = true
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                // Solid red behind a splash cover whose white page paints at cover.value alpha, so green == alpha.
+                Box(Modifier.fillMaxSize().background(Color.Red)) {
+                    LoadingCover(loading, LoadingArt.Deal, Modifier.fillMaxSize(), splash = true) {
+                        Box(Modifier.fillMaxSize())
+                    }
+                }
+            }
+        }
+        fun coverAlpha(): Float = android.graphics.Color.green(compose.onRoot().captureToImage().asAndroidBitmap().getPixel(4, 4)) / 255f
+        run(2_000)
+        assertTrue("cover is up and opaque", covered() && coverAlpha() > 0.95f)
+
+        // Start fading out and pause partway through.
+        compose.runOnUiThread { loading = false }
+        run(260)
+        val mid = coverAlpha()
+        assertTrue("still fading out partway: alpha=$mid", covered() && mid in 0.1f..0.92f)
+
+        // Enter loading again mid-fade: cover stays mounted and alpha rises from [mid] back to 1 without disappearing.
+        compose.runOnUiThread { loading = true }
+        run(0)
+        var prev = mid
+        var minSeen = mid
+        repeat(20) {
+            run(16)
+            assertTrue("cover never disappears while returning to opaque", covered())
+            val cur = coverAlpha()
+            minSeen = minOf(minSeen, cur)
+            prev = cur
+        }
+        assertTrue("alpha did not drop below its mid-fade level ($minSeen vs $mid)", minSeen >= mid - 0.05f)
+        assertTrue("alpha returned to opaque ($prev)", prev > 0.95f)
     }
 }

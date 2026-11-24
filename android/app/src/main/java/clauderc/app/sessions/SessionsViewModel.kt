@@ -27,6 +27,7 @@ import clauderc.app.protocol.UsageResponse
 import clauderc.app.ui.baseName
 import clauderc.app.ui.profileTitle
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -210,10 +211,16 @@ data class SessionsUiState(
     val switchAsk: BranchSwitch? = null,
     /** Session id to the text typed into its composer and not sent yet. */
     val drafts: Map<String, String> = emptyMap(),
+    /** Session ids whose session.stop is still in flight; they offer no 「移出」 meanwhile. */
+    val stopping: Set<String> = emptySet(),
+    /** Session ids whose session.remove is still in flight or waiting for the list to drop them. */
+    val removing: Set<String> = emptySet(),
+    /** Increments whenever a session.remove fails, so a row folded away in the UI opens back up. */
+    val removeFailed: Int = 0,
 )
 
-/** A switch of [dir] to [branch]; [sessionName] is a session working there, named in the question. */
-data class BranchSwitch(val dir: String, val title: String, val branch: String, val sessionName: String?)
+/** A switch of [dir] to [branch]; [sessionName] is a session working there, named in the question; [unsure] when dir.busy failed. */
+data class BranchSwitch(val dir: String, val title: String, val branch: String, val sessionName: String?, val unsure: Boolean = false)
 
 /** What the user set on this phone for the machine's groups. */
 private data class GroupSettings(
@@ -239,6 +246,9 @@ class SessionsViewModel(
     /** Stops and removals already shown while the agent is still on them; null means removed. */
     private val pendingActs = MutableStateFlow<Map<String, SessionState?>>(emptyMap())
 
+    /** Counts refused removals so the UI restores a row that folded away before session.remove failed. */
+    private val removeFailed = MutableStateFlow(0)
+
     private val usage = MutableStateFlow<UsageResponse?>(null)
 
     private val groupSettings = combine(
@@ -249,7 +259,8 @@ class SessionsViewModel(
         drafts?.drafts(machineId) ?: flowOf(emptyMap()),
         ::GroupSettings,
     )
-    private val activity = combine(refreshing, pendingActs, usage, ::Triple)
+    private data class ActivityState(val refreshing: Boolean, val acts: Map<String, SessionState?>, val usage: UsageResponse?, val removeFailed: Int)
+    private val activity = combine(refreshing, pendingActs, usage, removeFailed, ::ActivityState)
 
     /** Profile id to directory to the branch its rows are narrowed to; only in memory, so a restart shows every branch. */
     private val branchFilters = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
@@ -260,11 +271,11 @@ class SessionsViewModel(
     private val switchAsk = MutableStateFlow<BranchSwitch?>(null)
     private val git = combine(branchFilters, branches, switchAsk, ::Triple)
 
-    val state: StateFlow<SessionsUiState> = combine(fleet.machines, fleet.sessions, groupSettings, activity, git) { machines, sessions, settings, (busy, acts, plan), (filters, known, ask) ->
+    val state: StateFlow<SessionsUiState> = combine(fleet.machines, fleet.sessions, groupSettings, activity, git) { machines, sessions, settings, act, (filters, known, ask) ->
         SessionsUiState(
             machine = machines?.firstOrNull { it.id == machineId },
             groups = sessions[machineId]?.let { list ->
-                groupSessions(list.withActs(acts), settings.names).map {
+                groupSessions(list.withActs(act.acts), settings.names).map {
                     it.copy(
                         collapsed = it.profile.id in settings.folded,
                         foldedDirs = settings.foldedDirs[it.profile.id].orEmpty(),
@@ -274,15 +285,24 @@ class SessionsViewModel(
                     )
                 }
             },
-            refreshing = busy,
-            usage = plan,
+            refreshing = act.refreshing,
+            usage = act.usage,
             switchAsk = ask,
             drafts = settings.drafts,
+            stopping = act.acts.filterValues { it == SessionState.Stopped }.keys,
+            removing = act.acts.filterValues { it == null }.keys,
+            removeFailed = act.removeFailed,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SessionsUiState())
 
     /** Directories whose branches have been asked for since the page opened or was last refreshed. */
     private val asked = mutableSetOf<String>()
+
+    /** Per-directory generation counter so an older git.branches answer never overwrites a newer one. */
+    private val branchGen = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>()
+
+    /** True while a branch switch (dir.busy through git.switch) is in flight; ignores a second tap. */
+    private val switching = MutableStateFlow(false)
 
     init {
         loadUsage()
@@ -299,14 +319,17 @@ class SessionsViewModel(
 
     /** Reads [dir]'s branches. A failed read leaves an empty answer, so the sheet stops waiting and the title falls back on the sessions. */
     private fun loadBranches(dir: String) {
+        val gen = branchGen.computeIfAbsent(dir) { java.util.concurrent.atomic.AtomicLong() }.incrementAndGet()
         viewModelScope.launch {
             val b = try {
                 relay.call(Method.GIT_BRANCHES, machineId, DirRequest(dir), DirRequest.serializer(), GitBranchesResponse.serializer())
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
+                if (branchGen[dir]?.get() != gen) return@launch
                 branches.value[dir] ?: GitBranchesResponse()
             }
+            if (branchGen[dir]?.get() != gen) return@launch
             branches.update { it + (dir to b) }
         }
     }
@@ -322,24 +345,41 @@ class SessionsViewModel(
         }
     }
 
-    /** Switches the directory to [branch] with git.switch, asking first when a session is working there, as the git page does. */
+    /** Switches the directory to [branch] with git.switch, asking first when a session is working there or dir.busy fails, as the git page does. */
     fun switchBranch(dir: DirGroup, branch: String) {
+        if (!switching.compareAndSet(false, true)) return
         viewModelScope.launch {
-            val busy = runCatching {
+            // Null when the check failed, the phone's own request timeout included.
+            val busy = try {
                 relay.call(Method.DIR_BUSY, machineId, DirRequest(dir.cwd), DirRequest.serializer(), DirBusyResponse.serializer()).busy
-            }.getOrDefault(false)
-            if (busy) {
+            } catch (e: CancellationException) {
+                if (e is TimeoutCancellationException) {
+                    null
+                } else {
+                    switching.value = false
+                    throw e
+                }
+            } catch (_: Exception) {
+                null
+            }
+            if (busy == false) {
+                runSwitch(dir.cwd, branch)
+            } else {
+                switching.value = false
                 // The agent counts only the sessions in the checkout itself; one in a worktree is not in the way.
                 val name = dir.sessions.firstOrNull { it.state == SessionState.Working && it.worktree == null }?.let(::display)
-                switchAsk.value = BranchSwitch(dir.cwd, dir.title, branch, name)
-            } else {
-                runSwitch(dir.cwd, branch)
+                switchAsk.value = BranchSwitch(dir.cwd, dir.title, branch, name, unsure = busy == null)
             }
         }
     }
 
     fun confirmSwitch() {
-        val ask = switchAsk.value ?: return
+        if (!switching.compareAndSet(false, true)) return
+        val ask = switchAsk.value
+        if (ask == null) {
+            switching.value = false
+            return
+        }
         switchAsk.value = null
         runSwitch(ask.dir, ask.branch)
     }
@@ -360,6 +400,8 @@ class SessionsViewModel(
                 throw e
             } catch (e: Exception) {
                 _messages.send("切换分支失败：${e.message}")
+            } finally {
+                switching.value = false
             }
             loadBranches(dir)
         }
@@ -440,6 +482,7 @@ class SessionsViewModel(
                 }
             }
             pendingActs.update { it - session.id }
+            if (!ok && shown == null) removeFailed.update { it + 1 }
         }
     }
 }

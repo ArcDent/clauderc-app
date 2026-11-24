@@ -8,16 +8,20 @@ import clauderc.app.net.Relay
 import clauderc.app.net.RemoteException
 import clauderc.app.net.call
 import clauderc.app.protocol.Empty
+import clauderc.app.protocol.ErrorCode
 import clauderc.app.protocol.Method
 import clauderc.app.protocol.ProtocolJson
 import clauderc.app.protocol.Session
 import clauderc.app.protocol.SessionIdRequest
 import clauderc.app.protocol.SessionState
+import clauderc.app.protocol.TermCloseRequest
 import clauderc.app.protocol.TermKeyRequest
 import clauderc.app.protocol.TermScreen
 import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,6 +61,8 @@ class TermViewModel(
     /** Outlives the view model so term.close still goes out when the page closes. */
     private val appScope: CoroutineScope,
     private val background: CoroutineContext = Dispatchers.Default,
+    /** Shown once on the terminal page's snackbar, e.g. why a rewind fell back here. */
+    initialNotice: String? = null,
 ) : ViewModel() {
     private val _state = MutableStateFlow(TermUiState())
     val state: StateFlow<TermUiState> = _state.asStateFlow()
@@ -64,18 +70,46 @@ class TermViewModel(
     private val _messages = Channel<String>(Channel.BUFFERED)
     val messages: Flow<String> = _messages.receiveAsFlow()
 
+    /** Key taps sent strictly in order, each waiting for the previous term.key to answer. */
+    private val keys = Channel<String>(Channel.UNLIMITED)
+
     private var opened = false
     private var opening = false
+    private var lastConnId: String? = null
+    private var lastRev = 0L
+    @Volatile private var subId: String? = null
 
     init {
+        if (!initialNotice.isNullOrEmpty()) _messages.trySend(initialNotice)
+        viewModelScope.launch {
+            for (key in keys) {
+                if (_state.value.ended || !_state.value.online) continue
+                try {
+                    relay.call(Method.TERM_KEY, machineId, TermKeyRequest(sessionId, key), TermKeyRequest.serializer(), Empty.serializer())
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _messages.send((e as? RemoteException)?.message ?: "按键没有发出")
+                }
+            }
+        }
         viewModelScope.launch {
             combine(relay.stateOf(machineId), fleet.machines, fleet.sessions) { conn, machines, sessions ->
                 val machine = machines?.firstOrNull { it.id == machineId }
-                Triple(conn == ConnectionState.Connected && machine?.online != false, sessions[machineId]?.sessions?.firstOrNull { it.id == sessionId }, conn)
-            }.collect { (online, session, _) ->
-                val reopen = online && !_state.value.online
+                Triple(conn == ConnectionState.Connected && machine?.online != false, sessions[machineId]?.sessions?.firstOrNull { it.id == sessionId }, machine?.connId)
+            }.collect { (online, session, rawConnId) ->
+                val connId = rawConnId?.takeIf { it.isNotEmpty() }
+                val connChanged = online && connId != null && lastConnId != null && connId != lastConnId
+                if (online && connId != null) lastConnId = connId
+                val reopen = (online && !_state.value.online) || connChanged
                 _state.update { it.copy(session = session ?: it.session, online = online) }
-                if (reopen || (online && !opened && !opening)) open()
+                if (reopen) {
+                    lastRev = 0L
+                    subId = null
+                    open()
+                } else if (online && !opened && !opening) {
+                    open()
+                }
             }
         }
         viewModelScope.launch {
@@ -83,7 +117,13 @@ class TermViewModel(
                 .filter { it.machine == machineId && it.method == Method.TERM_SCREEN && it.body != null }
                 .map { e -> runCatching { ProtocolJson.decodeFromJsonElement(TermScreen.serializer(), e.body!!) }.getOrNull()?.takeIf { it.sessionId == sessionId } }
                 .flowOn(background)
-                .collect { s -> if (s != null) _state.update { it.copy(screen = s, loading = false) } }
+                .collect { s ->
+                    if (s == null) return@collect
+                    val rev = s.rev ?: 0L
+                    if (rev > 0L && rev < lastRev) return@collect
+                    if (rev > 0L) lastRev = rev
+                    _state.update { it.copy(screen = s, loading = false) }
+                }
         }
     }
 
@@ -94,33 +134,40 @@ class TermViewModel(
                 val screen = withContext(background) {
                     relay.call(Method.TERM_OPEN, machineId, SessionIdRequest(sessionId), SessionIdRequest.serializer(), TermScreen.serializer())
                 }
-                _state.update { it.copy(screen = screen, loading = false, error = null) }
+                if (!screen.subId.isNullOrEmpty()) subId = screen.subId
+                val rev = screen.rev ?: 0L
+                val fresh = rev == 0L || rev >= lastRev
+                if (rev > 0L && fresh) lastRev = rev
+                opened = true
+                _state.update { it.copy(screen = if (fresh || it.screen == null) screen else it.screen, loading = false, error = null) }
             } catch (e: RemoteException) {
-                _state.update { it.copy(loading = false, error = e.message ?: "打不开终端") }
+                val transient = e.code == ErrorCode.MACHINE_OFFLINE || e.code == ErrorCode.MACHINE_BUSY || e.code == ErrorCode.TIMEOUT
+                if (!transient) {
+                    opened = true
+                    _state.update { it.copy(loading = false, error = e.message ?: "打不开终端") }
+                } else {
+                    _state.update { it.copy(loading = false) }
+                }
             } catch (e: Exception) {
+                if (e is CancellationException && e !is TimeoutCancellationException) throw e
+                // Network-like failures leave [opened] false so reconnecting opens again.
                 _state.update { it.copy(loading = false) }
             } finally {
                 opening = false
-                opened = true
             }
         }
     }
 
-    /** Presses one key of the key bar; a refused key is reported. */
+    /** Presses one key of the key bar; keys go out one by one in the order tapped. */
     fun key(key: String) {
         if (_state.value.ended || !_state.value.online) return
-        viewModelScope.launch {
-            try {
-                relay.call(Method.TERM_KEY, machineId, TermKeyRequest(sessionId, key), TermKeyRequest.serializer(), Empty.serializer())
-            } catch (e: Exception) {
-                _messages.send((e as? RemoteException)?.message ?: "按键没有发出")
-            }
-        }
+        keys.trySend(key)
     }
 
     override fun onCleared() {
+        val closeSubId = subId
         appScope.launch {
-            runCatching { relay.call(Method.TERM_CLOSE, machineId, SessionIdRequest(sessionId), SessionIdRequest.serializer(), Empty.serializer()) }
+            runCatching { relay.call(Method.TERM_CLOSE, machineId, TermCloseRequest(sessionId, closeSubId), TermCloseRequest.serializer(), Empty.serializer()) }
         }
     }
 }

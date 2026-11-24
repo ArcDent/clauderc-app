@@ -2,8 +2,10 @@ package clauderc.app
 
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.withResumed
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
+import androidx.navigation.NavOptionsBuilder
 
 /**
  * Opens [route] only while the page asking for it, [from], is resumed. A page stops being resumed
@@ -12,6 +14,17 @@ import androidx.navigation.NavHostController
  */
 fun NavHostController.navigateFrom(from: LifecycleOwner, route: Any) {
     if (from.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) navigate(route)
+}
+
+/**
+ * Opens [route] once [from] is resumed: right away when it already is, or after it comes back to
+ * the foreground when a long operation finished while the page was paused. If [from] is destroyed
+ * meanwhile, nothing happens.
+ */
+suspend fun NavHostController.navigateWhenResumed(from: LifecycleOwner, route: Any, builder: NavOptionsBuilder.() -> Unit = {}) {
+    from.withResumed {
+        if (from !is NavBackStackEntry || currentBackStackEntry?.id == from.id) navigate(route, builder)
+    }
 }
 
 /**

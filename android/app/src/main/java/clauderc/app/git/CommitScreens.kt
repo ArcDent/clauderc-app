@@ -45,9 +45,12 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import clauderc.app.net.ConnectionState
 import clauderc.app.net.Relay
+import clauderc.app.net.RemoteException
 import clauderc.app.net.call
 import clauderc.app.protocol.CommitFile
+import clauderc.app.protocol.ErrorCode
 import clauderc.app.protocol.GitDiffRequest
 import clauderc.app.protocol.GitDiffResponse
 import clauderc.app.protocol.GitLimits
@@ -70,6 +73,8 @@ import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.Symbols
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -78,15 +83,29 @@ import kotlinx.coroutines.launch
 /** Loads a value once; holds an error message when the request fails. */
 data class Loadable<T>(val value: T? = null, val error: String? = null)
 
+private fun isTransient(e: RemoteException) =
+    e.code == ErrorCode.MACHINE_OFFLINE || e.code == ErrorCode.MACHINE_BUSY || e.code == ErrorCode.TIMEOUT
+
 class CommitViewModel(machineId: String, dir: String, hash: String, relay: Relay) : ViewModel() {
     private val _state = MutableStateFlow(Loadable<GitShowResponse>())
     val state: StateFlow<Loadable<GitShowResponse>> = _state.asStateFlow()
 
     init {
         viewModelScope.launch {
-            _state.value = runCatching {
-                relay.call(Method.GIT_SHOW, machineId, GitShowRequest(dir, hash), GitShowRequest.serializer(), GitShowResponse.serializer())
-            }.fold({ Loadable(it) }, { Loadable(error = it.message ?: "读不到这个提交") })
+            var terminal = false
+            relay.stateOf(machineId).collect { conn ->
+                if (conn != ConnectionState.Connected || _state.value.value != null || terminal) return@collect
+                _state.value = Loadable()
+                try {
+                    _state.value = Loadable(relay.call(Method.GIT_SHOW, machineId, GitShowRequest(dir, hash), GitShowRequest.serializer(), GitShowResponse.serializer()))
+                } catch (e: RemoteException) {
+                    if (!isTransient(e)) terminal = true
+                    _state.value = Loadable(error = e.message ?: "读不到这个提交")
+                } catch (e: Exception) {
+                    if (e is CancellationException && e !is TimeoutCancellationException) throw e
+                    _state.value = Loadable(error = e.message ?: "读不到这个提交")
+                }
+            }
         }
     }
 }
@@ -97,9 +116,20 @@ class DiffViewModel(machineId: String, request: GitDiffRequest, relay: Relay) : 
 
     init {
         viewModelScope.launch {
-            _state.value = runCatching {
-                relay.call(Method.GIT_DIFF, machineId, request, GitDiffRequest.serializer(), GitDiffResponse.serializer())
-            }.fold({ Loadable(it) }, { Loadable(error = it.message ?: "读不到差异") })
+            var terminal = false
+            relay.stateOf(machineId).collect { conn ->
+                if (conn != ConnectionState.Connected || _state.value.value != null || terminal) return@collect
+                _state.value = Loadable()
+                try {
+                    _state.value = Loadable(relay.call(Method.GIT_DIFF, machineId, request, GitDiffRequest.serializer(), GitDiffResponse.serializer()))
+                } catch (e: RemoteException) {
+                    if (!isTransient(e)) terminal = true
+                    _state.value = Loadable(error = e.message ?: "读不到差异")
+                } catch (e: Exception) {
+                    if (e is CancellationException && e !is TimeoutCancellationException) throw e
+                    _state.value = Loadable(error = e.message ?: "读不到差异")
+                }
+            }
         }
     }
 }

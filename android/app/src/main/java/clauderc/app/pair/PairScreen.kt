@@ -151,6 +151,7 @@ private fun FailureSheet(state: PairUiState, onRescan: () -> Unit) {
     val (title, body) = when (state) {
         PairUiState.Expired -> "二维码已过期" to listOf("生成已超过 5 分钟，在目标机上重新生成一个。")
         PairUiState.Used -> "二维码无效" to listOf("它可能已经被用过，每个二维码只能用一次。")
+        PairUiState.Redeemed -> "二维码已经用过" to listOf("这个二维码已经配对过，请在目标机上重新生成。")
         is PairUiState.Insecure -> "地址没有加密" to listOf("二维码里的地址是 ", state.address, "。\n只能连接 ", "https://", " 或 ", "wss://", " 地址。")
         PairUiState.RateLimited -> "尝试太频繁" to listOf("1 分钟内失败次数过多，稍后再扫。")
         is PairUiState.Failed -> "配对失败" to listOf(state.message)

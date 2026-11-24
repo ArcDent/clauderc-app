@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -204,8 +205,8 @@ fun GitScreen(state: GitUiState, actions: GitActions, snack: SnackState = rememb
     when (val confirm = state.confirm) {
         is GitConfirm.Busy -> ClaudercDialog(
             onDismiss = actions.onDismissConfirm,
-            title = "claude 正在这个目录工作",
-            text = "${confirm.sessionName?.let { "「$it」" } ?: "有会话"}正在改 ${dir?.let(::baseName).orEmpty()} 里的代码，现在${confirm.op.verb}可能带上它写到一半的改动。",
+            title = busyTitle(confirm.unsure),
+            text = busyText(confirm.sessionName, confirm.unsure, baseName(confirm.dir), confirm.op.verb),
             buttons = {
                 TextAction("取消", onClick = actions.onDismissConfirm)
                 TextAction("仍然${confirm.op.verb}", onClick = actions.onConfirm)
@@ -300,7 +301,7 @@ private fun Tabs(state: GitUiState, onTab: (GitTab) -> Unit) {
                     val w by animateIntAsState(width, Motion.enter(), label = "underlineWidth")
                     val at = place.offset { IntOffset(x, 0) }.width(with(LocalDensity.current) { w.toDp() })
                     when (ui) {
-                        UiStyle.Sticker -> Box(at.fillMaxHeight().sticker(c.hue2, c.ink, 999.dp, drop = 0.dp).testTag("tabUnderline"))
+                        UiStyle.Sticker -> Box(at.fillMaxHeight().sticker(c.hue2, c.ink, 999.dp).testTag("tabUnderline"))
                         UiStyle.Grid -> Box(at.fillMaxHeight().padding(vertical = 6.dp).clip(RoundedCornerShape(2.dp)).background(c.fg).testTag("tabUnderline"))
                         UiStyle.Clear -> Box(at.height(2.dp).background(c.fg).testTag("tabUnderline"))
                     }
@@ -386,9 +387,10 @@ private fun Timeline(state: GitUiState, actions: GitActions) {
     val list = rememberLazyListState()
     val geometry = remember(state.commits, state.status?.branch) { timelineGeometry(state.commits, state.status?.branch) }
     val textStart = remember(state.commits) { graphWidth(state.commits) }
+    val autoLoad by rememberUpdatedState(state.hasMore && !state.loadingMore && !state.moreFailed)
     LaunchedEffect(list) {
         snapshotFlow { list.layoutInfo.visibleItemsInfo.lastOrNull()?.index to list.layoutInfo.totalItemsCount }
-            .collect { (last, total) -> if (last != null && total > 0 && last >= total - 2) actions.onLoadMore() }
+            .collect { (last, total) -> if (autoLoad && last != null && total > 0 && last >= total - 2) actions.onLoadMore() }
     }
     LazyColumn(Modifier.fillMaxSize().testTag("timeline"), state = list, contentPadding = PaddingValues(bottom = NavClearance)) {
         itemsIndexed(state.commits, key = { _, it -> it.hash }) { i, commit ->
@@ -399,13 +401,26 @@ private fun Timeline(state: GitUiState, actions: GitActions) {
         }
         if (state.hasMore || state.loadingMore) {
             item(key = "more") {
-                Row(
-                    Modifier.fillMaxWidth().padding(top = Clauderc.spacing.sp4, bottom = Clauderc.spacing.sp6),
-                    horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp2, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Spinner(size = 14.dp, color = c.fg3)
-                    Text("继续加载更早的提交", fontSize = Clauderc.fontSizes.caption, color = c.fg3)
+                if (state.moreFailed && !state.loadingMore) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(role = Role.Button, onClick = actions.onLoadMore)
+                            .padding(top = Clauderc.spacing.sp4, bottom = Clauderc.spacing.sp6),
+                        horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp2, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("加载失败，点此重试", fontSize = Clauderc.fontSizes.caption, color = c.fg3)
+                    }
+                } else {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = Clauderc.spacing.sp4, bottom = Clauderc.spacing.sp6),
+                        horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp2, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Spinner(size = 14.dp, color = c.fg3)
+                        Text("继续加载更早的提交", fontSize = Clauderc.fontSizes.caption, color = c.fg3)
+                    }
                 }
             }
         }
@@ -506,7 +521,7 @@ private fun StatusPage(state: GitUiState, actions: GitActions, onBranches: () ->
             val staged = st?.staged.orEmpty()
             staged.forEachIndexed { i, f ->
                 item(key = "s:" + f.path) {
-                    FileRow(f, "取消暂存", { actions.onOpenDiff(f.path, true) }, Modifier.groupItem(i == 0, i == staged.lastIndex)) { actions.onRequest(GitOp.Unstage(f.path)) }
+                    FileRow(f, "取消暂存", { actions.onOpenDiff(f.path, true) }, Modifier.groupItem(i == 0, i == staged.lastIndex), enabled = !state.running) { actions.onRequest(GitOp.Unstage(f.path)) }
                 }
             }
             item { SectionHeading("未暂存") }
@@ -514,7 +529,7 @@ private fun StatusPage(state: GitUiState, actions: GitActions, onBranches: () ->
             val unstaged = st?.unstaged.orEmpty()
             unstaged.forEachIndexed { i, f ->
                 item(key = "u:" + f.path) {
-                    FileRow(f, "暂存", { actions.onOpenDiff(f.path, false) }, Modifier.groupItem(i == 0, i == unstaged.lastIndex)) { actions.onRequest(GitOp.Stage(f.path)) }
+                    FileRow(f, "暂存", { actions.onOpenDiff(f.path, false) }, Modifier.groupItem(i == 0, i == unstaged.lastIndex), enabled = !state.running) { actions.onRequest(GitOp.Stage(f.path)) }
                 }
             }
         }
@@ -564,7 +579,7 @@ fun changeLetter(change: FileChange) = when (change) {
 }
 
 @Composable
-private fun FileRow(f: FileStatus, action: String, onOpen: () -> Unit, modifier: Modifier = Modifier, onAction: () -> Unit) {
+private fun FileRow(f: FileStatus, action: String, onOpen: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, onAction: () -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     Row(modifier.fillMaxWidth().padding(end = sp.sp2).semantics { isTraversalGroup = true }, verticalAlignment = Alignment.CenterVertically) {
@@ -577,7 +592,7 @@ private fun FileRow(f: FileStatus, action: String, onOpen: () -> Unit, modifier:
             FilePath(f.path, Modifier.weight(1f))
             if (f.change == FileChange.Untracked) Text("未跟踪", fontSize = Clauderc.fontSizes.caption, color = c.fg3, modifier = Modifier.padding(end = sp.sp4))
         }
-        TextAction(action, onClick = onAction, tone = TextTone.Quiet)
+        TextAction(action, onClick = onAction, tone = TextTone.Quiet, enabled = enabled)
     }
 }
 

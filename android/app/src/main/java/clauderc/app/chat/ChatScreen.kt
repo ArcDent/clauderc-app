@@ -2,7 +2,6 @@ package clauderc.app.chat
 
 import clauderc.app.ui.components.LoadingArt
 import clauderc.app.ui.components.LoadingCover
-import clauderc.app.ui.theme.PushDepth
 import clauderc.app.ui.components.topHighlight
 import clauderc.app.ui.components.LocalGlassSource
 import androidx.compose.runtime.mutableIntStateOf
@@ -30,6 +29,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -83,6 +83,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -132,6 +133,7 @@ import clauderc.app.protocol.PermissionMode
 import clauderc.app.protocol.SessionState
 import clauderc.app.protocol.Subagent
 import clauderc.app.protocol.ToolCall
+import clauderc.app.protocol.ToolImage
 import clauderc.app.protocol.ToolResult
 import clauderc.app.sessions.display
 import clauderc.app.ui.contextPercent
@@ -165,6 +167,7 @@ import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
+import clauderc.app.ui.theme.StickerPress
 import clauderc.app.ui.theme.stillLayer
 import com.hrm.latex.renderer.measure.rememberLatexMeasurer
 import com.hrm.latex.renderer.model.LatexConfig
@@ -177,25 +180,32 @@ class ChatActions(
     val onLoadOlder: () -> Unit = {},
     val onSend: (String) -> Boolean = { true },
     val onInterrupt: () -> Unit = {},
-    val onAllow: () -> Unit = {},
-    val onDeny: () -> Unit = {},
-    val onAnswer: (List<clauderc.app.protocol.Answer>) -> Unit = {},
+    /** The panel's answers carry the tool_use id of the request the panel was drawn for. */
+    val onAllow: (String) -> Unit = {},
+    val onDeny: (String) -> Unit = {},
+    val onAnswer: (String, List<clauderc.app.protocol.Answer>) -> Unit = { _, _ -> },
     val onLoadModels: () -> Unit = {},
     val onSetModel: (ModelOption) -> Unit = {},
     val onSetMode: (String) -> Unit = {},
     val onPickImages: () -> Unit = {},
     val onTakePhoto: () -> Unit = {},
-    val onRemoveImage: (Int) -> Unit = {},
+    val onRemoveImage: (Long) -> Unit = {},
     /** Asks for the whole result of a tool call whose text or diff came cut to 8 KB. */
     val onToolOutput: (String) -> Unit = {},
     /** Asks for a picture of a tool result, by its id, for the viewer. */
     val onImage: (String) -> Unit = {},
+    /** Saves the picture in the viewer into the phone's gallery, from its bytes on the phone when it has them. */
+    val onSaveImage: (ToolImage, ByteArray?) -> Unit = { _, _ -> },
+    /** The viewer shows the picture by this id, or closed with null. */
+    val onViewer: (String?) -> Unit = {},
     /** Opens the session's terminal view. */
     val onOpenTerm: () -> Unit = {},
     /** Opens the read-only page of a subagent from its Agent row. */
     val onOpenAgent: (Subagent) -> Unit = {},
     /** The composer's text was edited; kept as the session's draft. */
     val onDraft: (String) -> Unit = {},
+    /** The composer has dealt with the [Restore] of this id: it goes, so it is not put back again. */
+    val onRestored: (Long) -> Unit = {},
     /** Sends `/fork` with the instruction typed in the Fork dialog; false when it could not go out. */
     val onFork: (String) -> Boolean = { false },
     /** Starts a session in a new worktree by this name, with this first message, from the Worktree dialog. */
@@ -223,13 +233,15 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
     // The KaTeX fonts load in the background; starting with the page, a formula that turns up is
     // measured in them from the first frame instead of once more when they arrive.
     rememberLatexMeasurer(remember { LatexConfig() })
-    var sheet by remember { mutableStateOf<ChatSheet?>(null) }
-    // The user's message whose rewind sheet is open.
-    var rewinding by remember { mutableStateOf<ChatItem?>(null) }
+    var sheet by rememberSaveable { mutableStateOf<ChatSheet?>(null) }
+    // The seq of the user's message whose rewind sheet is open; saved across rotation.
+    var rewindingSeq by rememberSaveable { mutableStateOf<Long?>(null) }
+    val rewinding = rewindingSeq?.let { seq -> state.items.firstOrNull { it.seq == seq } }
     var viewing by remember { mutableStateOf<Viewing?>(null) }
-    val openImage: OpenImage = { img, from ->
-        viewing = Viewing(img, from)
-        if (img.id !in state.wholeImages && img.id !in state.fetchingImages) actions.onImage(img.id)
+    val openImage: OpenImage = { v ->
+        viewing = v
+        val id = v.image.id
+        if (v.local == null && id !in state.wholeImages && id !in state.fetchingImages) actions.onImage(id)
     }
     val openModels = { actions.onLoadModels(); sheet = ChatSheet.Model }
     val haptic = LocalHapticFeedback.current
@@ -281,6 +293,26 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
             }
     }
     }
+    // The composer's text, with its cursor so a picked command can put it after itself, is kept here and not
+    // in the composer, which leaves while the panel takes its place.
+    val input = rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+    // A failed send hands its text back, unless something new was typed meanwhile.
+    // A rewind puts its message back whatever was typed: that message is what the conversation goes on from.
+    // What comes back into the composer is saved as the draft too, as if typed. Taken or not, it is then let
+    // go, so the page shown again after the terminal or a rebuild does not put it back over what is there.
+    LaunchedEffect(state.restore) {
+        val r = state.restore ?: return@LaunchedEffect
+        val next = when {
+            input.value.text.isBlank() || r.replace -> r.text
+            r.append -> "${input.value.text}\n${r.text}"
+            else -> null
+        }
+        if (next != null) {
+            input.value = TextFieldValue(next, TextRange(next.length))
+            actions.onDraft(next)
+        }
+        actions.onRestored(r.id)
+    }
     val dock: @Composable () -> Unit = {
         // The panel is drawn whole from the first frame and comes up from the bottom edge over the fading
         // composer and the messages, while the room it takes grows to its height and the messages move up
@@ -301,13 +333,13 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
                     PendingPanel(
                         pending,
                         enabled = state.online,
-                        onAllow = { haptic.tap(); actions.onAllow() },
-                        onDeny = { haptic.tap(); actions.onDeny() },
-                        onAnswer = actions.onAnswer,
+                        onAllow = { haptic.tap(); actions.onAllow(pending.toolUseId) },
+                        onDeny = { haptic.tap(); actions.onDeny(pending.toolUseId) },
+                        onAnswer = { actions.onAnswer(pending.toolUseId, it) },
                     )
                 }
             } else {
-                Composer(state, actions, onAttach = { sheet = ChatSheet.Attach }, onModels = openModels)
+                Composer(state, actions, input, onAttach = { sheet = ChatSheet.Attach }, onModels = openModels)
             }
     }
     }
@@ -326,7 +358,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
                             padTop = with(density) { barHeight.toDp() },
                             padBottom = with(density) { dockHeight.toDp() },
                             snack = snack,
-                            onRewind = { rewinding = it },
+                            onRewind = { rewindingSeq = it.seq },
                         )
                         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().onSizeChanged { dockHeight = it.height }) {
                             CompositionLocalProvider(LocalGlassSource provides glass) { dock() }
@@ -340,22 +372,21 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
                 bar()
                 LoadingCover(state.loading, LoadingArt.Skeleton, Modifier.weight(1f)) {
                     Column(Modifier.fillMaxSize()) {
-                        MessageList(state, actions, openImage, Modifier.weight(1f), snack = snack, onRewind = { rewinding = it })
+                        MessageList(state, actions, openImage, Modifier.weight(1f), snack = snack, onRewind = { rewindingSeq = it.seq })
                         dock()
                     }
                 }
             }
         }
-        SnackHost(snack, Modifier.align(Alignment.BottomCenter), bottom = 84.dp)
-        viewing?.let { v ->
-            ImageViewer(v, state.wholeImages[v.image.id], v.image.id in state.failedImages, onClosed = { viewing = null })
-        }
+        viewing?.let { v -> ChatImageViewer(v, state, actions, onClosed = { viewing = null }) }
+        // Drawn after the viewer, so a snackbar shows over it.
+        SnackHost(snack, Modifier.align(Alignment.BottomCenter), bottom = if (viewing != null) 24.dp else 84.dp, onCamera = viewing != null)
     }
 
     rewinding?.let { item ->
         val files = remember(item, state.items) { filesChangedSince(state.items, item) }
-        RewindSheet(item, files, onDismiss = { rewinding = null }) { mode ->
-            rewinding = null
+        RewindSheet(item, files, onDismiss = { rewindingSeq = null }) { mode ->
+            rewindingSeq = null
             actions.onRewind(item, mode)
         }
     }
@@ -411,7 +442,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
         )
         ChatSheet.Worktree -> {
             // Closes once session.create succeeded; the page then moves on to the new session.
-            var asked by remember { mutableStateOf(false) }
+            var asked by rememberSaveable { mutableStateOf(false) }
             LaunchedEffect(state.creatingWorktree) {
                 if (state.creatingWorktree) asked = true else if (asked && state.worktreeError == null) sheet = null
             }
@@ -432,7 +463,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
 /** Fork: an optional instruction for the copy, which goes out as `/fork <instruction>`. */
 @Composable
 private fun ForkDialog(onDismiss: () -> Unit, onFork: (String) -> Unit) {
-    var instruction by remember { mutableStateOf("") }
+    var instruction by rememberSaveable { mutableStateOf("") }
     ClaudercDialog(
         onDismiss = onDismiss,
         title = "Fork 这个会话",
@@ -466,9 +497,9 @@ private fun WorktreeDialog(
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
-    var name by remember { mutableStateOf(worktreeName(java.time.LocalDateTime.now())) }
-    var prompt by remember { mutableStateOf("") }
-    var bad by remember { mutableStateOf(false) }
+    var name by rememberSaveable { mutableStateOf(worktreeName(java.time.LocalDateTime.now())) }
+    var prompt by rememberSaveable { mutableStateOf("") }
+    var bad by rememberSaveable { mutableStateOf(false) }
     ClaudercDialog(
         onDismiss = onDismiss,
         title = "在新 worktree 里开会话",
@@ -549,9 +580,10 @@ internal fun MessageList(
     val runs = remember(items) { chatRuns(items) }.asReversed()
     // The list is drawn bottom-up: the newest item is index 0, so the first page opens at the bottom
     // and older pages are appended at the top without moving what the user is reading.
-    LaunchedEffect(list, state.hasMore) {
+    val autoLoadOlder by rememberUpdatedState(state.hasMore && !state.loadingOlder && !state.olderFailed && state.online)
+    LaunchedEffect(list) {
         snapshotFlow { list.layoutInfo.visibleItemsInfo.lastOrNull()?.index to list.layoutInfo.totalItemsCount }
-            .collect { (last, total) -> if (last != null && total > 0 && last >= total - 3) actions.onLoadOlder() }
+            .collect { (last, total) -> if (autoLoadOlder && last != null && total > 0 && last >= total - 3) actions.onLoadOlder() }
     }
     val note = when {
         state.waking -> "正在唤醒会话"
@@ -635,8 +667,20 @@ internal fun MessageList(
         }
         if (state.hasMore || state.loadingOlder) {
             item(key = "older") {
-                Box(Modifier.fillMaxWidth().padding(top = sp.sp1, bottom = sp.sp2), contentAlignment = Alignment.Center) {
-                    Spinner(size = 14.dp, color = c.fg3)
+                if (state.olderFailed && !state.loadingOlder) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(role = Role.Button, onClick = actions.onLoadOlder)
+                            .padding(top = sp.sp1, bottom = sp.sp2),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("加载更早消息失败，点此重试", fontSize = Clauderc.fontSizes.caption, color = c.fg3)
+                    }
+                } else {
+                    Box(Modifier.fillMaxWidth().padding(top = sp.sp1, bottom = sp.sp2), contentAlignment = Alignment.Center) {
+                        Spinner(size = 14.dp, color = c.fg3)
+                    }
                 }
             }
         }
@@ -696,7 +740,7 @@ private fun GrowIn(content: @Composable () -> Unit) {
 @Composable
 private fun ChatItemView(item: ChatItem, working: Boolean, tools: ToolOutputs, typed: Boolean = false) {
     when (item.kind) {
-        ItemKind.USER -> UserBubble(item)
+        ItemKind.USER -> UserBubble(item, tools.open)
         ItemKind.ASSISTANT -> AssistantItem(item.text.orEmpty(), typed)
         ItemKind.TOOL -> item.tool?.let {
             when {
@@ -757,14 +801,35 @@ private fun AssistantItem(text: String, typed: Boolean = false) {
     }
 }
 
+/**
+ * The user's message. Its pictures open in the viewer from the bytes the phone has, so nothing is fetched; with
+ * no file name they are titled by their format.
+ */
 @Composable
-private fun UserBubble(item: ChatItem) {
+private fun UserBubble(item: ChatItem, onOpen: OpenImage) {
     val images = item.images.orEmpty()
     // The whole row slides left to lay bare the rewind button (ChatRewind.kt).
     RewindRow(item) { slid ->
         UserBubbleLayout(item.text.orEmpty(), images.size, faded = false, queued = item.queued == true, modifier = slid) { i ->
-            val data = images[i].data
-            ChatPicture(rememberChatImage(data) { Base64.getDecoder().decode(data) })
+            val image = images[i]
+            val bitmap = rememberChatImage(image.data) { Base64.getDecoder().decode(image.data) }
+            ChatPicture(bitmap) { from ->
+                if (image.id != null) {
+                    val shown = ToolImage(
+                        id = image.id,
+                        mediaType = image.mediaType,
+                        width = image.width ?: bitmap?.width,
+                        height = image.height ?: bitmap?.height,
+                        size = image.size ?: 0L,
+                        thumb = image.data.ifEmpty { null },
+                    )
+                    onOpen(Viewing(shown, from, local = null))
+                } else {
+                    val bytes = Base64.getDecoder().decode(image.data)
+                    val shown = ToolImage("msg:${item.uuid ?: item.seq}.$i", image.mediaType, width = bitmap?.width, height = bitmap?.height, size = bytes.size.toLong())
+                    onOpen(Viewing(shown, from, local = bytes))
+                }
+            }
         }
     }
 }
@@ -788,14 +853,18 @@ private fun UserBubbleLayout(text: String, pictures: Int, faded: Boolean, queued
     val sticker = Clauderc.style == UiStyle.Sticker
     Box(modifier.fillMaxWidth().padding(top = Clauderc.spacing.sp2).alpha(if (faded) 0.5f else 1f), contentAlignment = Alignment.CenterEnd) {
         Column(Modifier.fillMaxWidth(0.82f), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // The rewind button lines up with the text bubble, or with the pictures when there is no text.
             if (pictures > 0) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { repeat(pictures) { picture(it) } }
+                Row(if (text.isEmpty()) Modifier.rewindBand() else Modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) { repeat(pictures) { picture(it) } }
             }
             if (text.isNotEmpty()) {
                 // Its links show and open as a reply's do; nothing else in it is read as Markdown.
                 val runs = remember(text) { linkRuns(text) }
                 BubbleSelection(enabled = true, mine = true) {
-                    RunsText(runs, Int.MAX_VALUE, if (sticker) c.onAccent else c.bg, Modifier.bubble(mine = true).padding(horizontal = 16.dp, vertical = 10.dp))
+                    RunsText(
+                        runs, Int.MAX_VALUE, if (sticker) c.onAccent else c.bg,
+                        Modifier.rewindBand().testTag("userBubble").bubble(mine = true).padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
                 }
             }
             if (queued) {
@@ -808,8 +877,8 @@ private fun UserBubbleLayout(text: String, pictures: Int, faded: Boolean, queued
 /**
  * A chat bubble (.bubble), the user's [mine] or a reply. 清玻: 22dp corners, black for the user and grey
  * for replies. 格栅: 6dp corners, and a reply has no bubble, only a heavy rule down its left edge.
- * 贴纸: ink-outlined stickers on a hard shadow, the user's in the accent, a reply white, each with
- * an 8dp corner at the bottom on its own side.
+ * 贴纸: ink-outlined stickers with no shadow, the user's in the accent, a reply white, each with an
+ * 8dp corner at the bottom on its own side.
  */
 @Composable
 private fun Modifier.bubble(mine: Boolean): Modifier {
@@ -818,17 +887,22 @@ private fun Modifier.bubble(mine: Boolean): Modifier {
         UiStyle.Clear -> clip(RoundedCornerShape(22.dp)).background(if (mine) c.fg else c.surface)
         UiStyle.Grid -> if (mine) clip(RoundedCornerShape(6.dp)).background(c.fg) else drawBehind { drawRect(c.fg, size = Size(2.dp.toPx(), size.height)) }
         UiStyle.Sticker -> if (mine) {
-            sticker(c.accent, c.ink, 22.dp, drop = 3.dp, bottomEnd = 8.dp)
+            sticker(c.accent, c.ink, 22.dp, bottomEnd = 8.dp)
         } else {
             sticker(c.panel, c.ink, 22.dp, bottomStart = 8.dp)
         }
     }
 }
 
-/** A 96dp picture, a blank tile while it decodes. */
+/** A 96dp picture, a blank tile while it decodes; [onOpen], when set, opens it from where it sits on screen. */
 @Composable
-private fun ChatPicture(bitmap: ImageBitmap?) {
-    Box(Modifier.size(96.dp).clip(RoundedCornerShape(16.dp)).background(Clauderc.colors.surface)) {
+private fun ChatPicture(bitmap: ImageBitmap?, onOpen: ((Rect?) -> Unit)? = null) {
+    val placed = remember { Placed() }
+    val open = if (onOpen == null) Modifier else Modifier
+        .onPlaced { placed.coords = it }
+        .clickable(role = Role.Button, onClickLabel = "查看图片") { onOpen(placed.coords?.takeIf { it.isAttached }?.boundsInRoot()) }
+        .testTag("userPicture")
+    Box(Modifier.size(96.dp).clip(RoundedCornerShape(16.dp)).background(Clauderc.colors.surface).then(open)) {
         if (bitmap != null) Image(bitmap, contentDescription = "图片", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
     }
 }
@@ -1112,7 +1186,7 @@ private fun FoldText(text: AnnotatedString, fetching: Boolean = false) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> Unit, onModels: () -> Unit) {
+private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableState<TextFieldValue>, onAttach: () -> Unit, onModels: () -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val haptic = LocalHapticFeedback.current
@@ -1121,20 +1195,8 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
     val ui = Clauderc.style
     val card = ui == UiStyle.Sticker
     val wrap = if (ui == UiStyle.Grid) c.bg else Color.Transparent
-    // The cursor is kept with the text, so a picked command can put it after itself.
-    var field by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+    var field by input
     val text = field.text
-    // A failed send hands its text back, unless something new was typed meanwhile.
-    // A rewind puts its message back whatever was typed: that message is what the conversation goes on from.
-    // What comes back into the composer is saved as the draft too, as if typed.
-    LaunchedEffect(state.restore) {
-        state.restore?.let {
-            if (field.text.isBlank() || it.replace) {
-                field = TextFieldValue(it.text, TextRange(it.text.length))
-                actions.onDraft(it.text)
-            }
-        }
-    }
     // With the keyboard put away there is nothing to type into, so the field lets go and its cursor stops
     // blinking: two frames a second that the phone draws slowly while it idles. A tap takes it back. Only
     // once the keyboard was up: clearing focus as the page opens would stir the input method mid-slide.
@@ -1209,34 +1271,38 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                     horizontalArrangement = Arrangement.spacedBy(sp.sp2),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    state.attachments.forEachIndexed { i, a ->
-                        val bitmap = rememberChatImage(a) { a.jpeg }
-                        val press = remember { MutableInteractionSource() }
-                        Box(Modifier.size(60.dp).clip(RoundedCornerShape(12.dp)).background(c.surface)) {
-                            if (bitmap != null) Image(bitmap, contentDescription = a.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                            Box(
-                                Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(3.dp)
-                                    .pressShrink(press)
-                                    .size(20.dp)
-                                    .clip(CircleShape)
-                                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
-                                    .clickable(press, PressIndication(androidx.compose.ui.graphics.Color.White), role = Role.Button, onClickLabel = "移除") { actions.onRemoveImage(i) }
-                                    .semantics { contentDescription = "移除 ${a.name}" },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(Symbols.Close, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(14.dp))
+                    state.attachments.forEach { a ->
+                        androidx.compose.runtime.key(a.id) {
+                            val bitmap = rememberChatImage(a) { a.jpeg }
+                            val press = remember { MutableInteractionSource() }
+                            Box(Modifier.size(60.dp).clip(RoundedCornerShape(12.dp)).background(c.surface)) {
+                                if (bitmap != null) Image(bitmap, contentDescription = a.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                Box(
+                                    Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(3.dp)
+                                        .pressShrink(press)
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
+                                        .clickable(press, PressIndication(androidx.compose.ui.graphics.Color.White), role = Role.Button, onClickLabel = "移除") { actions.onRemoveImage(a.id) }
+                                        .semantics { contentDescription = "移除 ${a.name}" },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Symbols.Close, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(14.dp))
+                                }
                             }
                         }
                     }
                     val press = remember { MutableInteractionSource() }
+                    // 贴纸 outlines it in ink (.thumb-add).
                     Box(
                         Modifier
                             .pressShrink(press)
                             .size(60.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(if (card) c.card else c.surface)
+                            .then(if (card) Modifier.border(2.dp, c.ink, RoundedCornerShape(12.dp)) else Modifier)
                             .clickable(press, PressIndication(c.fg2), role = Role.Button, onClickLabel = "再添加图片", onClick = onAttach),
                         contentAlignment = Alignment.Center,
                     ) { Icon(Symbols.Add, contentDescription = "再添加图片", tint = c.fg2) }
@@ -1269,11 +1335,13 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
             verticalAlignment = Alignment.Bottom,
         ) {
             val attachPress = remember { MutableInteractionSource() }
+            // An icon button (.icon-btn): 贴纸 tilts it and rings it in ink while pressed.
             Box(
                 Modifier
-                    .pressShrink(attachPress)
+                    .pressShrink(attachPress, StickerPress.Icon)
                     .size(44.dp)
                     .clip(CircleShape)
+                    .then(if (card) Modifier.sticker(Color.Transparent, c.ink, 999.dp, border = 0.dp, source = attachPress) else Modifier)
                     .clickable(attachPress, PressIndication(c.fg2), enabled = enabled, role = Role.Button, onClick = onAttach),
                 contentAlignment = Alignment.Center,
             ) { Icon(Symbols.Image, contentDescription = "添加图片", tint = if (enabled) c.fg2 else c.fg3) }
@@ -1305,7 +1373,7 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
                     }
                 },
             )
-            val canSend = enabled && !state.sending && (text.isNotBlank() || state.attachments.isNotEmpty())
+            val canSend = enabled && !state.sending && !state.rewinding && (text.isNotBlank() || state.attachments.isNotEmpty())
             val sendPress = remember { MutableInteractionSource() }
             val sendFill = when {
                 canSend && card -> c.accent
@@ -1315,11 +1383,11 @@ private fun Composer(state: ChatUiState, actions: ChatActions, onAttach: () -> U
             }
             Box(
                 Modifier
-                    .pressShrink(sendPress)
+                    .pressShrink(sendPress, StickerPress.Send)
                     .size(44.dp)
                     .then(
                         when (ui) {
-                            UiStyle.Sticker -> Modifier.sticker(sendFill, if (canSend) c.ink else c.fg3, 22.dp, drop = if (canSend) PushDepth else 0.dp, source = sendPress)
+                            UiStyle.Sticker -> Modifier.sticker(sendFill, if (canSend) c.ink else c.fg3, 22.dp)
                             UiStyle.Grid -> Modifier.clip(RoundedCornerShape(4.dp)).background(sendFill)
                             UiStyle.Clear -> Modifier.clip(CircleShape).background(sendFill).then(if (canSend) Modifier.topHighlight(Color.White.copy(alpha = 0.22f)) else Modifier)
                         },

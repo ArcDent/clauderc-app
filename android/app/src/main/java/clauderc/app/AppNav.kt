@@ -1,8 +1,13 @@
 package clauderc.app
 
+import clauderc.app.data.Fleet
 import clauderc.app.net.ConnectionState
+import clauderc.app.net.RelayLink
+import clauderc.app.protocol.Machine
+import clauderc.app.protocol.SessionList
 import clauderc.app.ui.components.LoadingArt
 import clauderc.app.ui.components.LoadingCover
+import clauderc.app.ui.components.SnackHost
 import clauderc.app.ui.theme.page
 import android.Manifest
 import android.content.Context
@@ -31,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -98,6 +104,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import java.io.File
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
@@ -107,9 +114,19 @@ import kotlinx.serialization.Serializable
 @Serializable data class ChatRoute(val machineId: String, val sessionId: String)
 /** A subagent's page; [startedAt] is epoch milliseconds, 0 when unknown. */
 @Serializable data class AgentRoute(val machineId: String, val sessionId: String, val agentId: String, val description: String, val type: String, val startedAt: Long)
-@Serializable data class TermRoute(val machineId: String, val sessionId: String)
+@Serializable data class TermRoute(val machineId: String, val sessionId: String, val notice: String? = null)
 @Serializable data class CommitRoute(val machineId: String, val dir: String, val hash: String)
 @Serializable data class DiffRoute(val machineId: String, val dir: String, val path: String, val hash: String? = null, val staged: Boolean = false)
+
+/** True while the startup loading cover stays up: paired, not waiting to reconnect, and the first machine list neither arrived nor failed. */
+internal fun isBooting(machines: List<Machine>?, bootFailed: Boolean, links: List<RelayLink>): Boolean =
+    machines == null && !bootFailed && links.isNotEmpty() && links.none { it.state is ConnectionState.Waiting }
+
+/** True when any currently online machine has a session waiting for the user (drives the 会话 tab's red dot). */
+internal fun hasPendingOnline(machines: List<Machine>?, sessions: Map<String, SessionList>): Boolean {
+    val online = machines?.filter { it.online }?.mapTo(HashSet()) { it.id } ?: return false
+    return sessions.any { (id, list) -> id in online && list.sessions.any(::needsYou) }
+}
 
 @Composable
 fun ClaudercNav(container: AppContainer) {
@@ -117,10 +134,13 @@ fun ClaudercNav(container: AppContainer) {
     // The home tabs are the glass bar's blur source; the bar itself floats over every page.
     val haze = rememberHazeState()
     // Starting up, a dot runs between a phone and a computer over the whole app until the first machine
-    // list arrives. Once the relay fails and waits to retry, the page shows how the reconnect goes instead.
+    // list arrives. Once the relay fails and waits to retry, or the first list fails, the page takes over.
     val links by container.connection.links.collectAsStateWithLifecycle()
     val machines by container.fleet.machines.collectAsStateWithLifecycle()
-    val booting = machines == null && links.isNotEmpty() && links.none { it.state is ConnectionState.Waiting }
+    val machinesFailed by container.fleet.machinesFailed.collectAsStateWithLifecycle()
+    var bootFailed by remember { mutableStateOf(false) }
+    if (machinesFailed) bootFailed = true
+    val booting = isBooting(machines, bootFailed, links)
     LoadingCover(booting, LoadingArt.Link, Modifier.fillMaxSize(), splash = true, label = links.firstOrNull()?.let { "正在连接 ${it.host}" }.orEmpty()) {
         Box(Modifier.fillMaxSize()) {
             ClaudercPages(container, nav, haze)
@@ -143,6 +163,8 @@ private fun ClaudercPages(container: AppContainer, nav: NavHostController, haze:
                     deviceName(),
                     onPaired = { container.credentials.add(it) },
                     paired = { container.credentials.all().map { it.relay }.toSet() },
+                    appScope = container.scope,
+                    onNotice = container::notice,
                 )
             }
             val state by vm.state.collectAsStateWithLifecycle()
@@ -169,10 +191,10 @@ private fun ClaudercPages(container: AppContainer, nav: NavHostController, haze:
         }
         composable<CreateRoute> { entry ->
             val r = entry.toRoute<CreateRoute>()
-            val vm = viewModel { CreateSessionViewModel(r.machineId, container.fleet, container.connection, container.profileNames) }
+            val vm = viewModel { CreateSessionViewModel(r.machineId, container.fleet, container.connection, container.profileNames, container.scope, container::notice) }
             val state by vm.state.collectAsStateWithLifecycle()
             LaunchedEffect(vm) {
-                vm.created.collect { id -> nav.navigate(ChatRoute(r.machineId, id)) { popUpTo<CreateRoute> { inclusive = true } } }
+                vm.created.collect { id -> nav.navigateWhenResumed(entry, ChatRoute(r.machineId, id)) { popUpTo<CreateRoute> { inclusive = true } } }
             }
             CreateSessionScreen(
                 state, { nav.popFrom(entry) }, vm::submit, vm::setDir, vm::pickDir, vm::showAllDirs, vm::setName, vm::setPrompt,
@@ -191,7 +213,7 @@ private fun ClaudercPages(container: AppContainer, nav: NavHostController, haze:
         }
         composable<TermRoute> { entry ->
             val r = entry.toRoute<TermRoute>()
-            val vm = viewModel { TermViewModel(r.machineId, r.sessionId, container.connection, container.fleet, container.scope) }
+            val vm = viewModel { TermViewModel(r.machineId, r.sessionId, container.connection, container.fleet, container.scope, initialNotice = r.notice) }
             val state by vm.state.collectAsStateWithLifecycle()
             val snack = remember { SnackState() }
             LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
@@ -258,45 +280,75 @@ private fun LightSystemBars() {
 
 @Composable
 private fun HomeScreen(container: AppContainer, nav: NavHostController, haze: HazeState, onAdd: () -> Unit, onClearAll: () -> Unit) {
-    val c = Clauderc.colors
-    val selection = container.selection
+    HomeTabsContent(
+        selection = container.selection,
+        fleet = container.fleet,
+        notices = container.notices,
+        haze = haze,
+    ) { tab, machineId ->
+        when (tab) {
+            MainTab.Machines -> {
+                val vm = viewModel { MachinesViewModel(container.fleet, container.connection.links) }
+                val state by vm.state.collectAsStateWithLifecycle()
+                MachinesScreen(state, onOpen = container.selection::openSessions, onAdd = onAdd, onClearAll = onClearAll, onRetry = vm::retry)
+            }
+            MainTab.Sessions -> if (machineId == null) {
+                SessionsScreen(SessionsUiState(), {}, {}, {}, { _, _ -> }, {}, {})
+            } else {
+                SessionsTab(container, machineId, nav)
+            }
+            MainTab.Git -> if (machineId == null) {
+                GitScreen(clauderc.app.git.GitUiState(), GitActions())
+            } else {
+                GitTab(container, machineId, nav)
+            }
+            MainTab.Settings -> SettingsTab(container)
+        }
+    }
+}
+
+/**
+ * The home screen's four tabs and app-wide notice snackbar. Pins the automatically chosen default
+ * machine once a machine tab is open so it going offline does not switch tabs to another machine,
+ * and shows container notices (such as token revocation) regardless of which tab is open.
+ */
+@Composable
+internal fun HomeTabsContent(
+    selection: Selection,
+    fleet: Fleet,
+    notices: Flow<String>,
+    haze: HazeState? = null,
+    content: @Composable (MainTab, String?) -> Unit,
+) {
     val tab by selection.tab.collectAsStateWithLifecycle()
-    val machines by container.fleet.machines.collectAsStateWithLifecycle()
+    val machines by fleet.machines.collectAsStateWithLifecycle()
     val chosen by selection.machineId.collectAsStateWithLifecycle()
-    // Default to the first online machine until the user picks one.
-    val machineId = chosen ?: machines?.firstOrNull { it.online }?.id
+    val onMachineTab = tab == MainTab.Sessions || tab == MainTab.Git
+    LaunchedEffect(machines, chosen, onMachineTab) { selection.syncMachines(machines, onMachineTab) }
+    val machineList = machines
+    val machineId = if (chosen != null && (machineList == null || machineList.any { it.id == chosen })) {
+        chosen
+    } else {
+        machineList?.firstOrNull { it.online }?.id
+    }
     val snack = remember { SnackState() }
-    LaunchedEffect(Unit) { container.notices.collect { snack.show(it) } }
+    LaunchedEffect(notices) { notices.collect { snack.show(it) } }
     val shift = with(LocalDensity.current) { 24.dp.roundToPx() }
 
-    Box(Modifier.fillMaxSize().page().hazeSource(haze)) {
-        AnimatedContent(
-            targetState = tab,
-            transitionSpec = {
-                val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                Motion.tabIn(shift, dir).togetherWith(Motion.tabOut(shift, dir))
-            },
-            label = "tabs",
-        ) { t ->
-            when (t) {
-                MainTab.Machines -> {
-                    val vm = viewModel { MachinesViewModel(container.fleet, container.connection.links) }
-                    val state by vm.state.collectAsStateWithLifecycle()
-                    MachinesScreen(state, onOpen = selection::openSessions, onAdd = onAdd, onClearAll = onClearAll, snack = snack)
-                }
-                MainTab.Sessions -> if (machineId == null) {
-                    SessionsScreen(SessionsUiState(), {}, {}, {}, { _, _ -> }, {}, {})
-                } else {
-                    SessionsTab(container, machineId, nav)
-                }
-                MainTab.Git -> if (machineId == null) {
-                    GitScreen(clauderc.app.git.GitUiState(), GitActions())
-                } else {
-                    GitTab(container, machineId, nav)
-                }
-                MainTab.Settings -> SettingsTab(container)
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().page().let { if (haze != null) it.hazeSource(haze) else it }) {
+            AnimatedContent(
+                targetState = tab,
+                transitionSpec = {
+                    val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                    Motion.tabIn(shift, dir).togetherWith(Motion.tabOut(shift, dir))
+                },
+                label = "tabs",
+            ) { t ->
+                content(t, machineId)
             }
         }
+        SnackHost(snack, Modifier.align(Alignment.BottomCenter), bottom = 88.dp)
     }
 }
 
@@ -310,10 +362,22 @@ private fun HomeNavBar(container: AppContainer, nav: NavHostController, haze: Ha
     val entry by nav.currentBackStackEntryAsState()
     // Home is the start page, so the bar is already there before the first entry lands.
     val onHome = entry?.destination?.hasRoute<HomeRoute>() ?: true
-    val tab by container.selection.tab.collectAsStateWithLifecycle()
-    val sessions by container.fleet.sessions.collectAsStateWithLifecycle()
-    val pendingSomewhere = sessions.values.any { list -> list.sessions.any(::needsYou) }
-    AnimatedVisibility(onHome, modifier, enter = Motion.navBarIn, exit = Motion.navBarOut) {
+    HomeNavBarContent(container.selection, container.fleet, onHome, haze, modifier)
+}
+
+@Composable
+internal fun HomeNavBarContent(
+    selection: Selection,
+    fleet: Fleet,
+    visible: Boolean,
+    haze: HazeState? = null,
+    modifier: Modifier = Modifier,
+) {
+    val tab by selection.tab.collectAsStateWithLifecycle()
+    val machines by fleet.machines.collectAsStateWithLifecycle()
+    val sessions by fleet.sessions.collectAsStateWithLifecycle()
+    val pendingSomewhere = hasPendingOnline(machines, sessions)
+    AnimatedVisibility(visible, modifier, enter = Motion.navBarIn, exit = Motion.navBarOut) {
         GlassNavBar(
             tabs = listOf(
                 NavTab("目标机", Symbols.Computer, Symbols.ComputerFilled),
@@ -322,7 +386,7 @@ private fun HomeNavBar(container: AppContainer, nav: NavHostController, haze: Ha
                 NavTab("设置", Symbols.Settings, Symbols.SettingsFilled),
             ),
             selected = tab.ordinal,
-            onSelect = { container.selection.tab.value = MainTab.entries[it] },
+            onSelect = { selection.tab.value = MainTab.entries[it] },
             hazeState = haze,
         )
     }
@@ -387,7 +451,7 @@ private fun agentRoute(machineId: String, sessionId: String, a: Subagent) =
 
 @Composable
 private fun AgentRouteContent(container: AppContainer, r: AgentRoute, nav: NavHostController, entry: NavBackStackEntry) {
-    val vm = viewModel { ChatViewModel(r.machineId, r.sessionId, container.connection, container.fleet, container.scope, cache = container.chatCache, agentId = r.agentId) }
+    val vm = viewModel { ChatViewModel(r.machineId, r.sessionId, container.connection, container.fleet, container.scope, cache = container.chatCache, agentId = r.agentId, saver = container.gallery) }
     val state by vm.state.collectAsStateWithLifecycle()
     val snack = remember { SnackState() }
     LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
@@ -400,6 +464,8 @@ private fun AgentRouteContent(container: AppContainer, r: AgentRoute, nav: NavHo
             onLoadOlder = vm::loadOlder,
             onToolOutput = vm::loadToolOutput,
             onImage = vm::loadImage,
+            onSaveImage = vm::saveImage,
+            onViewer = vm::viewImage,
         ),
     )
 }
@@ -440,25 +506,26 @@ private fun GitTab(container: AppContainer, machineId: String, nav: NavHostContr
 @Composable
 private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHostController, entry: NavBackStackEntry) {
     val context = LocalContext.current
-    val vm = viewModel { ChatViewModel(r.machineId, r.sessionId, container.connection, container.fleet, container.scope, cache = container.chatCache, drafts = container.drafts) }
+    val vm = viewModel { ChatViewModel(r.machineId, r.sessionId, container.connection, container.fleet, container.scope, cache = container.chatCache, drafts = container.drafts, saver = container.gallery, onNotice = container::notice) }
     val state by vm.state.collectAsStateWithLifecycle()
     val snack = remember { SnackState() }
     LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
-    // A session started in a new worktree from here opens on top of this one.
-    LaunchedEffect(vm) { vm.created.collect { id -> nav.navigateFrom(entry, ChatRoute(r.machineId, id)) } }
+    // A session started in a new worktree from here opens on top of this one, waiting if the page is paused.
+    LaunchedEffect(vm) { vm.created.collect { id -> nav.navigateWhenResumed(entry, ChatRoute(r.machineId, id)) } }
 
     fun add(uri: Uri) {
         val (name, size) = nameAndSize(context, uri)
         vm.addImage(name, size) { context.contentResolver.openInputStream(uri)!!.use { it.readBytes() } }
     }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris -> uris.forEach(::add) }
-    var photo by remember { mutableStateOf<Uri?>(null) }
-    val take = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> if (ok) photo?.let(::add) }
+    var finishPhoto: (Boolean) -> Unit = {}
+    val take = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> finishPhoto(ok) }
+    val (startPhoto, onPhotoResult) = rememberPhotoCapture(onCaptured = ::add, launch = take::launch)
+    finishPhoto = onPhotoResult
     fun shoot() {
         val file = File(context.cacheDir, "camera/photo-${System.currentTimeMillis()}.jpg").apply { parentFile?.mkdirs() }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-        photo = uri
-        take.launch(uri)
+        startPhoto(uri)
     }
     // The manifest declares CAMERA for the QR scanner, so the system camera needs it granted too.
     val askCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) shoot() else snack.show("没有相机权限，不能拍照") }
@@ -489,15 +556,18 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
             onRemoveImage = vm::removeImage,
             onToolOutput = vm::loadToolOutput,
             onImage = vm::loadImage,
-            onOpenTerm = { nav.navigateFrom(entry, TermRoute(r.machineId, r.sessionId)) },
+            onSaveImage = vm::saveImage,
+            onViewer = vm::viewImage,
+            onOpenTerm ={ nav.navigateFrom(entry, TermRoute(r.machineId, r.sessionId)) },
             onOpenAgent = { a -> if (a.id != null) nav.navigateFrom(entry, agentRoute(r.machineId, r.sessionId, a)) },
             onDraft = vm::typed,
+            onRestored = vm::restored,
             onFork = vm::fork,
             onCreateWorktree = vm::createWorktree,
             onClearWorktreeError = vm::clearWorktreeError,
             onAutoResume = vm::setAutoResume,
             onResumeText = vm::typedResume,
-            onRewind = { item, restore -> vm.rewind(item, restore) { nav.navigateFrom(entry, TermRoute(r.machineId, r.sessionId)) } },
+            onRewind = { item, restore -> vm.rewind(item, restore) { reason -> nav.navigateFrom(entry, TermRoute(r.machineId, r.sessionId, notice = reason)) } },
         ),
     )
 }
@@ -513,4 +583,20 @@ private fun nameAndSize(context: Context, uri: Uri): Pair<String, Long> {
     }
     if (size < 0) size = context.contentResolver.openInputStream(uri)?.use { it.available().toLong() } ?: 0
     return name to size
+}
+
+/** Keeps the camera output URI across Activity recreation while the system camera app is open. */
+@Composable
+internal fun rememberPhotoCapture(onCaptured: (Uri) -> Unit, launch: (Uri) -> Unit): Pair<(Uri) -> Unit, (Boolean) -> Unit> {
+    var pending by rememberSaveable { mutableStateOf<String?>(null) }
+    val start: (Uri) -> Unit = { uri ->
+        pending = uri.toString()
+        launch(uri)
+    }
+    val finish: (Boolean) -> Unit = { ok ->
+        val saved = pending
+        pending = null
+        if (ok && saved != null) onCaptured(Uri.parse(saved))
+    }
+    return start to finish
 }

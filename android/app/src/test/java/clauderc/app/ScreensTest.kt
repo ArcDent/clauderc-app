@@ -5,16 +5,33 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageShader
+import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -95,10 +112,12 @@ import clauderc.app.ui.components.LOADING_DELAY_MILLIS
 import clauderc.app.ui.components.LoadingArt
 import clauderc.app.ui.components.LoadingCover
 import clauderc.app.ui.components.NavTab
+import clauderc.app.ui.components.sticker
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercTheme
 import clauderc.app.ui.theme.Symbols
 import java.io.File
+import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assume.assumeTrue
@@ -276,7 +295,8 @@ class ScreensTest {
         shot("05d-chat-images-dark", isDark = true) { ChatScreen(pictures, ChatActions()) }
         shot("05d-chat-images-sticker", look = UiStyle.Sticker) { ChatScreen(pictures, ChatActions()) }
         val shotImage = pictures.items.first { it.tool?.toolUseId == "t1" }.tool!!.result!!.images!!.single()
-        shot("05e-viewer") { Box { ChatScreen(pictures, ChatActions()); ImageViewer(Viewing(shotImage, null), null, false) {} } }
+        val shotWhole = java.util.Base64.getDecoder().decode(shotImage.thumb!!)
+        shot("05e-viewer") { Box { ChatScreen(pictures, ChatActions()); ImageViewer(Viewing(shotImage, null), shotWhole, false) {} } }
         val permission = chat.copy(pending = Pending("t3", PendingKind.PERMISSION, "Bash", buildJsonObject { put("command", "go vet ./... && go test ./internal/protocol/...") }))
         shot("06-chat-permission") { ChatScreen(permission, ChatActions()) }
         shot("06-chat-permission-dark", isDark = true) { ChatScreen(permission, ChatActions()) }
@@ -872,32 +892,41 @@ class ScreensTest {
     }
 
     /**
-     * readme-cover: the four README shots as 贴纸 stickers on its dotted paper, ink outline and hard
-     * shadow, each set a little higher or lower; design/screenshots/cover.png is a copy of it.
+     * readme-cover: the four README shots as 贴纸 stickers, each set a little higher or lower, on the app's
+     * own paper (page()) with sticker()'s ink outline, so the cover follows the style as it changes. It is
+     * drawn one pixel to a dp, larger than the window, so the page is drawn straight from the view.
+     * design/screenshots/cover.png is a copy of it.
      */
     private fun cover(tail: String, isDark: Boolean) {
-        val ink = if (isDark) 0xFF000000.toInt() else 0xFF1E1B2E.toInt()
-        val bmp = Bitmap.createBitmap(1800, 820, Bitmap.Config.ARGB_8888)
-        val canvas = android.graphics.Canvas(bmp)
-        canvas.drawColor(if (isDark) 0xFF1C1A27.toInt() else 0xFFFFF6E9.toInt())
-        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        paint.color = if (isDark) 0x14FFFFFF else 0x1E1E1B2E
-        for (y in 14 until bmp.height step 28) for (x in 14 until bmp.width step 28) canvas.drawCircle(x.toFloat(), y.toFloat(), 2f, paint)
-        listOf("sessions" to 96, "permission" to 44, "agents" to 136, "git" to 70).forEachIndexed { i, (name, top) ->
+        val phones = listOf("sessions" to 96, "permission" to 44, "agents" to 136, "git" to 70).map { (name, top) ->
             val shot = android.graphics.BitmapFactory.decodeFile(File(out, "readme-$name$tail.png").path)
             // Two smaller steps down to 360 wide: one bilinear step from 1170 drops strokes of the text.
             val half = Bitmap.createScaledBitmap(shot, 720, shot.height * 720 / shot.width, true)
-            val phone = Bitmap.createScaledBitmap(half, 360, half.height / 2, true)
-            val x = 90f + i * 420
-            val y = top.toFloat()
-            paint.color = ink
-            canvas.drawRoundRect(x + 9, y + 9, x + 379, y + phone.height + 19, 46f, 46f, paint)
-            canvas.drawRoundRect(x - 5, y - 5, x + 365, y + phone.height + 5, 46f, 46f, paint)
-            val image = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
-            image.shader = android.graphics.BitmapShader(phone, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
-                .apply { setLocalMatrix(android.graphics.Matrix().apply { setTranslate(x, y) }) }
-            canvas.drawRoundRect(x, y, x + 360, y + phone.height, 40f, 40f, image)
+            Bitmap.createScaledBitmap(half, 360, half.height / 2, true).asImageBitmap() to top
         }
+        var view: android.view.View? = null
+        dark = isDark
+        style = UiStyle.Sticker
+        content = {
+            view = LocalView.current
+            CompositionLocalProvider(LocalDensity provides Density(1f)) {
+                Box(Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).requiredSize(1800.dp, 820.dp).page()) {
+                    phones.forEachIndexed { i, (phone, top) ->
+                        // The ink fills the sticker too, so it shows past the screen's rounder corners.
+                        Box(
+                            Modifier.offset((85 + i * 420).dp, (top - 5).dp).size(370.dp, (phone.height + 10).dp)
+                                .sticker(Clauderc.colors.ink, Clauderc.colors.ink, 46.dp, 5.dp).padding(5.dp)
+                                .drawBehind { drawRoundRect(ShaderBrush(ImageShader(phone)), cornerRadius = CornerRadius(40f)) },
+                        )
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(100)
+        compose.waitForIdle()
+        val bmp = Bitmap.createBitmap(1800, 820, Bitmap.Config.ARGB_8888)
+        view!!.draw(android.graphics.Canvas(bmp))
         File(out, "readme-cover$tail.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 

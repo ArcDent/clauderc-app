@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -34,7 +35,7 @@ import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.PressIndication
-import clauderc.app.ui.theme.PushDepth
+import clauderc.app.ui.theme.StickerPress
 import clauderc.app.ui.theme.pressShrink
 
 /** .btn.accent / .ink / .tonal / .outline */
@@ -66,8 +67,8 @@ fun PillButton(
     }
     val press = remember { MutableInteractionSource() }
     val surface = when (ui) {
-        // An ink outline and a 3dp hard shadow that the press sinks onto; disabled ones lose the shadow.
-        UiStyle.Sticker -> Modifier.sticker(bg, if (enabled) c.ink else c.fg3, 999.dp, drop = if (enabled) PushDepth else 0.dp, source = press)
+        // An ink outline, grey when disabled, that doubles while pressed.
+        UiStyle.Sticker -> Modifier.sticker(bg, if (enabled) c.ink else c.fg3, 999.dp, source = press)
         // Square corners.
         UiStyle.Grid -> Modifier.clip(RoundedCornerShape(2.dp)).background(bg).outline(style == PillStyle.Outline && enabled, c.surface2, RoundedCornerShape(2.dp))
         // A faint highlight along the top edge of the solid black button.
@@ -76,7 +77,7 @@ fun PillButton(
     }
     Row(
         modifier
-            .pressShrink(press)
+            .pressShrink(press, StickerPress.Button)
             .height(height)
             .then(surface)
             .clickable(press, PressIndication(fg), enabled = enabled, role = Role.Button, onClick = onClick)
@@ -135,9 +136,9 @@ fun TextAction(
         }
         Box(
             modifier
-                .pressShrink(press)
+                .pressShrink(press, StickerPress.Button)
                 .height(38.dp)
-                .sticker(bg, if (enabled) c.ink else c.fg3, 999.dp, drop = if (enabled) PushDepth else 0.dp, source = press)
+                .sticker(bg, if (enabled) c.ink else c.fg3, 999.dp, source = press)
                 .clickable(press, PressIndication(fg), enabled = enabled && !busy, role = Role.Button, onClick = onClick)
                 .padding(horizontal = Clauderc.spacing.sp4),
             contentAlignment = Alignment.Center,
@@ -146,11 +147,14 @@ fun TextAction(
         }
         return
     }
+    // 贴纸 presses a text button that is not quiet like the pill buttons, an ink ring showing round it.
+    val stamp = Clauderc.style == UiStyle.Sticker && tone != TextTone.Quiet
     Box(
         modifier
-            .pressShrink(press)
+            .pressShrink(press, if (stamp) StickerPress.Button else StickerPress.Plain)
             .height(40.dp)
             .clip(CircleShape)
+            .then(if (stamp) Modifier.sticker(Color.Transparent, c.ink, 999.dp, border = 0.dp, source = press) else Modifier)
             .clickable(press, PressIndication(color), enabled = enabled && !busy, role = Role.Button, onClick = onClick)
             .padding(horizontal = Clauderc.spacing.sp3),
         contentAlignment = Alignment.Center,
@@ -179,16 +183,7 @@ fun SymbolButton(
     enabled: Boolean = true,
     tint: Color = Clauderc.colors.fg,
 ) {
-    val box = if (small) 40.dp else 48.dp
-    val press = remember { MutableInteractionSource() }
-    Box(
-        modifier
-            .pressShrink(press)
-            .size(box)
-            .clip(CircleShape)
-            .clickable(press, PressIndication(tint), enabled = enabled, role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
+    SymbolButtonFrame(onClick, modifier, small, enabled, tint) {
         Icon(
             icon.styled,
             contentDescription = contentDescription,
@@ -196,4 +191,29 @@ fun SymbolButton(
             modifier = Modifier.size(if (small) 20.dp else 24.dp),
         )
     }
+}
+
+/** [SymbolButton]'s round press target, pressed in [tint], around [content] of the caller's own. */
+@Composable
+fun SymbolButtonFrame(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    small: Boolean = false,
+    enabled: Boolean = true,
+    tint: Color = Clauderc.colors.fg,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val press = remember { MutableInteractionSource() }
+    // 贴纸 tilts a pressed icon button and rings it in ink.
+    val sticker = Clauderc.style == UiStyle.Sticker
+    Box(
+        modifier
+            .pressShrink(press, StickerPress.Icon)
+            .size(if (small) 40.dp else 48.dp)
+            .clip(CircleShape)
+            .then(if (sticker) Modifier.sticker(Color.Transparent, Clauderc.colors.ink, 999.dp, border = 0.dp, source = press) else Modifier)
+            .clickable(press, PressIndication(tint), enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+        content = content,
+    )
 }

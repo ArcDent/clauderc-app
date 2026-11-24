@@ -34,6 +34,31 @@ import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.ClaudercMotion
 import clauderc.app.ui.theme.ClaudercTheme
 import clauderc.app.ui.theme.Symbols
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
+import clauderc.app.chat.TermUiState
+import clauderc.app.chat.TerminalScreen
+import clauderc.app.data.AccentChoice
+import clauderc.app.data.Appearance
+import clauderc.app.data.ThemeMode
+import clauderc.app.protocol.SessionState
+import clauderc.app.protocol.TermScreen
+import clauderc.app.settings.SettingsScreen
+import clauderc.app.testing.session
+import clauderc.app.ui.components.TextAction
+import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.StickerPress
+import clauderc.app.ui.theme.accentColor
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -157,12 +182,143 @@ class PressTest {
         assertEquals(rest, settled)
     }
 
-    /** 贴纸 sinks it 3dp onto its hard shadow, at full size, and pops it back up. */
-    @Test fun stickerSinks() {
-        val (rest, held, _, settled) = pillBounds(UiStyle.Sticker, 0)
-        val depth = with(compose.density) { 3.dp.toPx() }
-        assertEquals(rest.width, held.width, 0.5f)
-        assertEquals(rest.top + depth, held.top, 1f)
-        assertEquals(rest, settled)
+    // ---------- 贴纸: each kind of control has its own pose while pressed (round 12) ----------
+
+    /** The box a rect like [rest] fills once scaled by [scale] and turned [turn]° about its centre. */
+    private fun posed(rest: Rect, scale: Float, turn: Float): Rect {
+        val a = Math.toRadians(turn.toDouble())
+        val cos = abs(cos(a)).toFloat()
+        val sin = abs(sin(a)).toFloat()
+        val w = scale * (rest.width * cos + rest.height * sin)
+        val h = scale * (rest.width * sin + rest.height * cos)
+        return Rect(rest.center.x - w / 2, rest.center.y - h / 2, rest.center.x + w / 2, rest.center.y + h / 2)
+    }
+
+    private fun assertBox(what: String, want: Rect, got: Rect) {
+        val off = listOf(want.left - got.left, want.top - got.top, want.right - got.right, want.bottom - got.bottom).maxOf { abs(it) }
+        assertTrue("$what: $got, want $want", off <= 1.5f)
+    }
+
+    /**
+     * Bounds of [find] in 贴纸, at rest, one frame into a press, held 400ms and 400ms after the press is
+     * let go of; [prepare] runs once the page is up, and the press is cancelled so nothing is clicked.
+     */
+    private fun stickerPress(find: () -> SemanticsNodeInteraction, prepare: () -> Unit = {}, content: @Composable () -> Unit): List<Rect> {
+        compose.mainClock.autoAdvance = false
+        compose.setContent { ClaudercTheme(darkTheme = false, style = UiStyle.Sticker) { content() } }
+        compose.mainClock.advanceTimeBy(1_000)
+        prepare()
+        compose.mainClock.advanceTimeBy(1_000)
+        fun now() = find().fetchSemanticsNode().boundsInRoot
+        val rest = now()
+        find().performTouchInput { down(center) }
+        compose.mainClock.advanceTimeByFrame()
+        val first = now()
+        compose.mainClock.advanceTimeBy(400)
+        val held = now()
+        find().performTouchInput { cancel() }
+        compose.mainClock.advanceTimeBy(400)
+        return listOf(rest, first, held, now())
+    }
+
+    /** A pill button presses like a rubber stamp: 96% and 1.5° to the left, then springs back. */
+    @Test fun stickerPillPressesLikeAStamp() {
+        val (rest, _, held, after) = stickerPress({ compose.onNodeWithTag("pill") }) {
+            PillButton("允许", onClick = {}, modifier = Modifier.testTag("pill"))
+        }
+        assertBox("held", posed(rest, 0.96f, -1.5f), held)
+        assertEquals(rest, after)
+    }
+
+    /** A text button that is not quiet presses the same way as the pills. */
+    @Test fun stickerTextActionPressesLikeAStamp() {
+        val (rest, _, held, after) = stickerPress({ compose.onNodeWithTag("text") }) {
+            TextAction("全部 6 个", onClick = {}, modifier = Modifier.testTag("text"))
+        }
+        assertBox("held", posed(rest, 0.96f, -1.5f), held)
+        assertEquals(rest, after)
+    }
+
+    /** The send button leans far back, to 84% and 14°, like a bow drawn. */
+    @Test fun stickerSendLeansBack() {
+        val (rest, _, held, after) = stickerPress(
+            find = { compose.onNodeWithContentDescription("发送") },
+            prepare = { compose.onNodeWithTag("composer").performTextInput("跑一遍测试") },
+        ) {
+            ChatScreen(ChatUiState(loading = false), ChatActions(onSend = { false }))
+        }
+        assertBox("held", posed(rest, 0.84f, -14f), held)
+        assertEquals(rest, after)
+    }
+
+    /** An icon button tilts 10° at 88%. */
+    @Test fun stickerIconButtonTilts() {
+        val (rest, _, held, after) = stickerPress({ compose.onNodeWithTag("icon") }) {
+            SymbolButton(Symbols.Add, "添加目标机", onClick = {}, modifier = Modifier.testTag("icon"))
+        }
+        assertBox("held", posed(rest, 0.88f, -10f), held)
+        assertEquals(rest, after)
+    }
+
+    /** A terminal key sinks 2dp the moment it is hit, keeps its size, turns ink, and comes back up. */
+    @Test fun stickerKeySinksAtOnceAndTurnsInk() {
+        val term = TermUiState(session = session("s-work", "修复重连", SessionState.Idle, "default"), loading = false, screen = TermScreen("s-work", listOf("❯ ")))
+        var ink = Color.Unspecified
+        val key = { compose.onNodeWithContentDescription("Esc") }
+        compose.mainClock.autoAdvance = false
+        compose.setContent { ClaudercTheme(darkTheme = false, style = UiStyle.Sticker) { ink = Clauderc.colors.ink; TerminalScreen(term, onBack = {}, onKey = {}) } }
+        compose.mainClock.advanceTimeBy(2_000)
+        fun now() = key().fetchSemanticsNode().boundsInRoot
+        val rest = now()
+        val face = IntOffset((rest.left + 4 * compose.density.density).toInt(), rest.center.y.toInt())
+        val before = screen().getPixel(face.x, face.y)
+        key().performTouchInput { down(center) }
+        compose.mainClock.advanceTimeByFrame()
+        val sink = 2 * compose.density.density
+        assertBox("one frame into the press", rest.translate(0f, sink), now())
+        compose.mainClock.advanceTimeBy(400)
+        assertBox("held", rest.translate(0f, sink), now())
+        val held = screen().getPixel(face.x, face.y)
+        assertTrue("the key turns ink: ${Integer.toHexString(held)} was ${Integer.toHexString(before)}", Color(held).luminance() < 0.1f && Color(before).luminance() > 0.5f)
+        key().performTouchInput { cancel() }
+        compose.mainClock.advanceTimeBy(400)
+        assertEquals(rest, now())
+        assertEquals("back to white", before, screen().getPixel(face.x, face.y))
+    }
+
+    /**
+     * An accent swatch squashes to 82% and tilts 10° while pressed; picked, it lands like a stamp,
+     * overshooting to 112% before it settles, and its tick springs in.
+     */
+    @Test fun stickerSwatchSquashesThenLandsLikeAStamp() {
+        var look by mutableStateOf(Appearance(UiStyle.Sticker, ThemeMode.Light, AccentChoice.Blue))
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Sticker, accent = accentColor(look.accent, false)) {
+                SettingsScreen(look, accentColor(look.accent, false), wallpaperAvailable = true, onStyle = { _, _ -> }, onMode = { _, _ -> }, onAccent = { a, _ -> look = look.copy(accent = a) })
+            }
+        }
+        compose.mainClock.advanceTimeBy(1_000)
+        val swatch = compose.onNodeWithContentDescription("紫色")
+        val face = { compose.onNode(hasTestTag("swatchFace") and hasAnyAncestor(hasContentDescription("紫色")), useUnmergedTree = true) }
+        fun now() = face().fetchSemanticsNode().boundsInRoot
+        val rest = now()
+        swatch.performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(400)
+        assertBox("held", posed(rest, 0.82f, -10f), now())
+        swatch.performTouchInput { up() }
+        // 45% into the 350ms stamp it is at its largest, 112% and turned 6° the other way.
+        compose.mainClock.advanceTimeBy(160)
+        val stamped = now()
+        assertTrue("stamping: ${stamped.width} > ${rest.width}", stamped.width > rest.width * 1.08f)
+        assertEquals(AccentChoice.Purple, look.accent)
+        compose.mainClock.advanceTimeBy(600)
+        assertEquals(rest, now())
+    }
+
+    /** Each kind's held pose is its own: what was pressed reads at a glance. */
+    @Test fun stickerKindsAreAllDifferent() {
+        val poses = StickerPress.entries.map { it.scale to it.turn }
+        assertEquals(poses.size, poses.toSet().size)
     }
 }

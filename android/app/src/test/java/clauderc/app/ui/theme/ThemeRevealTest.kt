@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -57,6 +58,9 @@ class ThemeRevealTest {
 
     private val start = Appearance(UiStyle.Sticker, ThemeMode.Light, AccentChoice.Blue)
 
+    /** The nav bar's tabs picked, in order. */
+    private val picked = mutableListOf<Int>()
+
     /** The 设置 page over the nav bar, with the pick kept in memory so a change lands in the same frame. */
     private fun app() {
         compose.setContent {
@@ -81,7 +85,7 @@ class ThemeRevealTest {
                             NavTab("设置", Symbols.Settings, Symbols.SettingsFilled),
                         ),
                         selected = 3,
-                        onSelect = {},
+                        onSelect = { picked += it },
                         hazeState = null,
                         modifier = Modifier.align(Alignment.BottomCenter),
                     )
@@ -157,20 +161,23 @@ class ThemeRevealTest {
         app()
         val green = compose.onNodeWithContentDescription("绿色")
         val swatch = bounds(green)
-        // 贴纸 lifts the picked dot 3dp: 3.5dp below the swatch's top its ink ring gives way to the green dot.
-        val lifted = Offset(swatch.center.x, swatch.top + with(compose.density) { 3.5.dp.toPx() })
+        // 贴纸 rings the picked dot a second time, 6dp outside its own ink ring: a 2dp line 29dp above the swatch's centre.
+        val ring = Offset(swatch.center.x, swatch.center.y - with(compose.density) { 29.dp.toPx() })
         // The accent dot on the 会话 tab, 10.5dp right of the cell's centre and 6.5dp below its top.
         val tab = compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))[1]
         val cell = bounds(tab)
         val dot = with(compose.density) { Offset(cell.center.x + 10.5.dp.toPx(), cell.top + 6.5.dp.toPx()) }
         tapAndWaitForTheCircle(green)
 
-        // The first frame the circle takes in the lifted dot's top edge.
-        val reach = with(compose.density) { 25.dp.toPx() }
+        // The first frame the circle takes in the top of that ring: the nav bar's dot, far off, is still blue.
+        val reach = with(compose.density) { 30.dp.toPx() }
+        assertTrue("no outer ring before the tap", Color(shot().at(ring)).luminance() > 0.5f)
         while (reveal.radius.value < reach) compose.mainClock.advanceTimeByFrame()
         var image = shot()
-        assertEquals("the picked swatch is already lifted", Color(0xFF34C759).toArgb(), image.at(lifted))
         assertClose("the nav bar's dot is still blue", Color(0xFF007AFF).toArgb(), image.at(dot))
+        // Inside the circle the new page lands the swatch like a stamp, its ring springing in by the end.
+        compose.mainClock.advanceTimeBy(motion.durL.toLong())
+        assertClose("the picked swatch has its outer ring", StickerLightColors.ink.toArgb(), shot().at(ring))
 
         compose.mainClock.advanceTimeBy(motion.durReveal.toLong())
         image = shot()
@@ -236,6 +243,22 @@ class ThemeRevealTest {
             assertFalse("$from → $to changes the page", before.asAndroidBitmap().sameAs(end.asAndroidBitmap()))
             from = to
         }
+    }
+
+    /** The old page's picture covers the nav bar while the circle grows: a tap on a tab there switches nothing. */
+    @Test fun aTabTappedWhileTheCircleGrowsIsNotPicked() {
+        app()
+        val tab = compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))[0]
+        tapAndWaitForTheCircle(compose.onNodeWithText("深色"))
+        compose.mainClock.advanceTimeBy(motion.durReveal / 2L, ignoreFrameDuration = true)
+        tab.performClick()
+        assertTrue("the tap lands mid reveal", reveal.running)
+        assertEquals("no tab picked mid reveal", emptyList<Int>(), picked)
+
+        compose.mainClock.advanceTimeBy(motion.durReveal.toLong())
+        assertFalse(reveal.running)
+        tab.performClick()
+        assertEquals("once the reveal ends the tab takes the tap", listOf(0), picked)
     }
 
     @Test fun clearSpreadsFromTheClearOption() {
