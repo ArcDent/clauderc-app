@@ -20,6 +20,7 @@ import (
 // snapshot does not overwrite the poller's baseline, so the first phone still
 // receives chat.pending with a higher rev.
 func TestSecondPhoneOpenDoesNotSuppressPendingForFirst(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{
 		opts: func(o *chat.Options) {
 			o.PollInterval = 100 * time.Millisecond
@@ -85,6 +86,7 @@ func TestSecondPhoneOpenDoesNotSuppressPendingForFirst(t *testing.T) {
 // A late chat.close or term.close carrying an older subId leaves the newer
 // subscription from the same client intact.
 func TestLateCloseWithOldSubIDKeepsNewSubscription(t *testing.T) {
+	t.Parallel()
 	s := running()
 	s.screen = "❯ ready"
 	f := newFixture(t, s)
@@ -136,6 +138,7 @@ func TestLateCloseWithOldSubIDKeepsNewSubscription(t *testing.T) {
 // term.open is in flight prevents registering the subscription, stops polling
 // and releases the attach.
 func TestClientGoneOrCloseDuringOpensLeavesNoSubscriptions(t *testing.T) {
+	t.Parallel()
 	waitDelayCall := func(t *testing.T, f *fixture, before int) {
 		t.Helper()
 		deadline := time.Now().Add(3 * time.Second)
@@ -276,6 +279,7 @@ func TestClientGoneOrCloseDuringOpensLeavesNoSubscriptions(t *testing.T) {
 // When /clear changes target.SessionID, the open chat switches to the new
 // transcript and pushes one reset page, then follows new entries from it.
 func TestClearSwitchesTranscriptAndPushesReset(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{
 		opts: func(o *chat.Options) {
 			o.PollInterval = 100 * time.Millisecond
@@ -348,6 +352,7 @@ func TestClearSwitchesTranscriptAndPushesReset(t *testing.T) {
 // When the hidden attach process exits on its own, the next screen poll
 // switches to a fresh attach and terminal keys work again.
 func TestDeadAttachReconnectsOnNextPollAndKeysWork(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "pid")
 	countFile := filepath.Join(dir, "count")
@@ -475,6 +480,7 @@ func waitPID(t *testing.T, path string, timeout time.Duration) int {
 // and returns the same response; once the clock moves past 10 minutes, the same
 // id executes as a fresh send.
 func TestChatSendDedupAndExpiry(t *testing.T) {
+	t.Parallel()
 	var nowMu sync.Mutex
 	now := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
 	clock := func() time.Time {

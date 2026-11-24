@@ -83,6 +83,7 @@ func (f *fixture) waitKeys(t *testing.T, want string) {
 }
 
 func TestLimitInChatStatus(t *testing.T) {
+	t.Parallel()
 	c := newClock(limitHit.Add(time.Minute))
 	f := newFixture(t, setup{opts: resumeOpts(c, "", nil)})
 	f.appendTranscript(t, limitLine(denverLimit))
@@ -110,6 +111,7 @@ func TestLimitInChatStatus(t *testing.T) {
 // The message goes out once, a minute after the reset, and the limit is
 // gone after it.
 func TestAutoResumeSendsOnce(t *testing.T) {
+	t.Parallel()
 	c := newClock(limitHit.Add(time.Minute))
 	f := newFixture(t, setup{opts: resumeOpts(c, filepath.Join(t.TempDir(), "resume.json"), nil)})
 	f.appendTranscript(t, limitLine(denverLimit))
@@ -139,6 +141,7 @@ func TestAutoResumeSendsOnce(t *testing.T) {
 // Something else sent before the time drops the message; turning it off
 // does too.
 func TestAutoResumeDropped(t *testing.T) {
+	t.Parallel()
 	c := newClock(limitHit.Add(time.Minute))
 	f := newFixture(t, setup{opts: resumeOpts(c, "", nil)})
 	f.appendTranscript(t, limitLine(denverLimit))
@@ -160,6 +163,7 @@ func TestAutoResumeDropped(t *testing.T) {
 
 // A new agent reads the waiting message back from the file and sends it.
 func TestAutoResumeSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	c := newClock(limitHit.Add(time.Minute))
 	file := filepath.Join(t.TempDir(), "resume.json")
 	var opts chat.Options
@@ -178,6 +182,7 @@ func TestAutoResumeSurvivesRestart(t *testing.T) {
 
 // A limit message without a time Go can read falls back on usage.get.
 func TestLimitResetFromUsage(t *testing.T) {
+	t.Parallel()
 	c := newClock(limitHit.Add(time.Minute))
 	reset := limitHit.Add(3 * time.Hour)
 	f := newFixture(t, setup{opts: func(o *chat.Options) {
@@ -204,6 +209,7 @@ func TestLimitResetFromUsage(t *testing.T) {
 }
 
 func TestAutoResumeRefused(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{opts: resumeOpts(newClock(limitHit), "", nil)})
 	res := f.call(t, "c1", protocol.MethodChatAutoResume, protocol.ChatAutoResumeRequest{SessionID: shortID, On: true, Text: "继续"})
 	if res.Error == nil || res.Error.Code != protocol.CodeInvalidParams {
@@ -275,6 +281,7 @@ func resumeTexts(t *testing.T, file string) map[string]string {
 // Turned off while its message was being sent, an automatic message that
 // then failed to go out does not come back.
 func TestAutoResumeTurnedOffWhileSending(t *testing.T) {
+	t.Parallel()
 	f, _, file, release := sendingResume(t, func(*fixture, func(context.Context, string) (func(), error)) error {
 		return errors.New("resume failed")
 	})
@@ -289,6 +296,7 @@ func TestAutoResumeTurnedOffWhileSending(t *testing.T) {
 // Changed while its message was being sent, an automatic message that
 // then went out keeps the new setting.
 func TestAutoResumeChangedWhileSending(t *testing.T) {
+	t.Parallel()
 	f, c, file, release := sendingResume(t, func(f *fixture, _ func(context.Context, string) (func(), error)) error {
 		f.setAgents(t, "idle", "done", "7") // the session runs again
 		return nil
@@ -307,6 +315,7 @@ func TestAutoResumeChangedWhileSending(t *testing.T) {
 // Close waits for the automatic message being sent before it closes the
 // attaches.
 func TestCloseWaitsForAutoResume(t *testing.T) {
+	t.Parallel()
 	held := make(chan error, 1)
 	f, _, _, release := sendingResume(t, func(_ *fixture, hold func(context.Context, string) (func(), error)) error {
 		done, err := hold(context.Background(), shortID)
@@ -340,6 +349,7 @@ func TestCloseWaitsForAutoResume(t *testing.T) {
 // A text update that arrives at the agent while waiting on usage.get cannot
 // race past a turn-off for the same session and turn auto-resume back on.
 func TestAutoResumeSerializedPerSession(t *testing.T) {
+	t.Parallel()
 	c := newClock(limitHit.Add(time.Minute))
 	reset := limitHit.Add(3 * time.Hour)
 	file := filepath.Join(t.TempDir(), "resume.json")

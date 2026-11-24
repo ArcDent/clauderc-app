@@ -46,6 +46,7 @@ func (f *fixture) addSubagents(t *testing.T) string {
 }
 
 func TestOpenSubagent(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "busy", state: "working"})
 	dir := f.addSubagents(t)
 
@@ -104,6 +105,7 @@ func TestOpenSubagent(t *testing.T) {
 }
 
 func TestOpenSubagentRejects(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	f.addSubagents(t)
 	before := len(fakeclaude.Calls(t, f.claudeLog))

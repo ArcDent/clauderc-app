@@ -63,6 +63,7 @@ func rewindSample(t *testing.T) (before, after string) {
 }
 
 func TestRewind(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		rows    []string
@@ -105,6 +106,7 @@ func TestRewind(t *testing.T) {
 
 // A working session is refused before a single key goes out.
 func TestRewindWhileWorking(t *testing.T) {
+	t.Parallel()
 	f := rewindFixture(t, setup{status: "busy", state: "working", attachEnv: []string{fakeattach.RewindEnv(rewindRows, rewindOptions)}})
 	res := f.call(t, "c1", protocol.MethodChatRewind, protocol.ChatRewindRequest{SessionID: shortID, UUID: rewindTwoUUID, Restore: protocol.RewindBoth})
 	if res.Error == nil || res.Error.Code != protocol.CodeRewindFailed {
@@ -119,6 +121,7 @@ func TestRewindWhileWorking(t *testing.T) {
 // messages away itself: the open chat gets them as removed items, and a
 // later page of the session leaves them out too.
 func TestRewindTakesTheMessagesAwayAtOnce(t *testing.T) {
+	t.Parallel()
 	f := rewindFixture(t, setup{attachEnv: []string{fakeattach.RewindEnv(rewindRows, rewindOptions)}})
 	var opened protocol.ChatOpenResponse
 	if err := json.Unmarshal(f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID}), &opened); err != nil {
@@ -163,6 +166,7 @@ func TestRewindTakesTheMessagesAwayAtOnce(t *testing.T) {
 // chat's screen; the agent takes the messages away when the panel closes
 // on a way back that took the conversation, and only then.
 func TestRewindSeenOnTheScreen(t *testing.T) {
+	t.Parallel()
 	const wait = 1300 * time.Millisecond // the chat reads its screen once a second
 	type step struct {
 		keys []protocol.TermKey
@@ -235,6 +239,7 @@ func TestRewindSeenOnTheScreen(t *testing.T) {
 // The mark a rewind leaves on the session holds while the transcript stays
 // as it was: once a record comes, the branch it hangs from tells.
 func TestRewindMarkLastsUntilTheTranscriptMovesOn(t *testing.T) {
+	t.Parallel()
 	before, after := rewindSample(t)
 	var last string
 	for _, l := range strings.Split(strings.TrimSpace(before), "\n") {
@@ -288,6 +293,7 @@ func TestRewindMarkLastsUntilTheTranscriptMovesOn(t *testing.T) {
 // seven, the first reading the same, is where Enter goes. In a list longer
 // than the screen, the third of sixteen is more than a screen up.
 func TestRewindByPlace(t *testing.T) {
+	t.Parallel()
 	var long []string
 	for i := 1; i <= 16; i++ {
 		long = append(long, fmt.Sprintf("第 %d 条", i))
@@ -341,6 +347,7 @@ func TestRewindTimeLimit(t *testing.T) {
 // message to come back into the input box and clears it; what goes wrong
 // then is told, and the rewind still answered as done.
 func TestRewindAfterTheLastEnter(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		env    []string
@@ -394,6 +401,7 @@ func TestRewindAfterTheLastEnter(t *testing.T) {
 // A panel that cannot be read is left with Esc until it is gone; with no
 // panel, no Esc goes out.
 func TestRewindLeavesAPanelItCannotRead(t *testing.T) {
+	t.Parallel()
 	f := rewindFixture(t, setup{attachEnv: []string{fakeattach.RewindEnv(rewindRows, rewindOptions), fakeattach.RewindBrokenEnv()}})
 	res := f.call(t, "c1", protocol.MethodChatRewind, protocol.ChatRewindRequest{SessionID: shortID, UUID: rewindTwoUUID, Restore: protocol.RewindBoth})
 	if res.Error == nil || res.Error.Code != protocol.CodeRewindFailed || !strings.Contains(res.Error.Message, "已按 Esc 退出") {
@@ -458,6 +466,7 @@ func TestRewindPlacesTheMessageAgainWithTheTerminal(t *testing.T) {
 // open chat's screen reads while it runs. The input box keeps the message,
 // so chat.rewind holds the terminal a while after the panel closed.
 func TestRewindIsNotFollowedOnTheScreen(t *testing.T) {
+	t.Parallel()
 	s := setup{attachEnv: []string{fakeattach.RewindEnv(rewindRows, rewindOptions), fakeattach.RewindStickyEnv()}}
 	var mu sync.Mutex
 	var removedAt []time.Time

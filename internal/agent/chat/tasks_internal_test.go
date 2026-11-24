@@ -30,6 +30,7 @@ func ids(tasks []protocol.ChatTask) string {
 }
 
 func TestTaskList(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	var l taskList
 	if tasks, _ := l.read(filepath.Join(dir, "none")); tasks == nil || len(tasks) != 0 {
@@ -71,6 +72,7 @@ func TestTaskList(t *testing.T) {
 // Claude Code deletes the files of a list all completed one by one: the
 // list is taken as cleared at the first one gone.
 func TestTaskListClearing(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	var l taskList
 	for _, id := range []string{"1", "2", "3"} {
@@ -95,6 +97,7 @@ func TestTaskListClearing(t *testing.T) {
 }
 
 func TestTaskListCap(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for i := 1; i <= 60; i++ {
 		writeTask(t, dir, fmt.Sprint(i), task(fmt.Sprint(i), "任务", "pending"))
@@ -109,6 +112,7 @@ func TestTaskListCap(t *testing.T) {
 // A list read from another directory, after /clear, is not taken for the
 // old one being cleared.
 func TestTaskListOfAnotherSession(t *testing.T) {
+	t.Parallel()
 	a, b := t.TempDir(), t.TempDir()
 	for _, id := range []string{"1", "2", "3"} {
 		writeTask(t, a, id, task(id, "旧任务", "completed"))
@@ -124,6 +128,7 @@ func TestTaskListOfAnotherSession(t *testing.T) {
 // The refill is seen only in an input box on screen: a screen caught
 // without it, as while it redraws, is not one with the message back.
 func TestInputFilled(t *testing.T) {
+	t.Parallel()
 	rule := strings.Repeat("─", 20)
 	for _, c := range []struct {
 		screen string

@@ -43,6 +43,7 @@ func shotPNG(t *testing.T) []byte {
 }
 
 func TestChatImageReturnsTheOriginal(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	shot := shotPNG(t)
 	webp := append([]byte("RIFF\x24\x00\x00\x00WEBPVP8 "), make([]byte, 64)...)
@@ -77,6 +78,7 @@ func TestChatImageReturnsTheOriginal(t *testing.T) {
 }
 
 func TestChatImageRejects(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	big := make([]byte, protocol.MaxImageBytes+1)
 	f.appendTranscript(t, imageLines("toolu_big", "image/png", big))
@@ -103,6 +105,7 @@ func TestChatImageRejects(t *testing.T) {
 // names it, whether its chat is open or not; without the AgentID only the
 // session's own transcript is looked at, as before.
 func TestChatImageOfASubagent(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	dir := f.addSubagents(t)
 	shot := shotPNG(t)
@@ -200,6 +203,7 @@ func userImagesLine(uuid, text string, imgs [][]byte) string {
 // in both chat.open and live chat.items; chat.image returns the exact 4 MB
 // original bytes for each ID.
 func TestUserMessageImagesSendThumbnailsAndFetchOriginal(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	originals := [][]byte{bigPNG(t, 0), bigPNG(t, 1), bigPNG(t, 2)}
 	f.appendTranscript(t, userImagesLine("u-open-imgs", "三张大图", originals))

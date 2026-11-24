@@ -33,6 +33,7 @@ const (
 )
 
 func TestAnswerRejectsChangedPending(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	// Nothing pending at all.
 	res := f.call(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_p1", Decision: protocol.DecisionAllow})
@@ -51,6 +52,7 @@ func TestAnswerRejectsChangedPending(t *testing.T) {
 }
 
 func TestAnswerPermission(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		decision protocol.Decision
 		keys     string
@@ -65,6 +67,7 @@ func TestAnswerPermission(t *testing.T) {
 }
 
 func TestAnswerQuestions(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, input string
 		answers     []protocol.Answer
@@ -104,6 +107,7 @@ func TestAnswerQuestions(t *testing.T) {
 // Esc only goes out while the session works: in a dialog or a pending
 // prompt it would close or deny something else.
 func TestInterrupt(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "busy", state: "working"})
 	f.ok(t, "c1", protocol.MethodChatInterrupt, protocol.ChatInterruptRequest{SessionID: shortID})
 	if got := f.keyLog(); got != "\x1b" {
@@ -123,6 +127,7 @@ func TestInterrupt(t *testing.T) {
 // phone would land on the list and save the default model (RESULTS.md),
 // so chat.send and chat.answer refuse without typing anything.
 func TestEnterRefusedWhilePickerOpen(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{replay: "picker"})
 	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "你好"})
 	if res.Error == nil || res.Error.Code != protocol.CodeInvalidParams || !strings.Contains(res.Error.Message, "选择界面") {
@@ -140,6 +145,7 @@ func TestEnterRefusedWhilePickerOpen(t *testing.T) {
 
 // On the recorded input screen a message is typed as usual.
 func TestEnterAllowedOnPromptScreen(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{replay: "mode-default"})
 	// The replay does not write the transcript, so delivery is not seen.
 	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "你好"})
@@ -154,6 +160,7 @@ func TestEnterAllowedOnPromptScreen(t *testing.T) {
 const openPicker = "\x15\x1b[200~/model\x1b[201~\r"
 
 func TestModels(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	var res protocol.ChatModelsResponse
 	if err := json.Unmarshal(f.ok(t, "c1", protocol.MethodChatModels, protocol.ChatModelsRequest{SessionID: shortID}), &res); err != nil {
@@ -183,6 +190,7 @@ func TestModels(t *testing.T) {
 }
 
 func TestSetModelUsesSessionOnlyKey(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		env     []string
@@ -216,6 +224,7 @@ func TestSetModelUsesSessionOnlyKey(t *testing.T) {
 }
 
 func TestSetPermissionMode(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		env     []string
@@ -243,6 +252,7 @@ func TestSetPermissionMode(t *testing.T) {
 
 // With an attach the status line, not the transcript, gives the mode.
 func TestPermissionModeFromScreen(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
 	f.ok(t, "c1", protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: shortID, Mode: protocol.PermissionAcceptEdits})
@@ -268,6 +278,7 @@ func TestPermissionModeFromScreen(t *testing.T) {
 // phone after the one chat.setPermissionMode pushes: the phone's last
 // chat.state has the new mode.
 func TestSwitchedModeIsThePhonesLastState(t *testing.T) {
+	t.Parallel()
 	var armed atomic.Bool
 	held, switched := make(chan struct{}, 1), make(chan struct{})
 	var once sync.Once
@@ -315,6 +326,7 @@ func TestSwitchedModeIsThePhonesLastState(t *testing.T) {
 }
 
 func TestCommands(t *testing.T) {
+	t.Parallel()
 	// The session's folder holds a skill kept from the model, a symlinked
 	// skill, a command in a subfolder and a skill the user cannot run; the
 	// user's own folder (the fake ~/.claude) repeats a listed skill.
@@ -371,6 +383,7 @@ func TestCommands(t *testing.T) {
 // --add-dir, cannot run the user's own skills and commands, so they are
 // not offered; the project's and the plugins' still are.
 func TestCommandsFollowSettingSources(t *testing.T) {
+	t.Parallel()
 	write := func(path, body string) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -429,6 +442,7 @@ func TestCommandsFollowSettingSources(t *testing.T) {
 }
 
 func TestMethodsListsAllChatMethods(t *testing.T) {
+	t.Parallel()
 	h := chat.New(chat.Options{})
 	defer h.Close()
 	want := map[protocol.Method]bool{
@@ -453,6 +467,7 @@ func TestMethodsListsAllChatMethods(t *testing.T) {
 // /model would land on the list and save the default model (RESULTS.md),
 // so chat.models and chat.setModel refuse without typing anything.
 func TestModelOpsRefusedWhilePickerOpen(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{replay: "picker"})
 	want := "电脑上开着模型选择界面，这时按回车会改掉默认模型；请先在电脑上关掉它再试"
 	for _, c := range []struct {
@@ -475,6 +490,7 @@ func TestModelOpsRefusedWhilePickerOpen(t *testing.T) {
 // When the picker does not show up after /model, Esc is pressed in case it
 // opens late, so it is never left open with Enter saving the default.
 func TestModelsLeavesWithEscWhenPickerNeverShows(t *testing.T) {
+	t.Parallel()
 	// The recorded prompt screen never reacts to keys.
 	f := newFixture(t, setup{replay: "mode-default"})
 	res := f.call(t, "c1", protocol.MethodChatModels, protocol.ChatModelsRequest{SessionID: shortID})
@@ -492,6 +508,7 @@ const promptScreen = "\x1b[?25l Bash command\n\n   rm -rf build\n\n Do you want 
 // On a permission prompt the keys of the model and mode operations would
 // answer it: /model's Enter allows it, Shift+Tab allows all edits.
 func TestModelAndModeOpsRefusedOnAPrompt(t *testing.T) {
+	t.Parallel()
 	s := running()
 	s.screen = promptScreen
 	f := newFixture(t, s)
@@ -517,6 +534,7 @@ func TestModelAndModeOpsRefusedOnAPrompt(t *testing.T) {
 // A prompt that comes up while /model is typed gets neither its Enter nor
 // the Esc that would deny it.
 func TestModelsStopsWhenAPromptComesUp(t *testing.T) {
+	t.Parallel()
 	prompt := `\033[2J\033[H\033[?25l Bash command\r\n\r\n Do you want to proceed?\r\n ❯ 1. Yes\r\n   2. No`
 	s := running()
 	s.opts = shellAttach(`printf '────────\r\n❯\302\240'; n=0; while :; do c=$(dd bs=1 count=1 2>/dev/null); [ -z "$c" ] && exit; printf '%s' "$c" >> "$FAKE_ATTACH_LOG"; if [ "$c" = "~" ]; then n=$((n+1)); [ $n -eq 2 ] && printf '` + prompt + `'; fi; done`)
@@ -533,6 +551,7 @@ func TestModelsStopsWhenAPromptComesUp(t *testing.T) {
 // A request given up while the picker is open still closes it with Esc:
 // left open, an Enter on the computer would save the default model.
 func TestModelsClosesThePickerWhenGivenUp(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -579,6 +598,7 @@ func stepAttach(t *testing.T, screens ...string) func(*chat.Options) {
 // take its Esc as a denial: the screen is looked at once the terminal is
 // held.
 func TestInterruptLooksAtTheScreenWithTheTerminal(t *testing.T) {
+	t.Parallel()
 	prompt := `\033[2J\033[H\033[?25l Bash command\r\n\r\n Do you want to proceed?\r\n ❯ 1. Yes\r\n   2. No`
 	s := running()
 	// The prompt comes up as the paste of a message ends, on its second ~.
@@ -608,6 +628,7 @@ func TestInterruptLooksAtTheScreenWithTheTerminal(t *testing.T) {
 // pending; the prompt is gone from the screen, and a denial from the phone
 // would interrupt the tool: no key goes out.
 func TestAnswerAfterThePromptLeftTheScreen(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{screen: inputScreen})
 	f.blockedOn(t, "toolu_p1", "Bash", `{"command":"sleep 30"}`)
 	res := f.call(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_p1", Decision: protocol.DecisionDeny})
@@ -623,6 +644,7 @@ func TestAnswerAfterThePromptLeftTheScreen(t *testing.T) {
 // for on the screen first: one closed elsewhere would leave the rest of the
 // keys to the input box or to whatever came up.
 func TestAnswerLooksForEachQuestion(t *testing.T) {
+	t.Parallel()
 	q1 := questionScreen("你喜欢哪种颜色？", "❯ 1. 红", "  2. 绿", "  3. 蓝")
 	q2 := questionScreen("你喜欢哪种动物？", "❯ 1. 猫", "  2. 狗")
 	review := questionScreen("Review your answers", "● 你喜欢哪种颜色？ → 绿", "● 你喜欢哪种动物？ → 狗", "❯ 1. Submit answers", "  2. Cancel")
@@ -664,6 +686,7 @@ func TestAnswerLooksForEachQuestion(t *testing.T) {
 // an open chat does not tell the phone the session stopped on a panel,
 // however long the picker shows.
 func TestSetModelPickerIsNoPanelLeftOpen(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	picker := "\x1b[2J\x1b[H\x1b[?25l   Select model\r\n\r\n"
 	for i := 1; i <= 10; i++ {

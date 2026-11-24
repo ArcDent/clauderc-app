@@ -39,6 +39,7 @@ func dialogPending(t *testing.T, f *fixture) protocol.Pending {
 // A blocked session with nothing pending in its transcript and the MCP
 // dialog on screen gets a dialog pending prompt and the pending state.
 func TestDialogIsPushedAsPending(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "waiting", state: "blocked", screen: mcpDialog(t)})
 	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
 	p := dialogPending(t, f)
@@ -66,6 +67,7 @@ func TestDialogIsPushedAsPending(t *testing.T) {
 // A blocked session showing a panel, with nothing pending in its
 // transcript, is flagged; the input box is not.
 func TestUnknownDialogIsFlagged(t *testing.T) {
+	t.Parallel()
 	panel := "\x1b[?25l   Manage MCP servers\n   8 servers\n\n   ❯ ✔ chrome-devtools     26 tools\n\n   ↑/↓ to navigate · Enter to confirm · Esc to cancel"
 	f := newFixture(t, setup{status: "waiting", state: "blocked", screen: panel})
 	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
@@ -104,6 +106,7 @@ func TestUnknownDialogIsFlagged(t *testing.T) {
 
 // Picking option 2 with the cursor on option 3 moves up once and confirms.
 func TestAnswerDialogMovesCursor(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "waiting", state: "blocked", screen: mcpDialog(t)})
 	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
 	p := dialogPending(t, f)
@@ -118,6 +121,7 @@ func TestAnswerDialogMovesCursor(t *testing.T) {
 
 // A stale id, a custom answer or two picks type nothing.
 func TestAnswerDialogRefused(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "waiting", state: "blocked", screen: mcpDialog(t)})
 	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
 	p := dialogPending(t, f)
@@ -144,6 +148,7 @@ func TestAnswerDialogRefused(t *testing.T) {
 
 // Without blocked the dialog text on screen is not read.
 func TestDialogOnlyWhileBlocked(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "idle", state: "done", screen: mcpDialog(t)})
 	var res protocol.ChatOpenResponse
 	if err := json.Unmarshal(f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID}), &res); err != nil {
@@ -160,6 +165,7 @@ func TestDialogOnlyWhileBlocked(t *testing.T) {
 
 // Blocked with a plain prompt on screen stays idle.
 func TestBlockedWithoutDialogStaysIdle(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "waiting", state: "blocked", replay: "mode-default"})
 	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
 	if e, ok := f.maybeEvent(protocol.EventChatPending, 2*time.Second); ok {
@@ -174,6 +180,7 @@ const mcpPanel = "\x1b[?25l   Manage MCP servers\n   8 servers\n\n   ❯ ✔ chr
 // A panel left open: Claude Code reports the session done, not blocked,
 // and the phone is told all the same.
 func TestUnknownDialogPanelThoughNotBlocked(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "idle", state: "done", screen: mcpPanel})
 	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
 	deadline := time.Now().Add(5 * time.Second)
@@ -191,6 +198,7 @@ func TestUnknownDialogPanelThoughNotBlocked(t *testing.T) {
 // One poll without the input box is not enough: it may be a frame caught
 // mid-draw. Here the panel is gone again before the second poll.
 func TestUnknownDialogNeedsTwoScreens(t *testing.T) {
+	t.Parallel()
 	s := setup{status: "idle", state: "done"}
 	panel := strings.ReplaceAll(mcpPanel, "\n", `\r\n`)
 	attachOpts := shellAttach(`printf '` + panel + `'; head -c 1 >/dev/null; printf '\033[2J\033[H──────────\r\n❯\302\240\r\n──────────\033[?25h'; exec cat > "$FAKE_ATTACH_LOG"`)

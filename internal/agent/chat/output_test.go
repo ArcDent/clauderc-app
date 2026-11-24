@@ -47,6 +47,7 @@ func toolItem(t *testing.T, items []protocol.ChatItem, id string) *protocol.Tool
 }
 
 func TestLongToolOutputIsTruncatedAndFetchedWhole(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	big, small := bigOutput(20<<10), bigOutput(protocol.MaxToolOutputBytes)
 	f.appendTranscript(t, toolLines("toolu_big", big)+toolLines("toolu_small", small))
@@ -94,6 +95,7 @@ func TestLongToolOutputIsTruncatedAndFetchedWhole(t *testing.T) {
 }
 
 func TestToolOutputRejects(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	cases := []struct {
 		body protocol.ChatToolOutputRequest

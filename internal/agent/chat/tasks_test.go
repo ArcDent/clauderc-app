@@ -53,6 +53,7 @@ func (f *fixture) tasksEvent(t *testing.T, within time.Duration) protocol.ChatTa
 }
 
 func TestChatTasks(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{})
 	dir := f.taskDir(t, sessionID)
 	putTask(t, dir, "1", "甲", "in_progress")
@@ -94,6 +95,7 @@ func TestChatTasks(t *testing.T) {
 
 // A subagent's chat shows no task list.
 func TestSubagentChatHasNoTasks(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t, setup{status: "busy", state: "working"})
 	f.addSubagents(t)
 	dir := f.taskDir(t, sessionID)
