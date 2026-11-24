@@ -1131,6 +1131,77 @@ exec "`+fakeclaude.Path()+`" "$@"
 	}
 }
 
+// A session that shows up in the working directory while waking is no
+// copy when this handler launched it, by session.create or a fork, or when
+// it is a fork of another session, as /fork there starts: it stays, and the
+// wake goes through.
+func TestWakeKeepsSessionsStartedMeanwhile(t *testing.T) {
+	cases := []struct {
+		name string
+		// start makes the new session; it returns once it is listed.
+		start func(t *testing.T, f *fixture, h *lifecycle.Handler, work string) error
+	}{
+		{"session.create", func(t *testing.T, f *fixture, h *lifecycle.Handler, work string) error {
+			_, err := h.Create(context.Background(), protocol.SessionCreateRequest{Cwd: work})
+			return err
+		}},
+		{"fork by the agent", func(t *testing.T, f *fixture, h *lifecycle.Handler, work string) error {
+			return h.Fork(context.Background(), "old00001", "")
+		}},
+		{"fork in another session", func(t *testing.T, f *fixture, h *lifecycle.Handler, work string) error {
+			writeJSON(t, filepath.Join(f.claudeDir, "jobs", "f00dcafe", "state.json"), map[string]any{"forkParentSessionId": "uuid-old", "cwd": work})
+			f.setAgents(t, session{"stp00001", wakeUUID, work, false}, session{"old00001", "uuid-old", work, true}, session{"f00dcafe", "uuid-new", work, true})
+			return nil
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			work := t.TempDir()
+			orig := session{"stp00001", wakeUUID, work, false}
+			other := session{"old00001", "uuid-old", work, true} // there before waking
+			added := session{"f00dcafe", "uuid-new", work, true}
+			f.setAgents(t, orig, other)
+			f.job(t, "old00001", []string{"--model", "opus"}, nil, "2026-11-13T08:00:00.000Z")
+			// A launch lists its session a while before claude returns.
+			writeJSON(t, filepath.Join(f.claudeDir, "agents.new.json"), agentEntries(orig, other, added))
+			src := f.src
+			src.ClaudePath = writeScript(t, `case " $* " in *" --bg "*) cp "$FAKE_CLAUDE_DIR/agents.new.json" "$FAKE_CLAUDE_DIR/agents.json"; sleep 0.5 ;; esac
+exec "`+fakeclaude.Path()+`" "$@"
+`)
+			h := lifecycle.New(lifecycle.Options{Source: src, Dir: f.dir, WakeTimeout: 5 * time.Second, PollInterval: 20 * time.Millisecond})
+			started := make(chan error, 1)
+			hd := &holder{attached: func() { go func() { started <- c.start(t, f, h, work) }() }}
+			woke := make(chan error, 1)
+			go func() { woke <- h.Wake(context.Background(), wakeUUID, hd.hold) }()
+			select {
+			case err := <-started:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case err := <-woke:
+				t.Fatalf("Wake returned %v before the new session was started", err)
+			}
+			// Wake looks at the new session a few times, then the session comes back.
+			select {
+			case err := <-woke:
+				t.Fatalf("Wake returned %v while the session was still stopped", err)
+			case <-time.After(200 * time.Millisecond):
+			}
+			orig.running = true
+			f.setAgents(t, orig, other, added)
+			if err := <-woke; err != nil {
+				t.Fatalf("Wake: %v", err)
+			}
+			for _, l := range f.launches(t) {
+				if l.Args[0] == "stop" || l.Args[0] == "rm" {
+					t.Errorf("claude %q called on a session started meanwhile", l.Args)
+				}
+			}
+		})
+	}
+}
+
 func TestWakeRunningSession(t *testing.T) {
 	f := newFixture(t)
 	f.setAgents(t, session{"run00001", wakeUUID, t.TempDir(), true})
@@ -1229,5 +1300,52 @@ func TestHandle(t *testing.T) {
 				t.Errorf("body = %s, want %s", res.Body, c.wantBody)
 			}
 		})
+	}
+}
+
+// Creating a session twice with the same clientReqId within 10 minutes launches
+// claude only once and returns the same id; after 10 minutes on a fake clock,
+// the same id starts a fresh session.
+func TestCreateDedupAndExpiry(t *testing.T) {
+	f := newFixture(t)
+	var nowMu sync.Mutex
+	now := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
+	f.h = lifecycle.New(lifecycle.Options{
+		Source: f.src,
+		Dir:    f.dir,
+		Now: func() time.Time {
+			nowMu.Lock()
+			defer nowMu.Unlock()
+			return now
+		},
+	})
+	work := t.TempDir()
+	req := protocol.SessionCreateRequest{Cwd: work, Name: "dedup", ClientReqID: "create-req-1"}
+
+	id1, err := f.h.Create(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id2, err := f.h.Create(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id1 == "" || id2 != id1 {
+		t.Fatalf("ids = %q and %q, want same non-empty id", id1, id2)
+	}
+	if got := len(f.launches(t)); got != 1 {
+		t.Fatalf("claude launched %d times, want 1", got)
+	}
+
+	// Move fake clock past 10 minutes: the same clientReqId now runs again.
+	nowMu.Lock()
+	now = now.Add(10*time.Minute + time.Second)
+	nowMu.Unlock()
+
+	if _, err := f.h.Create(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.launches(t)); got != 2 {
+		t.Fatalf("claude launched %d times after 10m expiry, want 2", got)
 	}
 }

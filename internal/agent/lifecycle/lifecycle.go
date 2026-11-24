@@ -73,6 +73,8 @@ type Options struct {
 	// before the phone gets its answer, so the session list can be read
 	// again at once; nil calls nothing.
 	Changed func()
+	// Now is the clock for request deduplication; defaults to time.Now.
+	Now func() time.Time
 }
 
 // Handler implements agent.Handler for the session management methods.
@@ -82,6 +84,16 @@ type Handler struct {
 	// skillsMu lets one create at a time answer the trust prompt of
 	// userSkillsDir.
 	skillsMu sync.Mutex
+	// createDedup deduplicates session.create requests carrying ClientReqID.
+	createDedup *agent.Dedup[string]
+
+	// mu guards launching and launched, which tell Wake the sessions
+	// Create and Fork start: launching counts the launches under way, and
+	// launched holds the short ids of those done, with when, for as long
+	// as a Wake may be waiting.
+	mu        sync.Mutex
+	launching int
+	launched  map[string]time.Time
 }
 
 // New returns a Handler.
@@ -98,7 +110,14 @@ func New(opts Options) *Handler {
 	if opts.Changed == nil {
 		opts.Changed = func() {}
 	}
-	return &Handler{opts: opts}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
+	return &Handler{
+		opts:        opts,
+		createDedup: agent.NewDedup[string](agent.DefaultDedupTTL, opts.Now),
+		launched:    map[string]time.Time{},
+	}
 }
 
 // Methods implements agent.Handler.
@@ -153,6 +172,12 @@ func (h *Handler) Handle(ctx context.Context, req protocol.Envelope) protocol.En
 // when one is given. A missing working directory or a request launchConfig
 // refuses fails before claude runs.
 func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest) (string, error) {
+	return h.createDedup.Do(ctx, req.ClientReqID, func() (string, error) {
+		return h.createOnce(ctx, req)
+	})
+}
+
+func (h *Handler) createOnce(ctx context.Context, req protocol.SessionCreateRequest) (string, error) {
 	if err := checkDir(req.Cwd, "目录不存在："+req.Cwd); err != nil {
 		return "", err
 	}
@@ -175,6 +200,9 @@ func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest)
 		args = append(args, "--", req.Prompt)
 	}
 	const failed = "启动 claude 失败，请在目标机上查看日志"
+	var id string
+	end := h.startLaunch()
+	defer func() { end(id) }()
 	out, err := h.run(ctx, req.Cwd, env, "--bg", args)
 	if err != nil && untrusted(out) && req.Trust {
 		if err := attach.Trust(ctx, req.Cwd, []string{h.opts.Source.ClaudePath}, envList(env)); err != nil {
@@ -189,12 +217,35 @@ func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest)
 		}
 		return "", h.internal(failed, err)
 	}
-	id := parseBackgrounded(out)
+	id = parseBackgrounded(out)
 	if id == "" {
 		return "", h.internal(failed, fmt.Errorf("claude --bg: no session id in output: %s", tail(out)))
 	}
 	h.opts.Changed()
 	return id, nil
+}
+
+// startLaunch notes a launch of a background session under way. The
+// function it returns ends it, given the short id of the session started
+// or "".
+func (h *Handler) startLaunch() func(id string) {
+	h.mu.Lock()
+	h.launching++
+	h.mu.Unlock()
+	return func(id string) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.launching--
+		now := time.Now()
+		for k, at := range h.launched {
+			if now.Sub(at) > h.opts.WakeTimeout+claudeTimeout {
+				delete(h.launched, k)
+			}
+		}
+		if id != "" {
+			h.launched[id] = now
+		}
+	}
 }
 
 // Fork starts a copy of the session with short id id that carries on its
@@ -224,11 +275,14 @@ func (h *Handler) Fork(ctx context.Context, id, instruction string) error {
 		args = append(args, "--", instruction)
 	}
 	const failed = "Fork 失败，请在目标机上查看日志"
+	var copyID string
+	end := h.startLaunch()
+	defer func() { end(copyID) }()
 	out, err := h.run(ctx, dir, tmpl.ProviderEnv, "--bg", args)
 	if err != nil {
 		return h.internal(failed, err)
 	}
-	copyID := parseBackgrounded(out)
+	copyID = parseBackgrounded(out)
 	if copyID == "" {
 		return h.internal(failed, fmt.Errorf("claude --bg --fork-session: no session id in output: %s", tail(out)))
 	}
@@ -586,9 +640,9 @@ func kept(out []byte) (string, bool) {
 // and returns once the CLI lists it as running. `claude --bg --resume`
 // went through a wrapper's extra flags, which made Claude Code start a
 // copy instead (design D8). A new session in the same working directory
-// that shows up meanwhile is taken for such a copy: it is stopped and
-// removed, and Wake fails. A session that is running is left alone. It
-// implements the chat package's Waker.
+// that shows up meanwhile is taken for such a copy (see copied): it is
+// stopped and removed, and Wake fails. A session that is running is left
+// alone. It implements the chat package's Waker.
 func (h *Handler) Wake(ctx context.Context, sessionID string, hold func(ctx context.Context, id string) (func(), error)) error {
 	targets, err := h.targets(ctx)
 	if err != nil {
@@ -624,8 +678,13 @@ func (h *Handler) Wake(ctx context.Context, sessionID string, hold func(ctx cont
 			return nil
 		}
 		if i := slices.IndexFunc(now, func(n discovery.Target) bool { return !known[n.ID] && n.SessionID != sessionID && n.Cwd == t.Cwd }); i >= 0 {
-			h.removeCopy(ctx, now[i].ID)
-			return &protocol.Error{Code: protocol.CodeInternal, Message: "唤醒时 claude 另起了会话，已停止并移出；请在目标机上检查 claude 命令是否原样转发参数"}
+			switch copied, decided := h.copied(ctx, now[i].ID, t.ID); {
+			case copied:
+				h.removeCopy(ctx, now[i].ID)
+				return &protocol.Error{Code: protocol.CodeInternal, Message: "唤醒时 claude 另起了会话，已停止并移出；请在目标机上检查 claude 命令是否原样转发参数"}
+			case decided:
+				known[now[i].ID] = true
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -633,6 +692,28 @@ func (h *Handler) Wake(ctx context.Context, sessionID string, hold func(ctx cont
 		case <-ticker.C:
 		}
 	}
+}
+
+// copied reports whether the session with short id id, new in the working
+// directory of the session with short id of while that one wakes, is a
+// copy started instead of it. A session Create or Fork launched is not,
+// nor a fork of another session, as /fork there starts. decided is false
+// while that cannot be told: a launch under way may be what started it, or
+// the list does not show it.
+func (h *Handler) copied(ctx context.Context, id, of string) (copied, decided bool) {
+	h.mu.Lock()
+	_, ours := h.launched[id]
+	busy := h.launching > 0
+	h.mu.Unlock()
+	if ours || busy {
+		return false, ours
+	}
+	sessions, err := h.opts.Source.Sessions(ctx)
+	i := slices.IndexFunc(sessions, func(s protocol.Session) bool { return s.ID == id })
+	if err != nil || i < 0 {
+		return false, false
+	}
+	return sessions[i].ForkOf == "" || sessions[i].ForkOf == of, true
 }
 
 // removeCopy stops and removes the session with short id id, waiting for
