@@ -173,7 +173,10 @@ func IsPanelCommand(text string) bool {
 // a background session of 2.1.328: /btw answers in an overlay that never
 // reaches the transcript, /fast opens a dialog, /branch moves the session
 // to a new session id, and /stop stops it without a transcript record, so
-// chat.send reports it undelivered. The last
+// chat.send reports it undelivered. The second group first showed in a
+// 2.1.330 session logged in with a claude.ai account: they open account
+// dialogs or the browser, hand work to Chrome, the desktop app, Slack,
+// GitHub or a cloud session, or toggle voice input on the target. The last
 // group are Claude Code's own skills that its skill listing leaves out; a
 // background session's popup only shows them in --safe-mode.
 var UnofferedCommands = []string{
@@ -183,8 +186,12 @@ var UnofferedCommands = []string{
 	"memory", "mobile", "output-style", "powerup", "radio",
 	"release-notes", "resume", "sandbox", "scroll-speed", "skill-doctor",
 	"stickers", "stop", "terminal-setup", "theme", "tui", "workflows",
+	"artifacts", "autofix-pr", "chrome", "desktop", "install-github-app",
+	"install-slack-app", "privacy-settings", "rate-limit-options",
+	"remote-control", "remote-env", "send-to-project", "ship", "teleport",
+	"ultrareview", "upgrade", "usage-credits", "voice", "web-setup",
 	"batch", "debug", "deep-research", "design", "design-sync", "doctor", "insights",
-	"run-skill-generator", "statusline", "team-onboarding", "verify",
+	"run-skill-generator", "slides", "statusline", "team-onboarding", "verify", "whiteboard",
 }
 
 // Commands merges BuiltinCommands and PanelCommands with the given lists in

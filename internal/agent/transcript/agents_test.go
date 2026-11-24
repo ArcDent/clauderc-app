@@ -192,6 +192,35 @@ func TestAgentWatch(t *testing.T) {
 	}
 }
 
+// A meta file caught half written is read again next time, even when the
+// finished file has the same size and modification time, so the subagent
+// does not stay running.
+func TestAgentMetaHalfWrittenIsReadAgain(t *testing.T) {
+	path := copyAgents(t)
+	w := transcript.WatchAgents(path)
+	meta := filepath.Join(filepath.Dir(path), "agents", "subagents", "agent-"+goAgent+".meta.json")
+	at := time.Date(2026, 11, 17, 8, 0, 0, 0, time.UTC)
+	done := `{"toolUseId":"` + goCall + `","finished":true}`
+	// The same length as done, with its closing brace not yet written.
+	half := done[:len(done)-1] + " "
+	for _, body := range []string{half, done} {
+		writeMeta(t, path, goAgent, body)
+		if err := os.Chtimes(meta, at, at); err != nil {
+			t.Fatal(err)
+		}
+		running, err := w.Running()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body == half && (len(running) != 1 || running[0].ID != goAgent) {
+			t.Fatalf("half written: running = %+v, want the Go agent", running)
+		}
+		if body == done && len(running) != 0 {
+			t.Errorf("finished after a half written read: running = %+v, want none", running)
+		}
+	}
+}
+
 func TestValidAgentID(t *testing.T) {
 	for id, want := range map[string]bool{
 		goAgent: true, "": false, "../x": false, "a/b": false, "..": false, "a.b": false,
