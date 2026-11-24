@@ -67,6 +67,7 @@ data class ErrorBody(val code: String, val message: String = "")
 object ErrorCode {
     const val UNAUTHENTICATED = "unauthenticated"
     const val MACHINE_OFFLINE = "machineOffline"
+    const val MACHINE_BUSY = "machineBusy"
     const val UNKNOWN_METHOD = "unknownMethod"
     const val INVALID_PARAMS = "invalidParams"
     const val SESSION_NOT_FOUND = "sessionNotFound"
@@ -85,8 +86,10 @@ object ErrorCode {
     const val INTERNAL = "internal"
     const val PAIR_CODE_EXPIRED = "pairCodeExpired"
     const val PAIR_CODE_INVALID = "pairCodeInvalid"
+    const val PAIR_CODE_USED = "pairCodeUsed"
     const val RATE_LIMITED = "rateLimited"
     const val DEVICE_NOT_FOUND = "deviceNotFound"
+    const val MACHINE_IN_USE = "machineInUse"
 }
 
 /** Method names from methods.go. */
@@ -140,6 +143,30 @@ object Method {
     const val GIT_PUSH = "git.push"
     const val GIT_SWITCH = "git.switch"
     const val DIR_BUSY = "dir.busy"
+
+    /** True for queries and subscription lifecycle calls that do not mutate state on the machine. */
+    fun isReadOnly(method: String): Boolean = when (method) {
+        MACHINES_LIST,
+        SESSIONS_SUBSCRIBE,
+        SESSIONS_UNSUBSCRIBE,
+        CHAT_OPEN,
+        CHAT_CLOSE,
+        CHAT_MODELS,
+        CHAT_COMMANDS,
+        CHAT_TOOL_OUTPUT,
+        CHAT_IMAGE,
+        TERM_OPEN,
+        TERM_CLOSE,
+        DIRS_RECENT,
+        USAGE_GET,
+        GIT_STATUS,
+        GIT_LOG,
+        GIT_SHOW,
+        GIT_DIFF,
+        GIT_BRANCHES,
+        DIR_BUSY -> true
+        else -> false
+    }
 }
 
 /**

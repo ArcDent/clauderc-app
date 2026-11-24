@@ -53,9 +53,19 @@ object Decision {
     const val DENY = "deny"
 }
 
-/** An attached picture; [data] is base64. */
+/**
+ * An attached picture on chat.send or a user message thumbnail on chat.open / chat.items; [data] is base64.
+ * When [id] is set, [data] is a thumbnail and chat.image fetches the original by [id].
+ */
 @Serializable
-data class Image(val mediaType: String, val data: String)
+data class Image(
+    val mediaType: String,
+    val data: String,
+    val id: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val size: Long? = null,
+)
 
 /** One bubble or tool row; a later item with the same seq replaces the earlier one. */
 @Serializable
@@ -130,9 +140,9 @@ data class ToolImage(
     val thumb: String? = null,
 )
 
-/** Asks for a picture of a tool result by its id. */
+/** Asks for a picture of a tool result by its id; one of a subagent's tool results when [agentId] is set. */
 @Serializable
-data class ChatImageRequest(val sessionId: String, val id: String)
+data class ChatImageRequest(val sessionId: String, val id: String, val agentId: String? = null)
 
 /** The picture as it was; [data] is base64. */
 @Serializable
@@ -180,9 +190,9 @@ data class ChatOpenRequest(
     val agentId: String? = null,
 )
 
-/** chat.close; [agentId] closes a subagent's chat. */
+/** chat.close; [agentId] closes a subagent's chat, [subId] names the subscription returned by chat.open. */
 @Serializable
-data class ChatCloseRequest(val sessionId: String, val agentId: String? = null)
+data class ChatCloseRequest(val sessionId: String, val agentId: String? = null, val subId: String? = null)
 
 /** Go embeds ChatStatus, so state, model and permissionMode sit at the top level. */
 @Serializable
@@ -203,6 +213,8 @@ data class ChatOpenResponse(
     val limit: Limit? = null,
     /** The session's Claude Code task list, oldest task first; absent when it has none. */
     val tasks: List<ChatTask>? = null,
+    val rev: Long? = null,
+    val subId: String? = null,
 )
 
 /** Where a task of Claude Code's task list stands. */
@@ -218,7 +230,7 @@ data class ChatTask(val id: String, val subject: String, val activeForm: String?
 
 /** chat.tasks: the session's task list whenever it changed, whole; empty once Claude Code cleared it. */
 @Serializable
-data class ChatTasksEvent(val sessionId: String, val tasks: List<ChatTask>)
+data class ChatTasksEvent(val sessionId: String, val tasks: List<ChatTask>, val rev: Long? = null)
 
 /** The plan usage limit a session ran into, as in Claude Code's 「You've hit your 5-hour limit · resets 10:40pm」. */
 @Serializable
@@ -267,6 +279,7 @@ data class ChatSendRequest(
     val sessionId: String,
     val text: String,
     val images: List<Image>? = null,
+    val clientReqId: String? = null,
 )
 
 /** [queued] is true when the message waits in Claude Code's queue until the current turn ends. */
@@ -319,10 +332,13 @@ data class ChatItemsEvent(
     val items: List<ChatItem> = emptyList(),
     /** Set for a subagent's chat. */
     val agentId: String? = null,
+    val rev: Long? = null,
+    /** True after /clear when the session switched to a fresh transcript: replace shown items. */
+    val reset: Boolean? = null,
 )
 
 @Serializable
-data class ChatPendingEvent(val sessionId: String, val pending: Pending? = null)
+data class ChatPendingEvent(val sessionId: String, val pending: Pending? = null, val rev: Long? = null)
 
 @Serializable
 data class ChatStateEvent(
@@ -340,4 +356,5 @@ data class ChatStateEvent(
     val partial: String? = null,
     /** Set while the session waits out a plan usage limit whose reset time is known. */
     val limit: Limit? = null,
+    val rev: Long? = null,
 )

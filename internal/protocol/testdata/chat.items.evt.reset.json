@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "chat.items",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "sessionId": "a1b2c3",
+    "items": [
+      {"seq": 1, "kind": "user", "text": "新话题"}
+    ],
+    "rev": 9,
+    "reset": true
+  }
+}

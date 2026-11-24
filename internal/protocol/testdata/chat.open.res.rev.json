@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-010",
+  "method": "chat.open",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "items": [
+      {"seq": 251, "kind": "user", "text": "你好", "uuid": "6cbceb2c-343c-432b-b686-a0cbb8482651"}
+    ],
+    "hasMore": false,
+    "state": "idle",
+    "model": "claude-opus-4-1",
+    "permissionMode": "default",
+    "pending": null,
+    "rev": 7,
+    "subId": "sub-3"
+  }
+}

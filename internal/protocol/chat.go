@@ -14,6 +14,9 @@ const (
 	MaxImagesTotalBytes = 11 << 20
 	// MaxImageEdge is the longest side, in pixels, after the phone resizes.
 	MaxImageEdge = 2048
+	// UserImageThumbEdge caps the longest side of thumbnails carried inside
+	// user messages (chat.open / chat.items); chat.image fetches the original.
+	UserImageThumbEdge = 480
 )
 
 // ChatPageSize is how many items one chat.open page holds (design D6).
@@ -44,10 +47,21 @@ const (
 	ItemRemoved ItemKind = "removed"
 )
 
-// Image is an attached picture; Data is base64 in JSON.
+// Image is an attached picture on chat.send or a user message thumbnail on
+// chat.open / chat.items; Data is base64 in JSON. When ID is set, Data is a
+// thumbnail at most UserImageThumbEdge pixels on its longest side and
+// chat.image fetches Original by ID.
 type Image struct {
 	MediaType string `json:"mediaType"`
 	Data      []byte `json:"data"`
+	ID        string `json:"id,omitempty"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+	Size      int    `json:"size,omitempty"`
+	// Original and OriginalMediaType keep the full picture in memory for
+	// chat.image and never go on the wire.
+	Original          []byte `json:"-"`
+	OriginalMediaType string `json:"-"`
 }
 
 // ChatItem is one bubble or tool row. Seq increases along the transcript and
@@ -139,10 +153,12 @@ type ToolImage struct {
 	Data []byte `json:"-"`
 }
 
-// ChatImageRequest asks for a picture of a tool result by its ID.
+// ChatImageRequest asks for a picture of a tool result by its ID; one of a
+// subagent's tool results when AgentID is set.
 type ChatImageRequest struct {
 	SessionID string `json:"sessionId"`
 	ID        string `json:"id"`
+	AgentID   string `json:"agentId,omitempty"`
 }
 
 // ChatImageResponse is the picture as it was, at most MaxImageBytes.
@@ -343,6 +359,12 @@ type ChatOpenResponse struct {
 	// Tasks is the session's task list, left out when it has none, as
 	// for a subagent's chat.
 	Tasks []ChatTask `json:"tasks,omitempty"`
+	// Rev orders this snapshot against chat.items, chat.state, chat.pending
+	// and chat.tasks events for the same session.
+	Rev int64 `json:"rev,omitempty"`
+	// SubID identifies this phone's subscription; echo it in chat.close so a
+	// late close from an older page does not drop a newer open.
+	SubID string `json:"subId,omitempty"`
 }
 
 // TaskStatus is where a task of Claude Code's task list stands.
@@ -372,19 +394,24 @@ type ChatTask struct {
 type ChatTasksEvent struct {
 	SessionID string     `json:"sessionId"`
 	Tasks     []ChatTask `json:"tasks"`
+	Rev       int64      `json:"rev,omitempty"`
 }
 
 // ChatCloseRequest closes a chat, a subagent's when AgentID is set.
+// SubID, when set, matches the subscription chat.open returned.
 type ChatCloseRequest struct {
 	SessionID string `json:"sessionId"`
 	AgentID   string `json:"agentId,omitempty"`
+	SubID     string `json:"subId,omitempty"`
 }
 
 // ChatSendRequest sends one user message; a stopped session is woken first.
+// ClientReqID, when set, deduplicates retries within 10 minutes on the agent.
 type ChatSendRequest struct {
-	SessionID string  `json:"sessionId"`
-	Text      string  `json:"text"`
-	Images    []Image `json:"images,omitempty"`
+	SessionID   string  `json:"sessionId"`
+	Text        string  `json:"text"`
+	Images      []Image `json:"images,omitempty"`
+	ClientReqID string  `json:"clientReqId,omitempty"`
 }
 
 // ChatSendResponse answers chat.send once the message shows up in the
@@ -481,17 +508,21 @@ type ChatCommandsResponse struct {
 }
 
 // ChatItemsEvent carries new or updated items of an open chat; AgentID is
-// set for a subagent's chat.
+// set for a subagent's chat. Reset marks a fresh transcript (after /clear):
+// the phone replaces its shown items with Items.
 type ChatItemsEvent struct {
 	SessionID string     `json:"sessionId"`
 	AgentID   string     `json:"agentId,omitempty"`
 	Items     []ChatItem `json:"items"`
+	Rev       int64      `json:"rev,omitempty"`
+	Reset     bool       `json:"reset,omitempty"`
 }
 
 // ChatPendingEvent reports the pending prompt; Pending is null once cleared.
 type ChatPendingEvent struct {
 	SessionID string   `json:"sessionId"`
 	Pending   *Pending `json:"pending"`
+	Rev       int64    `json:"rev,omitempty"`
 }
 
 // ChatStateEvent reports a change of state, model or permission mode;
@@ -500,4 +531,5 @@ type ChatStateEvent struct {
 	SessionID string `json:"sessionId"`
 	AgentID   string `json:"agentId,omitempty"`
 	ChatStatus
+	Rev int64 `json:"rev,omitempty"`
 }
