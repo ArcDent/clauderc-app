@@ -1,11 +1,5 @@
 package clauderc.app.chat
 
-import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.addOutline
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.ClipOp
-import androidx.compose.ui.draw.drawBehind
 import clauderc.app.ui.components.sticker
 import clauderc.app.ui.components.glassPane
 import clauderc.app.ui.components.LocalGlassSource
@@ -34,6 +28,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -78,15 +74,10 @@ fun PendingPanel(
     val ui = Clauderc.style
     val corner = if (ui == UiStyle.Sticker) 30.dp else Clauderc.radii.lg
     val shape = RoundedCornerShape(topStart = corner, topEnd = corner)
-    // 清玻: glass over the messages. 贴纸: an ink outline on the top and sides with a hard shadow above.
+    // 清玻: glass over the messages. 贴纸: an ink outline on the top and sides.
     val surface = when (ui) {
         UiStyle.Clear -> Modifier.shadow(10.dp, shape, ambientColor = c.scrim, spotColor = c.scrim).clip(shape).glassPane(LocalGlassSource.current, edgeBottom = false)
-        UiStyle.Sticker -> Modifier
-            .drawBehind {
-                val outline = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawBehind)) }
-                clipPath(outline, ClipOp.Difference) { translate(top = -4.dp.toPx()) { drawPath(outline, c.ink) } }
-            }
-            .sticker(c.sheet, c.ink, corner, bottom = false)
+        UiStyle.Sticker -> Modifier.sticker(c.sheet, c.ink, corner, bottom = false)
         UiStyle.Grid -> Modifier.shadow(10.dp, shape, ambientColor = c.scrim, spotColor = c.scrim).clip(shape).background(c.sheet)
     }
     Column(
@@ -100,9 +91,9 @@ fun PendingPanel(
         verticalArrangement = Arrangement.spacedBy(sp.sp3),
     ) {
         when (pending.kind) {
-            PendingKind.QUESTION -> QuestionContent(pending.questions.orEmpty(), enabled, onAnswer)
+            PendingKind.QUESTION -> QuestionContent(pending.toolUseId, pending.questions.orEmpty(), enabled, onAnswer)
             // A dialog shows its title and options as on the computer's screen; a tap picks, nothing can be typed.
-            PendingKind.DIALOG -> QuestionContent(pending.questions.orEmpty().take(1), enabled, onAnswer, label = "等你选择", custom = false)
+            PendingKind.DIALOG -> QuestionContent(pending.toolUseId, pending.questions.orEmpty().take(1), enabled, onAnswer, label = "等你选择", custom = false)
             else -> PermissionContent(pending, enabled, onAllow, onDeny)
         }
     }
@@ -149,12 +140,44 @@ private fun PermissionContent(pending: Pending, enabled: Boolean, onAllow: () ->
  * question it and the options exclude each other; in a multi-select one it is ticked along with them.
  */
 @Composable
-private fun QuestionContent(questions: List<Question>, enabled: Boolean, onAnswer: (List<Answer>) -> Unit, label: String? = null, custom: Boolean = true) {
+private fun QuestionContent(key: String, questions: List<Question>, enabled: Boolean, onAnswer: (List<Answer>) -> Unit, label: String? = null, custom: Boolean = true) {
     val sp = Clauderc.spacing
     val instant = questions.size == 1 && !questions[0].multiSelect
-    val selected = remember(questions) { mutableStateMapOf<Int, List<Int>>() }
-    val other = remember(questions) { mutableStateMapOf<Int, Boolean>() }
-    val typed = remember(questions) { mutableStateListOf(*Array(questions.size) { "" }) }
+    val count = questions.size
+    val selected = rememberSaveable(
+        key, count,
+        saver = listSaver(
+            save = { map -> List(count) { i -> map[i].orEmpty().toIntArray() } },
+            restore = { saved ->
+                mutableStateMapOf<Int, List<Int>>().apply {
+                    saved.forEachIndexed { i, arr -> if (arr.isNotEmpty()) put(i, arr.toList()) }
+                }
+            },
+        ),
+    ) { mutableStateMapOf<Int, List<Int>>() }
+    val other = rememberSaveable(
+        key, count,
+        saver = listSaver(
+            save = { map -> List(count) { i -> map[i] == true } },
+            restore = { saved ->
+                mutableStateMapOf<Int, Boolean>().apply {
+                    saved.forEachIndexed { i, on -> if (on) put(i, true) }
+                }
+            },
+        ),
+    ) { mutableStateMapOf<Int, Boolean>() }
+    val typed = rememberSaveable(
+        key, count,
+        saver = listSaver(
+            save = { list -> list.toList() },
+            restore = { saved ->
+                mutableStateListOf<String>().apply {
+                    addAll(saved)
+                    while (size < count) add("")
+                }
+            },
+        ),
+    ) { mutableStateListOf(*Array(count) { "" }) }
     // What is typed stays in the field while 「其他」 is off, but only goes out with it on.
     fun written(i: Int) = typed[i].trim().takeIf { other[i] == true && it.isNotEmpty() }
     fun answers() = questions.indices.map { i -> Answer(selected = selected[i].orEmpty().sorted().ifEmpty { null }, custom = written(i)) }

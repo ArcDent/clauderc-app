@@ -29,6 +29,13 @@ type testRelay struct {
 // test adjust the options before the server starts.
 func startRelay(t *testing.T, edit func(*relay.Options)) *testRelay {
 	t.Helper()
+	return startRelayWrapped(t, edit, nil)
+}
+
+// startRelayWrapped is startRelay with wrap, when not nil, put in front of
+// the relay so a test can tamper with requests.
+func startRelayWrapped(t *testing.T, edit func(*relay.Options), wrap func(http.Handler) http.Handler) *testRelay {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "state.json")
 	st, err := store.Open(path)
 	if err != nil {
@@ -45,7 +52,11 @@ func startRelay(t *testing.T, edit func(*relay.Options)) *testRelay {
 		edit(&opts)
 	}
 	srv := relay.NewServer(opts)
-	hs := httptest.NewServer(srv)
+	var h http.Handler = srv
+	if wrap != nil {
+		h = wrap(srv)
+	}
+	hs := httptest.NewServer(h)
 	t.Cleanup(func() {
 		hs.Close()
 		srv.Close()

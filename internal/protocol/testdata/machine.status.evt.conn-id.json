@@ -1,0 +1,6 @@
+{
+  "v": 1,
+  "kind": "evt",
+  "method": "machine.status",
+  "body": {"id": "m-91c2", "name": "linux-box", "online": true, "lastSeenAt": "2026-11-12T09:31:02Z", "agentVersion": "0.1.0", "claudeVersion": "2.1.320", "connId": "g-0123456789abcdef"}
+}

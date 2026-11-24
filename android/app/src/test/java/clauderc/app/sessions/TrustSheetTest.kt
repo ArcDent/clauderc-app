@@ -103,7 +103,7 @@ class TrustSheetTest {
         assertEquals("the sheet names it beside the list's own row", 2, compose.onAllNodes(hasText("~/github/new-repo")).fetchSemanticsNodes().size)
         compose.onNodeWithText("信任并新建").assertIsDisplayed()
         // The form starts on the account login with its profile's models.
-        assertEquals(listOf(SessionCreateRequest(dir, models = officialModels)), creates())
+        assertEquals(listOf(SessionCreateRequest(dir, models = officialModels)), creates().map { it.copy(clientReqId = null) })
 
         // 「取消」 closes it and sends nothing more.
         compose.onNodeWithText("取消").performClick()
@@ -118,7 +118,7 @@ class TrustSheetTest {
         compose.waitUntil(5_000) { has("信任并新建") }
         compose.onNodeWithText("信任并新建").performClick()
         compose.waitUntil(5_000) { has("正在信任") }
-        assertEquals(SessionCreateRequest(dir, models = officialModels, trust = true), creates().last())
+        assertEquals(SessionCreateRequest(dir, models = officialModels, trust = true), creates().last().copy(clientReqId = null))
         assertTrue("not opened before it answers", opened.isEmpty())
 
         trusted.complete(Unit)
@@ -126,5 +126,50 @@ class TrustSheetTest {
         assertEquals("the new session opens as after any create", listOf("n1"), opened.toList())
         compose.waitUntil(5_000) { !has("这个目录还没被信任") }
         assertEquals(3, creates().size)
+    }
+
+    @Test fun swipingDownTrustSheetDuringTrustingLeavesPageOperableAfterAnswer() {
+        val gate = CompletableDeferred<Unit>()
+        var failTrust = true
+        val localRelay = FakeRelay().apply {
+            respond(Method.MACHINES_LIST, MachinesListResponse.serializer(), MachinesListResponse(listOf(machine("m-1", "工作室 Mac mini"))))
+            respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), sampleSessions)
+            respond(Method.DIRS_RECENT, DirsRecentResponse.serializer(), DirsRecentResponse(listOf(dir)))
+            on(Method.SESSION_CREATE) { s ->
+                val req = s.decode(SessionCreateRequest.serializer())
+                if (req.trust != true) throw RemoteException(ErrorCode.NOT_TRUSTED, "Claude Code 还没信任这个目录")
+                gate.await()
+                if (failTrust) throw RemoteException(ErrorCode.INTERNAL, "信任超时")
+                ProtocolJson.encodeToJsonElement(SessionCreateResponse.serializer(), SessionCreateResponse("n2"))
+            }
+        }
+        val vm = CreateSessionViewModel("m-1", Fleet(localRelay, scope), localRelay, profileNames(tmp.root, storeScope))
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                val state by vm.state.collectAsState()
+                CreateSessionScreen(
+                    state, {}, vm::submit, vm::setDir, vm::pickDir, vm::showAllDirs, vm::setName, vm::setPrompt,
+                    onTrust = vm::trustAndCreate, onDismissTrust = vm::dismissTrust,
+                )
+            }
+        }
+        compose.waitUntil(5_000) { has("new-repo") }
+        compose.onNode(hasText("启动") and hasClickAction()).performClick()
+        compose.waitUntil(5_000) { has("信任并新建") }
+        compose.onNodeWithText("信任并新建").performClick()
+        compose.waitUntil(5_000) { has("正在信任") }
+
+        // Dismiss the trust sheet while trusting is still in flight (as a downward swipe does).
+        compose.runOnUiThread { vm.dismissTrust() }
+        compose.waitUntil(5_000) { !has("这个目录还没被信任") }
+        assertEquals(null, vm.state.value.untrusted)
+        assertTrue("form stays submitting until the request ends", vm.state.value.submitting)
+
+        // Request ends: page returns to an operable state where 「启动」 works again.
+        gate.complete(Unit)
+        compose.waitUntil(5_000) { !vm.state.value.submitting }
+        compose.waitForIdle()
+        compose.onNode(hasText("启动") and hasClickAction()).performClick()
+        compose.waitUntil(5_000) { has("这个目录还没被信任") }
     }
 }

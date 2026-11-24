@@ -64,6 +64,10 @@ const (
 	CodeUnauthenticated ErrorCode = "unauthenticated"
 	// CodeMachineOffline: the target machine is not connected to the relay.
 	CodeMachineOffline ErrorCode = "machineOffline"
+	// CodeMachineBusy: the relay's queue to the target machine is full, so
+	// the request was not forwarded; the connection stays up and the phone
+	// may retry later.
+	CodeMachineBusy ErrorCode = "machineBusy"
 	// CodeUnknownMethod: the receiver does not handle this method.
 	CodeUnknownMethod ErrorCode = "unknownMethod"
 	// CodeInvalidParams: the request body is malformed or not allowed,
@@ -108,8 +112,12 @@ const (
 
 	// CodePairCodeExpired: the pairing code is past its 5 minutes (HTTP 410).
 	CodePairCodeExpired ErrorCode = "pairCodeExpired"
-	// CodePairCodeInvalid: no such pairing code, or it was used (HTTP 404).
+	// CodePairCodeInvalid: no such pairing code, or it was redeemed more
+	// than 5 minutes ago (HTTP 404).
 	CodePairCodeInvalid ErrorCode = "pairCodeInvalid"
+	// CodePairCodeUsed: the pairing code was already redeemed within the
+	// last 5 minutes (HTTP 409).
+	CodePairCodeUsed ErrorCode = "pairCodeUsed"
 	// CodeRateLimited: too many failed pairing attempts from this source
 	// within a minute (HTTP 429).
 	CodeRateLimited ErrorCode = "rateLimited"

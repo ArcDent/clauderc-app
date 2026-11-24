@@ -359,8 +359,8 @@ private fun TrustSheet(dir: String, trusting: Boolean, onTrust: () -> Unit, onDi
             horizontalArrangement = Arrangement.spacedBy(if (Clauderc.style == UiStyle.Sticker) sp.sp2 else sp.sp1, Alignment.End),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 「取消」 looks the same while it works, as in the mockup; the view model ignores it until the answer.
-            TextAction("取消", onClick = onDismiss)
+            // 「取消」 looks the same while it works, as in the mockup; swiping the sheet down closes it without sticking.
+            TextAction("取消", onClick = { if (!trusting) onDismiss() })
             TextAction(if (trusting) "正在信任" else "信任并新建", onClick = onTrust, busy = trusting)
         }
     }

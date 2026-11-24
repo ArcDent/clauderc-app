@@ -136,12 +136,18 @@ import clauderc.app.ui.components.TextTone
 import clauderc.app.ui.components.UnderlineField
 import clauderc.app.ui.components.groupDivider
 import clauderc.app.data.UiStyle
+import clauderc.app.git.busyText
+import clauderc.app.git.busyTitle
 import clauderc.app.ui.components.sticker
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
+import clauderc.app.ui.theme.snapPressed
+import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.foundation.border
 import clauderc.app.ui.theme.stillLayer
 
 /** Sessions sit 32dp in under their directory's folder icon. */
@@ -197,15 +203,21 @@ fun SessionsScreen(
     // The row slid open to its 「停止」 or 「移出」; one at a time.
     val swipe = remember { SwipeHub() }
     // Rows confirmed for removal: false while the row folds away, true once session.remove went out. An id
-    // goes when the list no longer holds the session; a row that comes back, the removal refused, is whole.
+    // goes when the list no longer holds the session, or when the removal fails so the row comes back whole.
     val removing = remember { mutableStateMapOf<String, Boolean>() }
     val listed = state.groups?.flatMapTo(HashSet()) { g -> g.sessions.map { it.id } }
     LaunchedEffect(listed) {
         if (listed != null) removing.keys.filter { removing[it] == true && it !in listed }.forEach { removing.remove(it) }
     }
+    LaunchedEffect(state.removeFailed) {
+        if (state.removeFailed > 0) {
+            removing.keys.filter { removing[it] == true && it !in state.removing }.forEach { removing.remove(it) }
+        }
+    }
     val rowActs = RowActs(
         swipe = swipe,
         removing = removing,
+        stopping = state.stopping,
         onAct = { s -> overlay = if (s.state == SessionState.Stopped) Overlay.ConfirmRemove(s) else Overlay.ConfirmStop(s) },
         onLeft = { s -> removing[s.id] = true; onRemove(s) },
     )
@@ -380,8 +392,8 @@ fun SessionsScreen(
     state.switchAsk?.let { ask ->
         ClaudercDialog(
             onDismiss = onDismissSwitch,
-            title = "claude 正在这个目录工作",
-            text = "${ask.sessionName?.let { "「$it」" } ?: "有会话"}正在改 ${ask.title} 里的代码，现在切换可能带上它写到一半的改动。",
+            title = busyTitle(ask.unsure),
+            text = busyText(ask.sessionName, ask.unsure, ask.title, "切换"),
             buttons = {
                 TextAction("取消", onClick = onDismissSwitch)
                 TextAction("仍然切换", onClick = onConfirmSwitch)
@@ -689,7 +701,7 @@ private fun UsageBlock(usage: UsageResponse) {
 
 /**
  * One limit's bar (.u-bar). 清玻: a 3dp hairline track. 格栅: a 6dp square bar filled solid. 贴纸: a
- * 14dp ink-outlined capsule on a 2dp hard shadow, filled flat and closed off with an ink stroke.
+ * 14dp ink-outlined capsule, filled flat and closed off with an ink stroke.
  */
 @Composable
 private fun UsageBar(share: Float, fill: Color, modifier: Modifier) {
@@ -701,7 +713,7 @@ private fun UsageBar(share: Float, fill: Color, modifier: Modifier) {
         UiStyle.Grid -> Box(modifier.height(6.dp).background(c.surface)) {
             Box(Modifier.fillMaxWidth(share).fillMaxHeight().background(fill))
         }
-        UiStyle.Sticker -> Box(modifier.height(14.dp).sticker(c.bg, c.ink, 7.dp, drop = 2.dp).padding(2.dp)) {
+        UiStyle.Sticker -> Box(modifier.height(14.dp).sticker(c.bg, c.ink, 7.dp).padding(2.dp)) {
             val ink = c.ink
             Box(
                 Modifier.fillMaxWidth(share).fillMaxHeight().background(fill).drawWithContent {
@@ -792,6 +804,8 @@ private fun treeLine(): TreeLine {
 private class RowActs(
     val swipe: SwipeHub,
     val removing: Map<String, Boolean>,
+    /** Session ids whose session.stop is still in flight; they offer no swipe action until it finishes. */
+    val stopping: Set<String>,
     /** The slid-open button was tapped: ask before stopping or removing. */
     val onAct: (Session) -> Unit,
     /** The row has folded away: send the removal. */
@@ -986,8 +1000,9 @@ private fun SessionRow(
     val scope = rememberCoroutineScope()
     val enter = Motion.enter<Float>()
     var pulled by remember { mutableFloatStateOf(0f) }
-    // Another row slid open, or a tap closed this one: back it goes.
-    LaunchedEffect(hub.open) { if (hub.open != s.id && slide.value != 0f) slide.animateTo(0f, enter) }
+    val canSwipe = enabled && s.id !in acts.stopping
+    // Another row slid open, a tap closed this one, or a stop is now in flight: back it goes.
+    LaunchedEffect(hub.open, canSwipe) { if ((hub.open != s.id || !canSwipe) && slide.value != 0f) slide.animateTo(0f, enter) }
     val drag = rememberDraggableState { d ->
         pulled = (pulled + d).coerceAtMost(0f)
         // Past the button's width the row drags with a third of the finger's travel.
@@ -1002,7 +1017,7 @@ private fun SessionRow(
             .draggable(
                 drag,
                 Orientation.Horizontal,
-                enabled = enabled,
+                enabled = canSwipe,
                 onDragStarted = {
                     pulled = slide.value
                     hub.open = s.id
@@ -1015,7 +1030,7 @@ private fun SessionRow(
             )
             .semantics {
                 isTraversalGroup = true
-                if (enabled) customActions = listOf(CustomAccessibilityAction(act) { acts.onAct(s); true })
+                if (canSwipe) customActions = listOf(CustomAccessibilityAction(act) { acts.onAct(s); true })
             }
             .testTag("sessionRow:${s.id}"),
     ) {
@@ -1054,7 +1069,7 @@ private fun SessionRow(
                 )
             }
         }
-        val out by remember { derivedStateOf { slide.value < 0f } }
+        val out by remember { derivedStateOf { slide.value < 0f && canSwipe } }
         if (out) {
             Box(Modifier.matchParentSize()) {
                 SwipeAction(
@@ -1121,38 +1136,46 @@ private fun SessionRowText(s: Session, showBranch: Boolean, draft: String?) {
 }
 
 /**
- * The button a slid row brings in (.swipe-act): a 40dp danger-red circle with a white symbol over an 11sp
- * word in red. 格栅 makes it a 36dp square in monospace; 贴纸 outlines it in ink on a hard shadow, the word bold.
+ * The button a slid row brings in (.swipe-act): one danger-red symbol and no word under it, [text]
+ * read out instead, drawn as each style draws its rewind button. 清玻 the bare 24dp symbol; 格栅 a 40dp
+ * square in a 1.5dp red line; 贴纸 a 40dp card-white circle in a 2dp ink line, no shadow. A press shows
+ * at once and lets go in durS: 清玻's symbol shrinks and turns left like a knob, 格栅 fills red under a
+ * white symbol, 贴纸 fills red under a white symbol as it shrinks and tilts left.
  */
 @Composable
 private fun SwipeAction(text: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = Clauderc.colors
-    val ui = Clauderc.style
     val press = remember { MutableInteractionSource() }
-    Column(
+    // The turn springs back; the colours fade back evenly.
+    val turn by snapPressed(press, Clauderc.motion.easeSpring)
+    val fill by snapPressed(press, LinearEasing)
+    val symbol = @Composable { size: Dp, tint: Color -> Icon(icon.styled, contentDescription = null, tint = tint, modifier = Modifier.size(size)) }
+    Box(
         modifier
             .clickable(press, null, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = text }
             .testTag("swipeAction"),
-        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        contentAlignment = Alignment.Center,
     ) {
-        val knob = when (ui) {
-            UiStyle.Clear -> Modifier.size(40.dp).clip(CircleShape).background(c.danger)
-            UiStyle.Grid -> Modifier.size(36.dp).background(c.danger)
-            UiStyle.Sticker -> Modifier.padding(bottom = 3.dp).size(40.dp).sticker(c.danger, c.ink, 20.dp, drop = 3.dp, source = press)
+        when (Clauderc.style) {
+            UiStyle.Clear -> Box(Modifier.graphicsLayer { turned(turn, 0.82f, -24f) }) { symbol(24.dp, c.danger) }
+            UiStyle.Grid -> Box(
+                Modifier.size(40.dp).background(c.danger.copy(alpha = fill)).border(1.5.dp, c.danger),
+                contentAlignment = Alignment.Center,
+            ) { symbol(20.dp, lerp(c.danger, Color.White, fill)) }
+            UiStyle.Sticker -> Box(
+                Modifier.graphicsLayer { turned(turn, 0.9f, -10f) }.size(40.dp).sticker(lerp(c.card, c.danger, fill), c.ink, 20.dp),
+                contentAlignment = Alignment.Center,
+            ) { symbol(20.dp, lerp(c.danger, Color.White, fill)) }
         }
-        Box(Modifier.pressShrink(press).then(knob), contentAlignment = Alignment.Center) {
-            Icon(icon.styled, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-        }
-        Text(
-            text,
-            fontSize = 11.sp,
-            fontFamily = if (ui == UiStyle.Grid) MonoFamily else null,
-            fontWeight = if (ui == UiStyle.Sticker) FontWeight.ExtraBold else null,
-            color = c.danger,
-            maxLines = 1,
-        )
     }
+}
+
+/** Scales the layer toward [scale] and turns it toward [turn]° as [p] goes from 0 to 1. */
+private fun GraphicsLayerScope.turned(p: Float, scale: Float, turn: Float) {
+    scaleX = 1f + (scale - 1f) * p
+    scaleY = scaleX
+    rotationZ = turn * p
 }
 
 private const val WorktreeMark = "worktree"

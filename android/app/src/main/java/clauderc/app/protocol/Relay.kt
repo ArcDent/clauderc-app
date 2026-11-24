@@ -24,6 +24,8 @@ data class Machine(
     /** Empty when unknown. */
     val agentVersion: String = "",
     val claudeVersion: String = "",
+    /** Fresh id for each agent WebSocket connection; null when offline or from older relays. */
+    val connId: String? = null,
 )
 
 @Serializable

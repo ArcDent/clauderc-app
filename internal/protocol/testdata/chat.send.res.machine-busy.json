@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-031",
+  "method": "chat.send",
+  "machine": "m-7f3a",
+  "error": {"code": "machineBusy", "message": "目标机暂时忙不过来，请稍后重试"}
+}

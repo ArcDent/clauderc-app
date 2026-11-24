@@ -23,6 +23,15 @@ var (
 	stopWait   = 5 * time.Second
 )
 
+// daemonEnv marks the run that start launches. Only that run writes the
+// pid file, after it has taken the config's lock, so of two starts racing
+// each other the file always names the run that stays.
+const daemonEnv = "CLAUDERC_DAEMON"
+
+// beforeLaunch runs after start found the config unlocked, just before it
+// launches the run. Tests use it to let a second start in between.
+var beforeLaunch = func() {}
+
 // daemonFiles returns the pid and log files of the background run, kept
 // next to the config so each config has its own.
 func daemonFiles(cfgPath string) (pidFile, logFile string) {
@@ -52,8 +61,7 @@ func startCmd(args []string, exe string, out io.Writer) error {
 	}
 	pidFile, logFile := daemonFiles(cfgPath)
 	if pid, ok := runningPID(pidFile, cfgPath); ok {
-		_, err := fmt.Fprintf(out, "已在后台运行，进程号 %d\n日志：%s\n", pid, logFile)
-		return err
+		return alreadyRunning(out, pid, logFile)
 	}
 	// A foreground run or the service may hold the config without a pid file.
 	lock, err := lockConfig(cfgPath)
@@ -66,6 +74,7 @@ func startCmd(args []string, exe string, out io.Writer) error {
 		return err
 	}
 	lock.Close()
+	beforeLaunch()
 	log, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
@@ -79,6 +88,7 @@ func startCmd(args []string, exe string, out io.Writer) error {
 	cmd := exec.Command(exe, "run", "--config", cfgPath)
 	cmd.Args[0] = prog
 	cmd.Stdout, cmd.Stderr = log, log
+	cmd.Env = append(os.Environ(), daemonEnv+"=1")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if home, err := os.UserHomeDir(); err == nil {
 		cmd.Dir = home
@@ -87,15 +97,16 @@ func startCmd(args []string, exe string, out io.Writer) error {
 		return err
 	}
 	pid := cmd.Process.Pid
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
-		_ = cmd.Process.Kill()
-		return err
-	}
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 	select {
 	case werr := <-exited:
-		_ = os.Remove(pidFile)
+		// A start racing this one may have launched the run that got the lock.
+		if other, ok := runningPID(pidFile, cfgPath); ok {
+			return alreadyRunning(out, other, logFile)
+		}
+		// The run may have written the pid file before it died.
+		removePIDFile(pidFile, pid)
 		return fmt.Errorf("后台进程启动后就退出了（%v），日志最后几行：\n%s", werr, logTail(logFile, from, 20))
 	case <-time.After(startGrace):
 	}
@@ -107,6 +118,40 @@ func startCmd(args []string, exe string, out io.Writer) error {
 	return err
 }
 
+func alreadyRunning(out io.Writer, pid int, logFile string) error {
+	_, err := fmt.Fprintf(out, "已在后台运行，进程号 %d\n日志：%s\n", pid, logFile)
+	return err
+}
+
+// writeOwnPID writes this process's pid file when start launched it and
+// returns the function that removes the file again. The caller holds the
+// config's lock, so no other run writes the file meanwhile.
+func writeOwnPID(cfgPath string) (func(), error) {
+	if os.Getenv(daemonEnv) == "" {
+		return func() {}, nil
+	}
+	// Processes this run starts must not take the mark as theirs.
+	os.Unsetenv(daemonEnv)
+	pidFile, _ := daemonFiles(cfgPath)
+	pid := os.Getpid()
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
+		return nil, err
+	}
+	return func() { removePIDFile(pidFile, pid) }, nil
+}
+
+// removePIDFile removes pidFile only while it names pid, so a file another
+// run has written since is kept.
+func removePIDFile(pidFile string, pid int) {
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		return
+	}
+	if got, _ := strconv.Atoi(strings.TrimSpace(string(data))); got == pid {
+		_ = os.Remove(pidFile)
+	}
+}
+
 // stopCmd sends SIGTERM to the background run and waits for it to exit.
 func stopCmd(args []string, out io.Writer) error {
 	cfgPath, err := absConfig("stop", args)
@@ -116,7 +161,7 @@ func stopCmd(args []string, out io.Writer) error {
 	pidFile, _ := daemonFiles(cfgPath)
 	pid, ok := runningPID(pidFile, cfgPath)
 	if !ok {
-		_ = os.Remove(pidFile)
+		removePIDFile(pidFile, pid)
 		_, err := fmt.Fprintln(out, "没有在后台运行")
 		return err
 	}
@@ -132,7 +177,7 @@ func stopCmd(args []string, out io.Writer) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	_ = os.Remove(pidFile)
+	removePIDFile(pidFile, pid)
 	_, err = fmt.Fprintf(out, "已结束后台进程 %d\n", pid)
 	return err
 }

@@ -36,21 +36,61 @@ func New(id, mediaType string, data []byte) protocol.ToolImage {
 		return img
 	}
 	if src, _, err := image.Decode(bytes.NewReader(data)); err == nil {
-		img.Thumb = thumbnail(src)
+		img.Thumb = thumbnailAt(src, protocol.ThumbEdge)
 	}
 	return img
 }
 
-// thumbnail scales src down to protocol.ThumbEdge pixels on its longest
-// side, each pixel the average of the ones it covers, over white, as a JPEG.
-func thumbnail(src image.Image) []byte {
+// UserThumb builds a wire Image for a picture inside a user message: Data holds
+// a thumbnail at most protocol.UserImageThumbEdge pixels on its longest side
+// (while Original keeps the raw bytes for chat.image).
+func UserThumb(id, mediaType string, data []byte) protocol.Image {
+	img := protocol.Image{
+		ID:                id,
+		MediaType:         mediaType,
+		Size:              len(data),
+		Original:          data,
+		OriginalMediaType: mediaType,
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		// Undecodable formats (e.g. WebP) stay inline only when small.
+		if len(data) <= 256<<10 {
+			img.Data = data
+		}
+		return img
+	}
+	img.Width, img.Height = cfg.Width, cfg.Height
+	if cfg.Width <= protocol.UserImageThumbEdge && cfg.Height <= protocol.UserImageThumbEdge {
+		img.Data = data
+		return img
+	}
+	if cfg.Width*cfg.Height > maxThumbPixels {
+		return img
+	}
+	if src, _, err := image.Decode(bytes.NewReader(data)); err == nil {
+		if thumb := thumbnailAt(src, protocol.UserImageThumbEdge); len(thumb) > 0 {
+			img.Data = thumb
+			img.MediaType = "image/jpeg"
+			return img
+		}
+	}
+	if len(data) <= 256<<10 {
+		img.Data = data
+	}
+	return img
+}
+
+// thumbnailAt scales src down to edge pixels on its longest side, each pixel
+// the average of the ones it covers, over white, as a JPEG.
+func thumbnailAt(src image.Image, edge int) []byte {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
-	tw, th := protocol.ThumbEdge, protocol.ThumbEdge
+	tw, th := edge, edge
 	if w >= h {
-		th = max(1, h*protocol.ThumbEdge/w)
+		th = max(1, h*edge/w)
 	} else {
-		tw = max(1, w*protocol.ThumbEdge/h)
+		tw = max(1, w*edge/h)
 	}
 	// Flatten onto white first: JPEG has no alpha, and draw has fast paths
 	// for the common formats.

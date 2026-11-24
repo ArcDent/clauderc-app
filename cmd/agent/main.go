@@ -135,6 +135,11 @@ func runCmd(ctx context.Context, args []string, hc *http.Client, logOut io.Write
 		return err
 	}
 	defer lock.Close()
+	removePID, err := writeOwnPID(cfgPath)
+	if err != nil {
+		return err
+	}
+	defer removePID()
 	return app.Run(ctx, app.Options{
 		Config:     cfg,
 		Version:    version,

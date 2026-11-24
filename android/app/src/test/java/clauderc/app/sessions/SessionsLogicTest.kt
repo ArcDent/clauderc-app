@@ -1,6 +1,7 @@
 package clauderc.app.sessions
 
 import clauderc.app.data.Fleet
+import clauderc.app.git.busyTitle
 import clauderc.app.machines.MachinesViewModel
 import clauderc.app.net.ConnectionState
 import clauderc.app.net.RelayLink
@@ -35,6 +36,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
@@ -42,6 +44,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -240,14 +243,16 @@ class SessionsLogicTest {
         val req = relay.sent(Method.SESSION_CREATE).single()
         assertEquals("m-1", req.machine)
         // The account login: no preset, address or key, and the profile's models as they stand.
-        assertEquals(SessionCreateRequest("/Users/me/notes", models = officialModels, prompt = "检查测试是否通过"), req.decode(SessionCreateRequest.serializer()))
+        val body1 = req.decode(SessionCreateRequest.serializer())
+        assertTrue("session.create carries clientReqId", !body1.clientReqId.isNullOrEmpty())
+        assertEquals(SessionCreateRequest("/Users/me/notes", models = officialModels, prompt = "检查测试是否通过"), body1.copy(clientReqId = null))
         assertEquals("b2", withTimeout(5_000) { vm.created.first() })
 
         vm.setDir("  /tmp/typed  ")
         vm.setName("check")
         vm.setPrompt("")
         vm.submit()
-        assertEquals(SessionCreateRequest("/tmp/typed", name = "check", models = officialModels), lastCreate())
+        assertEquals(SessionCreateRequest("/tmp/typed", name = "check", models = officialModels), lastCreate().copy(clientReqId = null))
     }
 
     @Test fun aProfileSendsItsIdAndTheModelsAsEdited() = runTest(dispatcher) {
@@ -263,7 +268,7 @@ class SessionsLogicTest {
         assertEquals("改了 2 项", vm.state.value.modelsSummary)
         vm.submit()
         val want = anyModels - ModelTier.Sonnet + (ModelTier.Haiku to "hy-4-flash[1M]")
-        assertEquals(SessionCreateRequest("/Users/me/notes", preset = "anyrouter.top", models = want), lastCreate())
+        assertEquals(SessionCreateRequest("/Users/me/notes", preset = "anyrouter.top", models = want), lastCreate().copy(clientReqId = null))
         assertEquals("hy-4-flash[1M]", lastCreate().models!![ModelTier.Haiku])
         assertFalse("a cleared tier is left out", ModelTier.Sonnet in lastCreate().models!!)
 
@@ -297,7 +302,7 @@ class SessionsLogicTest {
 
         vm.setUrl(" https://anyrouter.example ")
         vm.submit()
-        assertEquals(SessionCreateRequest("/Users/me/notes", baseUrl = "https://anyrouter.example", apiKey = "sk-1", models = officialModels), lastCreate())
+        assertEquals(SessionCreateRequest("/Users/me/notes", baseUrl = "https://anyrouter.example", apiKey = "sk-1", models = officialModels), lastCreate().copy(clientReqId = null))
     }
 
     @Test fun aModelWithASpaceIsRefusedAndOpensTheModels() = runTest(dispatcher) {
@@ -537,6 +542,27 @@ class SessionsLogicTest {
         collect.cancel()
     }
 
+    @Test fun switchingAsksWhenTheBusyCheckFails() = runTest(dispatcher) {
+        relay.respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), twoBranches)
+        relay.fail(Method.DIR_BUSY, ErrorCode.TIMEOUT, "读取会话列表超过 30 秒未完成")
+        val vm = SessionsViewModel("m-1", Fleet(relay, scope), relay, profileNames(tmp.root, scope))
+        withTimeout(5_000) { vm.state.first { it.groups != null } }
+
+        vm.switchBranch(appDir(vm), "dev")
+        assertTrue("not switched before the user says so", relay.sent(Method.GIT_SWITCH).isEmpty())
+        assertEquals(BranchSwitch("/p/app", "app", "dev", null, unsure = true), vm.state.value.switchAsk)
+        assertEquals("不确定 claude 是否在这个目录工作", busyTitle(vm.state.value.switchAsk!!.unsure))
+        vm.confirmSwitch()
+        assertEquals(listOf(GitSwitchRequest("/p/app", "dev")), relay.sent(Method.GIT_SWITCH).map { it.decode(GitSwitchRequest.serializer()) })
+
+        // The phone gives up waiting on its own: that asks too.
+        relay.on(Method.DIR_BUSY) { withTimeout(10) { awaitCancellation() } }
+        vm.switchBranch(appDir(vm), "dev")
+        advanceTimeBy(100)
+        assertEquals(true, vm.state.value.switchAsk?.unsure)
+        assertEquals(1, relay.sent(Method.GIT_SWITCH).size)
+    }
+
     @Test fun usageIsReadWhenThePageOpensAndOnRefresh() = runTest(dispatcher) {
         relay.respond(Method.USAGE_GET, UsageResponse.serializer(), UsageResponse(available = true, fiveHour = UsageWindow(60.0), sevenDay = UsageWindow(70.0)))
         val vm = SessionsViewModel("m-1", Fleet(relay, scope), relay, profileNames(tmp.root, scope))
@@ -546,5 +572,163 @@ class SessionsLogicTest {
         withTimeout(5_000) { vm.state.first { !it.refreshing } }
         assertEquals(2, relay.sent(Method.USAGE_GET).size)
         assertEquals(70.0, vm.state.value.usage!!.sevenDay!!.utilization, 0.0)
+    }
+
+    @Test fun switchingBranchIgnoresSecondTapWhileInFlight() = runTest(dispatcher) {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        relay.respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), twoBranches)
+        relay.respond(Method.DIR_BUSY, DirBusyResponse.serializer(), DirBusyResponse(false))
+        relay.on(Method.GIT_SWITCH) {
+            gate.await()
+            kotlinx.serialization.json.JsonObject(emptyMap())
+        }
+        val vm = SessionsViewModel("m-1", Fleet(relay, scope), relay, profileNames(tmp.root, scope))
+        withTimeout(5_000) { vm.state.first { it.groups != null } }
+
+        val dir = appDir(vm)
+        vm.switchBranch(dir, "dev")
+        vm.switchBranch(dir, "feat")
+        assertEquals("only the first switch request goes out", listOf(GitSwitchRequest("/p/app", "dev")), relay.sent(Method.GIT_SWITCH).map { it.decode(GitSwitchRequest.serializer()) })
+        assertEquals(1, relay.sent(Method.DIR_BUSY).size)
+
+        gate.complete(Unit)
+        vm.switchBranch(dir, "feat")
+        assertEquals(2, relay.sent(Method.GIT_SWITCH).size)
+    }
+
+    @Test fun staleBranchesResponseDoesNotOverwriteNewerOne() = runTest(dispatcher) {
+        val firstGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var calls = 0
+        relay.respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), twoBranches)
+        relay.on(Method.GIT_BRANCHES) {
+            val n = ++calls
+            if (n == 2) firstGate.await()
+            val out = when (n) {
+                2 -> GitBranchesResponse(current = "stale", local = listOf("main", "stale"))
+                3 -> GitBranchesResponse(current = "fresh", local = listOf("main", "fresh"))
+                else -> GitBranchesResponse(current = "main", local = listOf("main"))
+            }
+            clauderc.app.protocol.ProtocolJson.encodeToJsonElement(GitBranchesResponse.serializer(), out)
+        }
+        val vm = SessionsViewModel("m-1", Fleet(relay, scope), relay, profileNames(tmp.root, scope))
+        withTimeout(5_000) { vm.state.first { it.groups != null } }
+
+        val dir = appDir(vm)
+        // Call #2 blocks, call #3 returns immediately with "fresh".
+        vm.openBranches(dir)
+        vm.openBranches(dir)
+        assertEquals("fresh", appDir(vm).branches?.current)
+        // Call #2 arrives late: must not overwrite "fresh".
+        firstGate.complete(Unit)
+        assertEquals("fresh", appDir(vm).branches?.current)
+    }
+
+    @Test fun pendingDotAndFleetSessionsDropOfflineMachinesAndUnpairedRelays() = runTest(dispatcher) {
+        val work = clauderc.app.data.Credential("wss://relay.example.com", "d-1", "t-1")
+        val home = clauderc.app.data.Credential("wss://home.example.net", "d-2", "t-2")
+        val a = FakeRelay().apply {
+            respond(Method.MACHINES_LIST, MachinesListResponse.serializer(), MachinesListResponse(listOf(machine("m-1", "工作室 Mac mini"))))
+            respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), sampleSessions)
+        }
+        val b = FakeRelay().apply {
+            respond(Method.MACHINES_LIST, MachinesListResponse.serializer(), MachinesListResponse(listOf(machine("m-9", "家里的 iMac"))))
+            respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), SessionList(listOf(session("s-ok", "已完成", SessionState.Idle, "default")), sampleProfiles))
+        }
+        val hub = clauderc.app.net.RelayHub(scope) { if (it.relay == work.relay) a else b }
+        val fleet = Fleet(hub, scope)
+        hub.setCredentials(listOf(work, home))
+        assertTrue(clauderc.app.hasPendingOnline(fleet.machines.value, fleet.sessions.value))
+
+        a.event(Method.MACHINE_STATUS, null, Machine.serializer(), machine("m-1", "工作室 Mac mini", online = false))
+        assertFalse("offline machine does not light the dot", clauderc.app.hasPendingOnline(fleet.machines.value, fleet.sessions.value))
+
+        a.event(Method.MACHINE_STATUS, null, Machine.serializer(), machine("m-1", "工作室 Mac mini", online = true))
+        assertTrue(clauderc.app.hasPendingOnline(fleet.machines.value, fleet.sessions.value))
+
+        hub.setCredentials(listOf(home))
+        assertFalse("unpaired relay's sessions are pruned from fleet", "m-1" in fleet.sessions.value)
+        assertFalse(clauderc.app.hasPendingOnline(fleet.machines.value, fleet.sessions.value))
+    }
+
+    @Test fun defaultPickedMachineStaysFixedWhenItGoesOffline() {
+        val selection = clauderc.app.Selection()
+        val bothOnline = listOf(machine("m-1", "工作室 Mac mini"), machine("m-2", "家里的 iMac"))
+        selection.syncMachines(bothOnline, onMachineTab = true)
+        assertEquals("m-1", selection.machineId.value)
+        assertEquals("m-1", selection.effectiveMachine(bothOnline))
+
+        val firstOffline = listOf(machine("m-1", "工作室 Mac mini", online = false), machine("m-2", "家里的 iMac"))
+        selection.syncMachines(firstOffline, onMachineTab = true)
+        assertEquals("m-1 stays fixed after going offline", "m-1", selection.machineId.value)
+        assertEquals("m-1", selection.effectiveMachine(firstOffline))
+
+        val firstRemoved = listOf(machine("m-2", "家里的 iMac"))
+        selection.syncMachines(firstRemoved, onMachineTab = true)
+        assertEquals("unpaired machine falls back to an online one", "m-2", selection.machineId.value)
+    }
+
+    @Test fun staleSubscribeResponseDoesNotOverwriteNewerSessionsPush() = runTest(dispatcher) {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var subCalls = 0
+        relay.on(Method.SESSIONS_SUBSCRIBE) {
+            val n = ++subCalls
+            val list = if (n == 1) {
+                sampleSessions.copy(rev = 1)
+            } else {
+                gate.await()
+                sampleSessions.copy(rev = 2)
+            }
+            clauderc.app.protocol.ProtocolJson.encodeToJsonElement(SessionList.serializer(), list)
+        }
+        val fleet = Fleet(relay, scope)
+        val vm = SessionsViewModel("m-1", fleet, relay, profileNames(tmp.root, scope))
+        withTimeout(5_000) { vm.state.first { it.groups != null } }
+        assertEquals(SessionState.Working, vm.state.value.groups!![0].sessions.first { it.id == "s-work" }.state)
+
+        // Start a refresh (sessions.subscribe) that will return stale rev=2.
+        vm.refresh()
+        assertEquals(2, subCalls)
+
+        // Meanwhile a newer push with rev=5 arrives marking s-work Idle.
+        val newer = sampleSessions.copy(
+            sessions = sampleSessions.sessions.map { if (it.id == "s-work") it.copy(state = SessionState.Idle) else it },
+            rev = 5,
+        )
+        relay.event(Method.SESSIONS_CHANGED, "m-1", SessionList.serializer(), newer)
+        assertEquals(SessionState.Idle, vm.state.value.groups!![0].sessions.first { it.id == "s-work" }.state)
+
+        // Now the stale rev=2 subscribe response lands: must not overwrite rev=5.
+        gate.complete(Unit)
+        assertEquals(SessionState.Idle, vm.state.value.groups!![0].sessions.first { it.id == "s-work" }.state)
+    }
+
+    @Test fun uncertainSessionCreateSucceedsWhenNamedSessionAppearsAfterResubscribe() = runTest(dispatcher) {
+        val sendGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        relay.on(Method.SESSION_CREATE) {
+            sendGate.await()
+            throw clauderc.app.net.NotConnectedException()
+        }
+        val vm = createForm()
+        vm.setDir("/Users/me/notes")
+        vm.setName("断线新建")
+        vm.submit()
+        assertEquals(CREATE_SESSION_TIMEOUT_MILLIS, relay.sent(Method.SESSION_CREATE).single().timeoutMillis)
+        assertEquals(120_000L, relay.sent(Method.SESSION_CREATE).single().timeoutMillis)
+
+        // Connection drops while session.create is in flight: stays submitting while outcome is unknown.
+        relay.state.value = ConnectionState.Waiting(1, 0)
+        sendGate.complete(Unit)
+        assertTrue(vm.state.value.submitting)
+        assertNull(vm.state.value.note)
+
+        // Reconnect: resubscribed session list now contains the new named session -> treated as success.
+        val withCreated = sampleSessions.copy(
+            sessions = sampleSessions.sessions + session("s-created", "断线新建", SessionState.Working, "api.anthropic.com", cwd = "/Users/me/notes"),
+        )
+        relay.respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), withCreated)
+        relay.state.value = ConnectionState.Connected
+        assertEquals("s-created", withTimeout(5_000) { vm.created.first() })
+        assertFalse(vm.state.value.submitting)
+        assertNull(vm.state.value.note)
     }
 }

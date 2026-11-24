@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +66,7 @@ import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercColors
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.page
+import clauderc.app.ui.theme.swallowTouches
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -140,20 +142,27 @@ fun LoadingCover(
     val policy = LocalLoadingPolicy.current
     var covered by remember { mutableStateOf(false) }
     val cover = remember { Animatable(0f) }
+    val zoom = remember { Animatable(0f) }
     // Starts hidden when loading, so the page does not flash for the frame before the effect runs.
     val rise = remember { Animatable(if (loading) 0f else 1f) }
+    val hidden by remember { derivedStateOf { rise.value < 1f } }
     // The frame time a first load's art stays up until.
     var holdUntil by remember { mutableLongStateOf(0L) }
     LaunchedEffect(loading) {
         if (loading) {
             rise.snapTo(0f)
-            if (policy.first(art)) holdUntil = withFrameMillis { it } + FIRST_LOAD_HOLD_MILLIS else delay(LOADING_DELAY_MILLIS)
-            covered = true
+            if (!covered) {
+                if (policy.first(art)) holdUntil = withFrameMillis { it } + FIRST_LOAD_HOLD_MILLIS else delay(LOADING_DELAY_MILLIS)
+                covered = true
+                zoom.snapTo(0f)
+            }
+            launch { zoom.animateTo(0f, tween(COVER_IN_MILLIS, easing = m.easeEmph)) }
             cover.animateTo(1f, tween(COVER_IN_MILLIS, easing = m.easeEmph))
         } else if (covered) {
             val left = holdUntil - withFrameMillis { it }
             if (left > 0) delay(left)
             launch { rise.animateTo(1f, tween(m.durM, delayMillis = 120, easing = m.easeEmph)) }
+            launch { zoom.animateTo(1f, tween(COVER_OUT_MILLIS, easing = m.easeEmphIn)) }
             cover.animateTo(0f, tween(COVER_OUT_MILLIS, easing = m.easeEmphIn))
             covered = false
         } else {
@@ -168,26 +177,27 @@ fun LoadingCover(
             },
         ) { content() }
         if (covered) {
-            val leaving = !loading
             Box(
                 Modifier
                     .fillMaxSize()
                     .padding(top = top)
-                    .then(if (splash) Modifier.page() else Modifier)
                     .graphicsLayer { alpha = cover.value }
+                    .then(if (splash) Modifier.page() else Modifier)
                     .testTag("loadingCover")
                     .semantics { contentDescription = label.ifEmpty { "加载中" } },
                 contentAlignment = Alignment.Center,
             ) {
-                // Leaving, the art grows to 1.12x as it fades (ld-zoom).
+                // Leaving, the art grows to 1.12x as it fades (ld-zoom); loading again pulls it back smoothly.
                 val grow = Modifier.graphicsLayer {
-                    val out = if (leaving) 1f - cover.value else 0f
-                    scaleX = 1f + 0.12f * out
+                    scaleX = 1f + 0.12f * zoom.value
                     scaleY = scaleX
                 }
                 LoadingArtwork(art, grow, label, title)
             }
         }
+        // While the page is hidden for the load, the art not up yet as well as up or fading out, it is not to
+        // be pressed: every touch below the bar is taken until the page shows and the art has gone.
+        if (loading || covered || hidden) Box(Modifier.matchParentSize().padding(top = top).swallowTouches())
     }
 }
 
@@ -249,7 +259,7 @@ private fun phase(millis: Long, period: Int, delay: Long = 0): Float = ((millis 
  * A CSS keyframe track: [stops] are (offset, value) pairs in order; between two stops the value moves
  * on [easing], held before the first and after the last.
  */
-private fun track(p: Float, easing: Easing, vararg stops: Pair<Float, Float>): Float {
+internal fun track(p: Float, easing: Easing, vararg stops: Pair<Float, Float>): Float {
     if (p <= stops.first().first) return stops.first().second
     for (i in 1 until stops.size) {
         val (a, va) = stops[i - 1]
@@ -344,9 +354,6 @@ private fun SkeletonArt(modifier: Modifier, l: ArtLook, ms: () -> Long) {
             translate(top = (1f - e) * 14 * u) {
                 scale(s, s, Offset(x + w / 2, y + h * u / 2)) {
                     val fill = if (l.sticker && right) l.c.accent.copy(alpha = 0.32f) else l.ls
-                    if (l.sticker) {
-                        clipPath(shape, androidx.compose.ui.graphics.ClipOp.Difference) { translate(top = 4 * u) { drawPath(shape, l.c.ink.copy(alpha = alpha)) } }
-                    }
                     drawPath(shape, fill.copy(alpha = fill.alpha * alpha))
                     // sk-sweep: a light band 1.4s across, 90ms apart.
                     val sweep = InOut.transform(phase(t, 1400, i * 90L))
@@ -397,7 +404,6 @@ private fun DrawScope.drawDeal(l: ArtLook, ms: Long) {
                     val box = Path().apply { addRoundRect(RoundRect(0f, 0f, w, h, CornerRadius(22 * u))) }
                     val a = card.alpha
                     if (l.sticker) {
-                        clipPath(box, androidx.compose.ui.graphics.ClipOp.Difference) { translate(top = 4 * u) { drawPath(box, l.c.ink.copy(alpha = a)) } }
                         drawPath(box, l.ls.copy(alpha = l.ls.alpha * a))
                         drawPath(box, l.c.ink.copy(alpha = a), style = Stroke(4 * u))
                     } else {

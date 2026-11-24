@@ -53,6 +53,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.After
@@ -97,8 +98,8 @@ class ChatLogicTest {
         Dispatchers.resetMain()
     }
 
-    private fun viewModel(cache: ChatCache = ChatCache()) =
-        ChatViewModel("m-1", "s-need", relay, Fleet(relay, scope), scope, compress = { it }, cache = cache, background = dispatcher)
+    private fun viewModel(cache: ChatCache = ChatCache(), saver: ImageSaver? = null) =
+        ChatViewModel("m-1", "s-need", relay, Fleet(relay, scope), scope, compress = { it }, cache = cache, background = dispatcher, saver = saver)
 
     /** Keeps [method] outstanding until the returned gate opens; [result] then answers it. */
     private fun hold(method: String, result: () -> kotlinx.serialization.json.JsonElement = { kotlinx.serialization.json.JsonObject(emptyMap()) }): CompletableDeferred<Unit> {
@@ -221,10 +222,10 @@ class ChatLogicTest {
     }
 
     /** A view model kept in [store], so clearing the store closes the page as navigation does. */
-    private fun pageIn(store: androidx.lifecycle.ViewModelStore, cache: ChatCache) =
+    private fun pageIn(store: androidx.lifecycle.ViewModelStore, cache: ChatCache, saver: ImageSaver? = null) =
         androidx.lifecycle.ViewModelProvider(store, object : androidx.lifecycle.ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = viewModel(cache) as T
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = viewModel(cache, saver) as T
         })[ChatViewModel::class.java]
 
     @Test fun aMessageSentJustBeforeLeavingStillShowsOnReturn() = runTest(dispatcher) {
@@ -297,7 +298,7 @@ class ChatLogicTest {
         stop.complete(Unit)
 
         val answer = hold(Method.CHAT_ANSWER) { throw clauderc.app.net.RemoteException("internal", "没送到") }
-        vm.allow()
+        vm.allow("toolu_01B")
         assertNull("the panel closes at once", vm.state.value.pending)
         answer.complete(Unit)
         assertEquals("a refused answer brings it back", permission, vm.state.value.pending)
@@ -399,13 +400,13 @@ class ChatLogicTest {
 
     @Test fun allowSendsTheToolUseIdAndAnswersQuestions() = runTest(dispatcher) {
         val vm = viewModel()
-        vm.allow()
+        vm.allow("toolu_01B")
         assertEquals(ChatAnswerRequest("s-need", "toolu_01B", decision = "allow"), relay.sent(Method.CHAT_ANSWER).single().decode(ChatAnswerRequest.serializer()))
         assertNull(vm.state.value.pending)
 
         val q = Pending("toolu_01C", PendingKind.QUESTION, questions = listOf(Question("颜色", options = listOf(Option("红"), Option("绿")))))
         relay.event(Method.CHAT_PENDING, "m-1", ChatPendingEvent.serializer(), ChatPendingEvent("s-need", q))
-        vm.answerQuestions(listOf(Answer(custom = "都不喜欢")))
+        vm.answerQuestions("toolu_01C", listOf(Answer(custom = "都不喜欢")))
         assertEquals(ChatAnswerRequest("s-need", "toolu_01C", answers = listOf(Answer(custom = "都不喜欢"))), relay.sent(Method.CHAT_ANSWER).last().decode(ChatAnswerRequest.serializer()))
     }
 
@@ -430,7 +431,7 @@ class ChatLogicTest {
         val vm = viewModel()
         val d = Pending("dialog-3f9a1c0b7e21", PendingKind.DIALOG, questions = listOf(Question("New MCP server found in this project: remote-ssh", options = listOf(Option("Use this MCP server"), Option("Use this and all future MCP servers in this project"), Option("Continue without using this MCP server")))))
         relay.event(Method.CHAT_PENDING, "m-1", ChatPendingEvent.serializer(), ChatPendingEvent("s-need", d))
-        vm.answerQuestions(listOf(Answer(selected = listOf(1))))
+        vm.answerQuestions("dialog-3f9a1c0b7e21", listOf(Answer(selected = listOf(1))))
         assertEquals(ChatAnswerRequest("s-need", "dialog-3f9a1c0b7e21", answers = listOf(Answer(selected = listOf(1)))), relay.sent(Method.CHAT_ANSWER).last().decode(ChatAnswerRequest.serializer()))
     }
 
@@ -444,14 +445,75 @@ class ChatLogicTest {
     @Test fun changedPendingIsReported() = runTest(dispatcher) {
         relay.fail(Method.CHAT_ANSWER, ErrorCode.PENDING_CHANGED)
         val vm = viewModel()
-        vm.deny()
+        vm.deny("toolu_01B")
         assertTrue(withTimeout(1_000) { vm.messages.first() }.contains("已经变了"))
+    }
+
+    /** The panel shows X1 when chat.pending brings X2: a tap on X1's panel answers nothing, and X2's own panel still can. */
+    @Test fun anAnswerFromAPanelGivingWayToANewOneSendsNothing() = runTest(dispatcher) {
+        val vm = viewModel()
+        val next = Pending("toolu_01X", PendingKind.PERMISSION, "Bash", buildJsonObject { put("command", "rm marker.txt") })
+        relay.event(Method.CHAT_PENDING, "m-1", ChatPendingEvent.serializer(), ChatPendingEvent("s-need", next))
+        vm.allow("toolu_01B")
+        vm.deny("toolu_01B")
+        vm.answerQuestions("toolu_01B", listOf(Answer(selected = listOf(0))))
+        assertTrue(relay.sent(Method.CHAT_ANSWER).isEmpty())
+        assertEquals("the new panel stays", next, vm.state.value.pending)
+
+        vm.allow("toolu_01X")
+        assertEquals(ChatAnswerRequest("s-need", "toolu_01X", decision = "allow"), relay.sent(Method.CHAT_ANSWER).single().decode(ChatAnswerRequest.serializer()))
+    }
+
+    /** A refused answer defers to chat.pending that came meanwhile: cleared, the old panel stays gone; replaced, the new one stays. */
+    @Test fun aRefusedAnswerDoesNotBringBackAPanelTheAgentClearedOrReplaced() = runTest(dispatcher) {
+        val vm = viewModel()
+        val refused = hold(Method.CHAT_ANSWER) { throw clauderc.app.net.RemoteException(ErrorCode.PENDING_CHANGED, "pending changed") }
+        vm.allow("toolu_01B")
+        relay.event(Method.CHAT_PENDING, "m-1", ChatPendingEvent.serializer(), ChatPendingEvent("s-need", null))
+        refused.complete(Unit)
+        assertNull(vm.state.value.pending)
+        assertTrue(withTimeout(1_000) { vm.messages.first() }.contains("已经变了"))
+
+        val x2 = permission.copy(toolUseId = "toolu_01X")
+        val x3 = permission.copy(toolUseId = "toolu_01Y")
+        relay.event(Method.CHAT_PENDING, "m-1", ChatPendingEvent.serializer(), ChatPendingEvent("s-need", x2))
+        val again = hold(Method.CHAT_ANSWER) { throw clauderc.app.net.RemoteException(ErrorCode.PENDING_CHANGED, "pending changed") }
+        vm.deny("toolu_01X")
+        relay.event(Method.CHAT_PENDING, "m-1", ChatPendingEvent.serializer(), ChatPendingEvent("s-need", x3))
+        again.complete(Unit)
+        assertEquals(x3, vm.state.value.pending)
+    }
+
+    @Test fun aSecondInterruptWhileTheFirstIsOutSendsNothing() = runTest(dispatcher) {
+        val vm = viewModel()
+        val stop = hold(Method.CHAT_INTERRUPT)
+        vm.interrupt()
+        vm.interrupt()
+        assertEquals(1, relay.sent(Method.CHAT_INTERRUPT).size)
+        stop.complete(Unit)
+        vm.interrupt()
+        assertEquals("answered, it can be sent again", 2, relay.sent(Method.CHAT_INTERRUPT).size)
+    }
+
+    @Test fun nothingIsSentWhileARewindIsUnderway() = runTest(dispatcher) {
+        val vm = viewModel()
+        val rewound = hold(Method.CHAT_REWIND)
+        vm.rewind(ChatItem(60, ItemKind.USER, text = "第 60 条", uuid = "u-60"), clauderc.app.protocol.RewindRestore.BOTH) {}
+        assertTrue(vm.state.value.rewinding)
+        assertFalse(vm.send("再跑一遍"))
+        assertFalse(vm.fork(""))
+        assertTrue(relay.sent(Method.CHAT_SEND).isEmpty())
+        rewound.complete(Unit)
+        assertTrue(vm.send("再跑一遍"))
+        assertEquals(1, relay.sent(Method.CHAT_SEND).size)
     }
 
     @Test fun multilineTextIsOneMessage() = runTest(dispatcher) {
         val vm = viewModel()
         assertTrue(vm.send("第一行\n第二行\n第三行"))
-        assertEquals(ChatSendRequest("s-need", "第一行\n第二行\n第三行"), relay.sent(Method.CHAT_SEND).single().decode(ChatSendRequest.serializer()))
+        val sent = relay.sent(Method.CHAT_SEND).single().decode(ChatSendRequest.serializer())
+        assertTrue("send carries clientReqId", !sent.clientReqId.isNullOrEmpty())
+        assertEquals(ChatSendRequest("s-need", "第一行\n第二行\n第三行"), sent.copy(clientReqId = null))
     }
 
     @Test fun imageLimitsAreCheckedBeforeSending() = runTest(dispatcher) {
@@ -677,12 +739,103 @@ class ChatLogicTest {
         vm.loadImage("toolu_I.0")
         vm.loadImage("toolu_I.0")
         assertEquals(ChatImageRequest("s-need", "toolu_I.0"), relay.sent(Method.CHAT_IMAGE).single().decode(ChatImageRequest.serializer()))
-        assertTrue(vm.state.value.wholeImages["toolu_I.0"]!!.contentEquals(byteArrayOf(1, 2, 3)))
+        assertTrue(vm.state.value.wholeImages["toolu_I.0"]!!.bytes.contentEquals(byteArrayOf(1, 2, 3)))
 
         relay.fail(Method.CHAT_IMAGE, ErrorCode.NOT_FOUND)
         vm.loadImage("toolu_X.0")
         assertEquals(setOf("toolu_X.0"), vm.state.value.failedImages)
         assertTrue(vm.state.value.fetchingImages.isEmpty())
+    }
+
+    // ---------- 2026-11-22: saving a picture into the gallery ----------
+
+    private val shot = ToolImage("toolu_I.0", "image/png", name = "chat.png", width = 720, height = 1560, size = 3)
+
+    /** One write the saver was asked for: what, under which name, in which format. */
+    private class Write(val bytes: ByteArray, val name: String?, val mediaType: String?)
+
+    /** A saver that notes each write as it starts and then waits for [gate], when given, before it finishes. */
+    private class FakeSaver(val gate: CompletableDeferred<Unit>? = null, val fail: Boolean = false) : ImageSaver {
+        val writes = mutableListOf<Write>()
+
+        override suspend fun save(bytes: ByteArray, name: String?, mediaType: String?) {
+            writes += Write(bytes, name, mediaType)
+            gate?.await()
+            if (fail) throw java.io.IOException("相册没有接受这张图")
+        }
+    }
+
+    /** A page whose viewer shows [shot], its bytes fetched. */
+    private fun viewingShot(saver: ImageSaver, vm: ChatViewModel = viewModel(saver = saver)): ChatViewModel {
+        relay.respond(Method.CHAT_IMAGE, ChatImageResponse.serializer(), ChatImageResponse("image/png", "AQID"))
+        vm.loadImage(shot.id)
+        vm.viewImage(shot.id)
+        return vm
+    }
+
+    @Test fun tappingSaveThreeTimesWritesThePictureOnce() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val saver = FakeSaver(gate)
+        val vm = viewingShot(saver)
+        repeat(3) { vm.saveImage(shot) }
+        assertEquals(setOf(shot.id), vm.state.value.savingImages)
+        gate.complete(Unit)
+        assertEquals(setOf(shot.id), vm.state.value.savedImages)
+        assertTrue(vm.state.value.savingImages.isEmpty())
+        // Saved, the button is a tick until the viewer closes: another tap writes nothing either.
+        vm.saveImage(shot)
+        assertEquals(1, saver.writes.size)
+        assertTrue(saver.writes.single().bytes.contentEquals(byteArrayOf(1, 2, 3)))
+        assertEquals("chat.png", saver.writes.single().name)
+        // Closed and opened again, it can be saved again.
+        vm.viewImage(null)
+        assertTrue(vm.state.value.savedImages.isEmpty())
+        vm.viewImage(shot.id)
+        vm.saveImage(shot)
+        assertEquals(2, saver.writes.size)
+        // With the viewer on it, the tick is all that says so.
+        assertNull(withTimeoutOrNull(1_000) { vm.messages.first() })
+    }
+
+    @Test fun aSaveGoesOnAfterThePageIsGone() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val saver = FakeSaver(gate)
+        val store = androidx.lifecycle.ViewModelStore()
+        val vm = viewingShot(saver, pageIn(store, ChatCache(), saver))
+        vm.saveImage(shot)
+        store.clear()
+        gate.complete(Unit)
+        assertEquals(1, saver.writes.size)
+        assertTrue("the write ran to its end", vm.state.value.savingImages.isEmpty())
+    }
+
+    @Test fun aFailedSaveSaysSo() = runTest(dispatcher) {
+        val vm = viewingShot(FakeSaver(fail = true))
+        vm.saveImage(shot)
+        assertEquals("保存失败", withTimeout(1_000) { vm.messages.first() })
+        assertTrue(vm.state.value.savingImages.isEmpty())
+        assertTrue("the download icon comes back", vm.state.value.savedImages.isEmpty())
+    }
+
+    @Test fun aSaveThatEndsWithTheViewerClosedSaysWhereThePictureWent() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val vm = viewingShot(FakeSaver(gate))
+        vm.saveImage(shot)
+        vm.viewImage(null)
+        gate.complete(Unit)
+        assertEquals("已保存到相册", withTimeout(1_000) { vm.messages.first() })
+        assertTrue("opened again, it shows the download icon", vm.state.value.savedImages.isEmpty())
+    }
+
+    @Test fun aFetchedPictureKeepsTheMediaTypeChatImageNamed() = runTest(dispatcher) {
+        // The thumbnail's row said PNG; the picture itself came as WebP.
+        relay.respond(Method.CHAT_IMAGE, ChatImageResponse.serializer(), ChatImageResponse("image/webp", "UklGRg=="))
+        val saver = FakeSaver()
+        val vm = viewModel(saver = saver)
+        vm.loadImage(shot.id)
+        assertEquals("image/webp", vm.state.value.wholeImages[shot.id]!!.mediaType)
+        vm.saveImage(shot)
+        assertEquals("image/webp", saver.writes.single().mediaType)
     }
 
     private fun tinyPng(): ByteArray = java.util.Base64.getDecoder().decode(
@@ -715,5 +868,346 @@ class ChatLogicTest {
         screen(null, null, SessionState.Idle)
         assertNull(vm.state.value.partial)
         assertNull(vm.state.value.activity)
+    }
+
+    @Test fun networkFailureOnOpenReopensWhenReconnected() = runTest(dispatcher) {
+        var fail = true
+        relay.on(Method.CHAT_OPEN) {
+            if (fail) throw clauderc.app.net.NotConnectedException()
+            ProtocolJson.encodeToJsonElement(ChatOpenResponse.serializer(), ChatOpenResponse(items = listOf(text(1, body = "连上后到了")), state = SessionState.Idle))
+        }
+        val vm = viewModel()
+        assertTrue(vm.state.value.items.isEmpty())
+        assertFalse("network failure must not mark the page opened", vm.state.value.opened)
+        assertEquals(1, relay.sent(Method.CHAT_OPEN).size)
+
+        fail = false
+        relay.state.value = clauderc.app.net.ConnectionState.Waiting(1, 0)
+        relay.state.value = clauderc.app.net.ConnectionState.Connected
+        assertEquals(2, relay.sent(Method.CHAT_OPEN).size)
+        assertEquals(listOf("连上后到了"), vm.state.value.items.map { it.text })
+        assertTrue(vm.state.value.opened)
+    }
+
+    @Test fun failedLoadOlderMarksOlderFailedAndRetries() = runTest(dispatcher) {
+        var failOlder = true
+        relay.on(Method.CHAT_OPEN) { sent ->
+            val req = sent.decode(ChatOpenRequest.serializer())
+            if (req.before == null) {
+                ProtocolJson.encodeToJsonElement(ChatOpenResponse.serializer(), ChatOpenResponse(items = listOf(text(50, body = "第 50 条")), hasMore = true, state = SessionState.Idle))
+            } else if (failOlder) {
+                throw clauderc.app.net.NotConnectedException()
+            } else {
+                ProtocolJson.encodeToJsonElement(ChatOpenResponse.serializer(), ChatOpenResponse(items = listOf(text(40, body = "第 40 条")), hasMore = false, state = SessionState.Idle))
+            }
+        }
+        val vm = viewModel()
+        vm.loadOlder()
+        assertFalse(vm.state.value.loadingOlder)
+        assertTrue(vm.state.value.olderFailed)
+        assertTrue(vm.state.value.hasMore)
+
+        failOlder = false
+        vm.loadOlder()
+        assertFalse(vm.state.value.loadingOlder)
+        assertFalse(vm.state.value.olderFailed)
+        assertFalse(vm.state.value.hasMore)
+        assertEquals(listOf(40L, 50L), vm.state.value.items.map { it.seq })
+    }
+
+    @Test fun rapidAutoResumeTogglesEndOnTheLastTap() = runTest(dispatcher) {
+        val resets = java.time.Instant.parse("2026-11-23T22:00:00Z")
+        val baseLimit = clauderc.app.protocol.Limit("fiveHour", "limit", resets)
+        relay.respond(Method.CHAT_OPEN, ChatOpenResponse.serializer(), ChatOpenResponse(items = emptyList(), state = SessionState.Idle, limit = baseLimit))
+        val gates = mutableListOf<CompletableDeferred<Unit>>()
+        val calls = mutableListOf<Boolean>()
+        relay.on(Method.CHAT_AUTO_RESUME) { sent ->
+            val req = sent.decode(clauderc.app.protocol.ChatAutoResumeRequest.serializer())
+            calls += req.on
+            val gate = CompletableDeferred<Unit>()
+            gates += gate
+            gate.await()
+            val out = if (req.on) baseLimit.copy(autoResume = clauderc.app.protocol.AutoResume(req.text.orEmpty(), resets.plusSeconds(60))) else baseLimit
+            ProtocolJson.encodeToJsonElement(clauderc.app.protocol.ChatAutoResumeResponse.serializer(), clauderc.app.protocol.ChatAutoResumeResponse(out))
+        }
+        val vm = viewModel()
+        // Rapid taps: ON -> OFF -> ON -> OFF while the first request is still in flight.
+        vm.setAutoResume(true)
+        vm.setAutoResume(false)
+        vm.setAutoResume(true)
+        vm.setAutoResume(false)
+        assertEquals("only the first request went out before answering", listOf(true), calls)
+        assertNull("UI reflects the last tap (off)", vm.state.value.limit?.autoResume)
+
+        // First request answers ON: must not flip UI back on; then the latest (OFF) goes out.
+        gates[0].complete(Unit)
+        assertNull("stale ON answer did not overwrite OFF", vm.state.value.limit?.autoResume)
+        assertEquals("skipped superseded middle taps and sent final OFF", listOf(true, false), calls)
+        gates[1].complete(Unit)
+        assertNull(vm.state.value.limit?.autoResume)
+
+        // Now tap ON -> OFF -> ON: must end ON.
+        vm.setAutoResume(true)
+        vm.setAutoResume(false)
+        vm.setAutoResume(true)
+        gates[2].complete(Unit)
+        assertEquals(listOf(true, false, true, true), calls)
+        gates[3].complete(Unit)
+        assertTrue(vm.state.value.limit?.autoResume != null)
+    }
+
+    @Test fun messageSentBeforeOpenIsNotSettledByOlderMatchingSnapshotItem() = runTest(dispatcher) {
+        val openGate = hold(Method.CHAT_OPEN) {
+            ProtocolJson.encodeToJsonElement(
+                ChatOpenResponse.serializer(),
+                ChatOpenResponse(
+                    items = listOf(text(1, ItemKind.USER, "继续"), text(2, ItemKind.ASSISTANT, "上一次的回复")),
+                    state = SessionState.Idle,
+                ),
+            )
+        }
+        val sendGate = hold(Method.CHAT_SEND)
+        val vm = viewModel()
+        // Send "继续" before chat.open returns.
+        assertTrue(vm.send("继续"))
+        assertEquals(listOf("继续"), vm.state.value.outgoing.map { it.text })
+
+        // chat.open returns a snapshot containing an older "继续": the new outgoing bubble must stay unsettled.
+        openGate.complete(Unit)
+        assertEquals("older matching item in snapshot must not settle the new send", listOf("继续"), vm.state.value.outgoing.map { it.text })
+        assertEquals("anchored to the snapshot tip", 2L, vm.state.value.outgoing.single().afterSeq)
+
+        // Once the new "继续" actually lands after the snapshot tip, it settles.
+        sendGate.complete(Unit)
+        relay.event(Method.CHAT_ITEMS, "m-1", ChatItemsEvent.serializer(), ChatItemsEvent("s-need", listOf(text(3, ItemKind.USER, "继续"))))
+        assertTrue(vm.state.value.outgoing.isEmpty())
+    }
+
+    @Test fun twoSimultaneousFailedSendsKeepBothTextsInRestoreAndDraft() = runTest(dispatcher) {
+        val storeScope = CoroutineScope(Dispatchers.IO + Job())
+        val drafts = clauderc.app.data.DraftStore(
+            androidx.datastore.preferences.core.PreferenceDataStoreFactory.create(scope = storeScope, produceFile = { java.io.File(tmp.root, "both-fail.preferences_pb") }),
+        )
+        val cache = ChatCache()
+        val gates = mutableListOf<CompletableDeferred<Unit>>()
+        relay.on(Method.CHAT_SEND) {
+            val g = CompletableDeferred<Unit>()
+            gates += g
+            g.await()
+            throw clauderc.app.net.RemoteException(ErrorCode.NOT_DELIVERED, "没送达")
+        }
+        val store1 = androidx.lifecycle.ViewModelStore()
+        val vm1 = androidx.lifecycle.ViewModelProvider(store1, object : androidx.lifecycle.ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
+                ChatViewModel("m-1", "s-need", relay, Fleet(relay, scope), scope, compress = { it }, cache = cache, background = dispatcher, drafts = drafts) as T
+        })[ChatViewModel::class.java]
+        assertTrue(vm1.send("第一条消息"))
+        store1.clear()
+
+        val vm2 = ChatViewModel("m-1", "s-need", relay, Fleet(relay, scope), scope, compress = { it }, cache = cache, background = dispatcher, drafts = drafts)
+        assertTrue(vm2.send("第二条消息"))
+        assertEquals(2, gates.size)
+
+        // Both fail concurrently while vm2 is open.
+        gates[0].complete(Unit)
+        gates[1].complete(Unit)
+        assertEquals("第一条消息\n第二条消息", vm2.state.value.restore?.text)
+        assertEquals("第一条消息\n第二条消息", eventually { drafts.draft("m-1", "s-need").first { it.contains("第一条消息") && it.contains("第二条消息") } })
+        storeScope.cancel()
+    }
+
+    @Test fun connIdChangeWhileOnlineReopensChat() = runTest(dispatcher) {
+        relay.respond(Method.MACHINES_LIST, MachinesListResponse.serializer(), MachinesListResponse(listOf(machine("m-1", "mac-mini", online = true, connId = "g-1"))))
+        var opens = 0
+        relay.on(Method.CHAT_OPEN) {
+            opens++
+            ProtocolJson.encodeToJsonElement(
+                ChatOpenResponse.serializer(),
+                ChatOpenResponse(items = listOf(text(opens.toLong(), ItemKind.ASSISTANT, "第 $opens 次打开")), state = SessionState.Idle),
+            )
+        }
+        val vm = viewModel()
+        assertEquals(1, opens)
+        assertEquals(listOf("第 1 次打开"), vm.state.value.items.map { it.text })
+
+        // Machine stays online=true but receives a fresh connId after being replaced.
+        relay.event(Method.MACHINE_STATUS, "m-1", clauderc.app.protocol.Machine.serializer(), machine("m-1", "mac-mini", online = true, connId = "g-2"))
+        assertEquals("connId change reopens chat even when online stayed true", 2, opens)
+        assertTrue(vm.state.value.online)
+        assertEquals(listOf("第 2 次打开"), vm.state.value.items.map { it.text })
+    }
+
+    @Test fun staleChatOpenDoesNotOverwriteNewerItemsPendingOrOlderPages() = runTest(dispatcher) {
+        var openCalls = 0
+        val reopenGate = CompletableDeferred<Unit>()
+        relay.on(Method.CHAT_OPEN) { sent ->
+            val req = sent.decode(ChatOpenRequest.serializer())
+            if (req.before != null) {
+                ProtocolJson.encodeToJsonElement(
+                    ChatOpenResponse.serializer(),
+                    ChatOpenResponse(items = (1L..10L).map { text(it, ItemKind.USER, "old-$it") }, hasMore = false),
+                )
+            } else if (++openCalls == 1) {
+                ProtocolJson.encodeToJsonElement(
+                    ChatOpenResponse.serializer(),
+                    ChatOpenResponse(
+                        items = (11L..15L).map { text(it, ItemKind.USER, "m-$it") },
+                        hasMore = true,
+                        state = SessionState.Idle,
+                        rev = 2,
+                        subId = "sub-1",
+                    ),
+                )
+            } else {
+                reopenGate.await()
+                ProtocolJson.encodeToJsonElement(
+                    ChatOpenResponse.serializer(),
+                    ChatOpenResponse(
+                        items = (11L..15L).map { text(it, ItemKind.USER, "m-$it") },
+                        hasMore = true,
+                        state = SessionState.Idle,
+                        pending = null,
+                        rev = 3,
+                        subId = "sub-2",
+                    ),
+                )
+            }
+        }
+        val vm = viewModel()
+        vm.loadOlder()
+        assertEquals((1L..15L).toList(), vm.state.value.items.map { it.seq })
+        assertFalse(vm.state.value.hasMore)
+
+        // Trigger a second open while keeping the same rev space (e.g. machine blinked or re-opened):
+        // newer pushes arrive with rev 5 and 6 BEFORE the older rev 3 chat.open response arrives.
+        relay.event(Method.MACHINE_STATUS, "m-1", clauderc.app.protocol.Machine.serializer(), machine("m-1", "mac-mini", online = false))
+        relay.event(Method.MACHINE_STATUS, "m-1", clauderc.app.protocol.Machine.serializer(), machine("m-1", "mac-mini", online = true))
+        assertEquals(2, openCalls)
+
+        val newerPending = clauderc.app.protocol.Pending("toolu_new", clauderc.app.protocol.PendingKind.PERMISSION, toolName = "Bash")
+        relay.event(Method.CHAT_ITEMS, "m-1", ChatItemsEvent.serializer(), ChatItemsEvent("s-need", listOf(text(16, ItemKind.ASSISTANT, "新回复")), rev = 5))
+        relay.event(Method.CHAT_PENDING, "m-1", clauderc.app.protocol.ChatPendingEvent.serializer(), clauderc.app.protocol.ChatPendingEvent("s-need", newerPending, rev = 6))
+
+        // Now the stale rev=3 chat.open arrives: must preserve newer item 16, newer pending, and older pages 1..10.
+        reopenGate.complete(Unit)
+        assertEquals((1L..16L).toList(), vm.state.value.items.map { it.seq })
+        assertEquals("新回复", vm.state.value.items.last().text)
+        assertFalse("already loaded down to seq 1", vm.state.value.hasMore)
+        assertEquals("toolu_new", vm.state.value.pending?.toolUseId)
+    }
+
+    @Test fun resetItemsEventClearsOldItemsAndShowsNewTranscript() = runTest(dispatcher) {
+        relay.respond(
+            Method.CHAT_OPEN,
+            ChatOpenResponse.serializer(),
+            ChatOpenResponse(items = listOf(text(1, ItemKind.USER, "旧消息"), text(2, ItemKind.ASSISTANT, "旧回复")), hasMore = true, rev = 1),
+        )
+        val vm = viewModel()
+        assertEquals(listOf("旧消息", "旧回复"), vm.state.value.items.map { it.text })
+        assertTrue(vm.state.value.hasMore)
+
+        relay.event(
+            Method.CHAT_ITEMS,
+            "m-1",
+            ChatItemsEvent.serializer(),
+            ChatItemsEvent("s-need", listOf(text(1, ItemKind.USER, "清空后的新话题")), rev = 2, reset = true),
+        )
+        assertEquals(listOf("清空后的新话题"), vm.state.value.items.map { it.text })
+        assertFalse(vm.state.value.hasMore)
+    }
+
+    @Test fun sendDuringDisconnectStaysPendingAndSettlesWhenFoundInReopenSnapshot() = runTest(dispatcher) {
+        var openCalls = 0
+        relay.on(Method.CHAT_OPEN) {
+            val items = if (++openCalls == 1) {
+                listOf(text(1, ItemKind.USER, "旧消息"))
+            } else {
+                listOf(text(1, ItemKind.USER, "旧消息"), text(2, ItemKind.USER, "断线时发出的消息"))
+            }
+            ProtocolJson.encodeToJsonElement(ChatOpenResponse.serializer(), ChatOpenResponse(items = items, state = SessionState.Idle))
+        }
+        val sendGate = hold(Method.CHAT_SEND) { throw clauderc.app.net.NotConnectedException() }
+        val vm = viewModel()
+        assertTrue(vm.send("断线时发出的消息"))
+
+        // Connection drops while chat.send is in flight.
+        relay.state.value = clauderc.app.net.ConnectionState.Waiting(1, 0)
+        sendGate.complete(Unit)
+        assertEquals("bubble stays pending confirmation", listOf("断线时发出的消息"), vm.state.value.outgoing.map { it.text })
+        assertTrue(vm.state.value.outgoing.single().uncertain)
+        assertNull("composer is not restored while outcome is unknown", vm.state.value.restore)
+
+        // Reconnect: chat.open snapshot contains the message -> settled as delivered, no restore.
+        relay.state.value = clauderc.app.net.ConnectionState.Connected
+        assertTrue("settled as delivered", vm.state.value.outgoing.isEmpty())
+        assertNull(vm.state.value.restore)
+        assertEquals(listOf("旧消息", "断线时发出的消息"), vm.state.value.items.map { it.text })
+    }
+
+    @Test fun sendDuringDisconnectReturnsToComposerWhenMissingFromReopenSnapshot() = runTest(dispatcher) {
+        relay.respond(Method.CHAT_OPEN, ChatOpenResponse.serializer(), ChatOpenResponse(items = listOf(text(1, ItemKind.USER, "旧消息")), state = SessionState.Idle))
+        val sendGate = hold(Method.CHAT_SEND) { throw clauderc.app.net.NotConnectedException() }
+        val vm = viewModel()
+        val notices = mutableListOf<String>()
+        val job = launch { vm.messages.collect { notices += it } }
+
+        assertTrue(vm.send("没送到的消息"))
+        relay.state.value = clauderc.app.net.ConnectionState.Waiting(1, 0)
+        sendGate.complete(Unit)
+        assertEquals(listOf("没送到的消息"), vm.state.value.outgoing.map { it.text })
+        assertNull(vm.state.value.restore)
+
+        // Reconnect: chat.open snapshot does NOT contain the message -> returned to composer with notice.
+        relay.state.value = clauderc.app.net.ConnectionState.Connected
+        assertTrue(vm.state.value.outgoing.isEmpty())
+        assertEquals("没送到的消息", vm.state.value.restore?.text)
+        assertTrue("user is told it was not delivered", notices.any { it.contains("没有送到") })
+        job.cancel()
+    }
+
+    @Test fun stoppedSessionChatSendUses120SecondTimeout() = runTest(dispatcher) {
+        relay.respond(Method.CHAT_OPEN, ChatOpenResponse.serializer(), ChatOpenResponse(items = emptyList(), state = SessionState.Stopped))
+        val vm = viewModel()
+        assertTrue(vm.send("唤醒后发的消息"))
+        assertEquals(120_000L, relay.sent(Method.CHAT_SEND).single().timeoutMillis)
+    }
+
+    @Test fun sentUserMessageImagesStayLocalAndSkipChatImage() = runTest(dispatcher) {
+        val original = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 1, 2, 3, 4)
+        val vm = ChatViewModel("m-1", "s-need", relay, Fleet(relay, scope), scope, compress = { it }, background = dispatcher)
+        vm.addImage("photo.jpg", original.size.toLong()) { original }
+        assertEquals(1, vm.state.value.attachments.size)
+        assertTrue(vm.send("刚拍的图"))
+        val sentReq = relay.sent(Method.CHAT_SEND).single().decode(ChatSendRequest.serializer())
+        assertTrue(!sentReq.clientReqId.isNullOrEmpty())
+
+        // Transcript push arrives carrying a thumbnail with an image ID: ViewModel pairs it with the local bytes.
+        val thumbB64 = java.util.Base64.getEncoder().encodeToString(tinyPng())
+        val delivered = ChatItem(
+            seq = 102,
+            kind = ItemKind.USER,
+            text = "[Image #1] 刚拍的图",
+            images = listOf(clauderc.app.protocol.Image("image/jpeg", thumbB64, id = "usr-local.0", width = 1200, height = 900, size = original.size.toLong())),
+        )
+        relay.event(Method.CHAT_ITEMS, "m-1", ChatItemsEvent.serializer(), ChatItemsEvent("s-need", listOf(delivered)))
+
+        val whole = vm.state.value.wholeImages["usr-local.0"]
+        assertTrue("original bytes kept locally under the server's image id", whole != null && whole.bytes.contentEquals(original))
+        // Requesting loadImage for it does NOT hit the network.
+        vm.loadImage("usr-local.0")
+        assertTrue("no chat.image request sent", relay.sent(Method.CHAT_IMAGE).isEmpty())
+    }
+
+    @Test fun oldAppStyleDecodeStillReadsThumbnailData() {
+        // Older apps ignore unknown optional fields (id, width, height, size) and decode mediaType + data directly.
+        val json = """{"id":"usr-u1.0","mediaType":"image/jpeg","data":"${java.util.Base64.getEncoder().encodeToString(tinyPng())}","width":1200,"height":900,"size":4194304}"""
+        val decoded = ProtocolJson.decodeFromString(clauderc.app.protocol.Image.serializer(), json)
+        assertEquals("image/jpeg", decoded.mediaType)
+        assertTrue(java.util.Base64.getDecoder().decode(decoded.data).contentEquals(tinyPng()))
+        // Simulate an older schema with only mediaType + data under ignoreUnknownKeys = true.
+        val obj = ProtocolJson.parseToJsonElement(json) as kotlinx.serialization.json.JsonObject
+        assertEquals("image/jpeg", (obj["mediaType"] as kotlinx.serialization.json.JsonPrimitive).content)
+        assertTrue(java.util.Base64.getDecoder().decode((obj["data"] as kotlinx.serialization.json.JsonPrimitive).content).contentEquals(tinyPng()))
     }
 }

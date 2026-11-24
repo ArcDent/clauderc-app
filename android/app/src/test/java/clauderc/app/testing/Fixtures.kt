@@ -17,8 +17,8 @@ import kotlinx.coroutines.CoroutineScope
 
 val T0: Instant = Instant.parse("2026-11-12T09:30:00Z")
 
-fun machine(id: String, name: String, online: Boolean = true, lastSeen: Instant = T0) =
-    Machine(id, name, online, lastSeen, "0.1.0", "2.1.330")
+fun machine(id: String, name: String, online: Boolean = true, lastSeen: Instant = T0, connId: String? = null) =
+    Machine(id, name, online, lastSeen, "0.1.0", "2.1.330", connId)
 
 fun session(id: String, name: String, state: SessionState, profile: String, minutesAgo: Long = 1, cwd: String = "/Users/me/github/$id", context: SessionContext? = null) =
     Session(id, name, cwd, state, profile, T0.minusSeconds(minutesAgo * 60), context)

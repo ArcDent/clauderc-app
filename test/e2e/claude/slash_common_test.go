@@ -4,6 +4,7 @@ package claude
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"slices"
 	"strings"
@@ -95,6 +96,66 @@ func TestSlashCommon(t *testing.T) {
 		waitFor(t, 5*time.Minute, "会话记录出现 compact_boundary", func() bool {
 			raw, err := os.ReadFile(s.path)
 			return err == nil && strings.Contains(string(raw), `"compact_boundary"`)
+		})
+	})
+	// /clear starts a new transcript under the same background session; the
+	// open chat switches to it and delivers messages and replies sent afterwards.
+	t.Run("clear", func(t *testing.T) {
+		s := launchAt(t, "slash-clear", plain, probe, true)
+		oldSID := s.sessionID
+		s.x.mu.Lock()
+		evStart := len(s.x.events)
+		s.x.mu.Unlock()
+
+		s.send("/clear")
+		waitFor(t, 30*time.Second, "/clear 后 sessionId 切换或推送 reset", func() bool {
+			if tg, ok := s.x.target(s.id); ok && tg.SessionID != "" && tg.SessionID != oldSID {
+				return true
+			}
+			return false
+		})
+		if tg, ok := s.x.target(s.id); ok {
+			t.Logf("/clear 后 sessionId: %s -> %s", oldSID, tg.SessionID)
+		}
+		// Wait for the open chat's state poll to pick up the new transcript.
+		waitFor(t, 30*time.Second, "手机收到 /clear 后的 reset 推送", func() bool {
+			s.x.mu.Lock()
+			defer s.x.mu.Unlock()
+			for _, ev := range s.x.events[evStart:] {
+				if ev.Method != protocol.EventChatItems {
+					continue
+				}
+				var body protocol.ChatItemsEvent
+				if json.Unmarshal(ev.Body, &body) == nil && body.SessionID == s.id && body.Reset {
+					return true
+				}
+			}
+			return false
+		})
+
+		s.send("清空后的消息：只回复 CLEARED_OK")
+		waitFor(t, 120*time.Second, "手机聊天收到 /clear 后的消息和回复", func() bool {
+			s.x.mu.Lock()
+			defer s.x.mu.Unlock()
+			var sawUser, sawReply bool
+			for _, ev := range s.x.events[evStart:] {
+				if ev.Method != protocol.EventChatItems {
+					continue
+				}
+				var body protocol.ChatItemsEvent
+				if json.Unmarshal(ev.Body, &body) != nil || body.SessionID != s.id {
+					continue
+				}
+				for _, it := range body.Items {
+					if it.Kind == protocol.ItemUser && strings.Contains(it.Text, "CLEARED_OK") {
+						sawUser = true
+					}
+					if it.Kind == protocol.ItemAssistant && strings.Contains(it.Text, "CLEARED_OK") {
+						sawReply = true
+					}
+				}
+			}
+			return sawUser && sawReply
 		})
 	})
 }

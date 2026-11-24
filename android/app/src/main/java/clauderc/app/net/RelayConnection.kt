@@ -1,10 +1,14 @@
 package clauderc.app.net
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import clauderc.app.protocol.CloseCode
 import clauderc.app.protocol.Envelope
 import clauderc.app.protocol.Kind
+import clauderc.app.protocol.Method
 import clauderc.app.protocol.ProtocolJson
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
@@ -76,6 +80,9 @@ interface ForegroundAware {
 interface RelayLine : Relay, ForegroundAware {
     /** Closes the connection for good. */
     fun close()
+
+    /** Called when the active system network switches; live lines close and redial immediately. */
+    fun onNetworkChanged() {}
 }
 
 suspend fun <Req, Res> Relay.call(
@@ -90,9 +97,13 @@ suspend fun <Req, Res> Relay.call(
     return ProtocolJson.decodeFromJsonElement(responseSerializer, body)
 }
 
+/** How long going to the background waits for in-flight write requests before closing the socket. */
+const val BACKGROUND_GRACE_MILLIS = 10_000L
+
 /**
  * The phone's WebSocket to /ws/app (design D2). It is open only while the app
- * has a credential and is in the foreground, reconnects with growing delays,
+ * has a credential and is in the foreground (with up to [backgroundGraceMillis]
+ * grace when a write request is in flight), reconnects with growing delays,
  * and pairs each response with its request by id.
  */
 class RelayConnection(
@@ -101,6 +112,7 @@ class RelayConnection(
     private val reconnectDelaysMillis: List<Long> = listOf(1_000, 2_000, 4_000, 8_000, 16_000, 30_000),
     private val requestTimeoutMillis: Long = 30_000,
     private val now: () -> Long = System::currentTimeMillis,
+    private val backgroundGraceMillis: Long = BACKGROUND_GRACE_MILLIS,
 ) : RelayLine {
     private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     override val state: StateFlow<ConnectionState> = _state.asStateFlow()
@@ -109,6 +121,9 @@ class RelayConnection(
     override val events: SharedFlow<Envelope> = _events.asSharedFlow()
 
     private class Credential(val address: RelayAddress, val token: String)
+    private class PendingCall(val method: String, val deferred: CompletableDeferred<Envelope>) {
+        val write: Boolean get() = !Method.isReadOnly(method)
+    }
 
     private val lock = Any()
     private var credential: Credential? = null
@@ -117,7 +132,8 @@ class RelayConnection(
     private var generation = 0
     private var attempt = 0
     private var retryJob: Job? = null
-    private val pending = ConcurrentHashMap<String, CompletableDeferred<Envelope>>()
+    private var graceJob: Job? = null
+    private val pending = ConcurrentHashMap<String, PendingCall>()
     private val ids = AtomicLong()
 
     /** Sets or clears the device credential; a new credential also clears [ConnectionState.Revoked]. */
@@ -135,11 +151,46 @@ class RelayConnection(
         if (foreground == value) return@synchronized
         foreground = value
         if (!value) {
+            if (socket != null && hasInflightWrite()) {
+                graceJob?.cancel()
+                val gen = generation
+                graceJob = scope.launch {
+                    delay(backgroundGraceMillis)
+                    synchronized(lock) {
+                        if (gen != generation || foreground) return@synchronized
+                        graceJob = null
+                        closeLocked()
+                        attempt = 0
+                        if (_state.value != ConnectionState.Revoked) _state.value = ConnectionState.Idle
+                    }
+                }
+                return@synchronized
+            }
             closeLocked()
             attempt = 0
             if (_state.value != ConnectionState.Revoked) _state.value = ConnectionState.Idle
+        } else {
+            graceJob?.cancel()
+            graceJob = null
         }
         reconcileLocked()
+    }
+
+    override fun onNetworkChanged() = synchronized(lock) {
+        if (!foreground || credential == null || _state.value == ConnectionState.Revoked) return@synchronized
+        if (socket == null && retryJob == null && _state.value == ConnectionState.Idle) return@synchronized
+        closeLocked()
+        attempt = 0
+        reconcileLocked()
+    }
+
+    private fun hasInflightWrite(): Boolean = pending.values.any { it.write }
+
+    private fun maybeFinishBackgroundGrace() = synchronized(lock) {
+        if (foreground || graceJob == null || hasInflightWrite()) return@synchronized
+        closeLocked()
+        attempt = 0
+        if (_state.value != ConnectionState.Revoked) _state.value = ConnectionState.Idle
     }
 
     private fun reconcileLocked() {
@@ -159,6 +210,8 @@ class RelayConnection(
         generation++
         retryJob?.cancel()
         retryJob = null
+        graceJob?.cancel()
+        graceJob = null
         socket?.close(1000, null)
         socket = null
         failPending()
@@ -167,13 +220,15 @@ class RelayConnection(
     private fun failPending() {
         val waiting = pending.values.toList()
         pending.clear()
-        waiting.forEach { it.completeExceptionally(NotConnectedException()) }
+        waiting.forEach { it.deferred.completeExceptionally(NotConnectedException()) }
     }
 
     private fun onDropped(dropped: WebSocket, revoked: Boolean) = synchronized(lock) {
         // onClosing, onClosed and onFailure may all fire; only the first one for the live socket counts.
         if (dropped !== socket) return@synchronized
         socket = null
+        graceJob?.cancel()
+        graceJob = null
         val gen = generation
         failPending()
         if (revoked) {
@@ -205,9 +260,15 @@ class RelayConnection(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            synchronized(lock) {
+                if (gen != generation || webSocket !== socket) return
+            }
             val env = runCatching { Envelope.decode(text) }.getOrNull() ?: return
             when (env.kind) {
-                Kind.RESPONSE -> env.id?.let { pending.remove(it) }?.complete(env)
+                Kind.RESPONSE -> {
+                    env.id?.let { pending.remove(it) }?.deferred?.complete(env)
+                    maybeFinishBackgroundGrace()
+                }
                 Kind.EVENT -> _events.tryEmit(env)
             }
         }
@@ -229,18 +290,20 @@ class RelayConnection(
         val deferred = CompletableDeferred<Envelope>()
         val ws = synchronized(lock) {
             if (_state.value != ConnectionState.Connected) throw NotConnectedException()
-            pending[id] = deferred
+            pending[id] = PendingCall(method, deferred)
             socket ?: throw NotConnectedException()
         }
         val env = Envelope(kind = Kind.REQUEST, id = id, method = method, machine = machine, body = body)
         if (!ws.send(env.encode())) {
             pending.remove(id)
+            maybeFinishBackgroundGrace()
             throw NotConnectedException()
         }
         val response = try {
             withTimeout(timeoutMillis ?: requestTimeoutMillis) { deferred.await() }
         } finally {
             pending.remove(id)
+            maybeFinishBackgroundGrace()
         }
         response.error?.let { throw RemoteException(it.code, it.message) }
         return response.body ?: JsonNull
@@ -251,4 +314,37 @@ class RelayConnection(
 class ForegroundBinder(private val target: ForegroundAware) : DefaultLifecycleObserver {
     override fun onStart(owner: LifecycleOwner) = target.setForeground(true)
     override fun onStop(owner: LifecycleOwner) = target.setForeground(false)
+}
+
+/**
+ * Watches the default system network and triggers [onChanged] whenever the active network switches
+ * (e.g. Wi-Fi to cellular) or recovers after being lost, ignoring the initial callback on register.
+ */
+class NetworkWatcher(private val onChanged: () -> Unit) {
+    private var initialized = false
+    private var active: Any? = null
+
+    @Synchronized fun onAvailable(network: Any) {
+        val first = !initialized
+        val prev = active
+        initialized = true
+        active = network
+        if (!first && prev != network) onChanged()
+    }
+
+    @Synchronized fun onLost(network: Any) {
+        if (active == network) active = null
+    }
+
+    fun register(context: Context): ConnectivityManager.NetworkCallback? {
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = this@NetworkWatcher.onAvailable(network)
+            override fun onLost(network: Network) = this@NetworkWatcher.onLost(network)
+        }
+        return runCatching {
+            cm.registerDefaultNetworkCallback(cb)
+            cb
+        }.getOrNull()
+    }
 }

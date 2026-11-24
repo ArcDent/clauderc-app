@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"clauderc/internal/agent"
 	"clauderc/internal/agent/discovery"
@@ -101,6 +102,28 @@ func TestDirBusyWorktree(t *testing.T) {
 	})
 	setAgents(t, claudeDir, map[string]string{wt: "busy", repo: "busy"})
 	check(map[string]bool{repo: true, wt: true})
+}
+
+// A claude that does not answer fails dir.busy with a timeout once
+// ListTimeout has passed, instead of holding the request.
+func TestDirBusyTimesOut(t *testing.T) {
+	claudeDir := t.TempDir()
+	fakeclaude.Setup(t, claudeDir)
+	if err := os.WriteFile(filepath.Join(claudeDir, "agents.delay"), []byte("10\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := New(Options{Source: discovery.Source{ClaudePath: fakeclaude.Path(), ClaudeDir: claudeDir}, ListTimeout: 300 * time.Millisecond})
+	req := protocol.Envelope{V: protocol.Version, Kind: protocol.KindRequest, ID: "r-1", Method: protocol.MethodDirBusy, Client: "c-1", Body: json.RawMessage(fmt.Sprintf(`{"dir":%q}`, t.TempDir()))}
+	done := make(chan protocol.Envelope, 1)
+	go func() { done <- h.Handle(context.Background(), req) }()
+	select {
+	case res := <-done:
+		if res.Error == nil || res.Error.Code != protocol.CodeTimeout || res.Error.Message != "读取会话列表超过 0.3 秒未完成" {
+			t.Fatalf("dir.busy error = %v, want a timeout", res.Error)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("dir.busy still waiting for claude after 5s")
+	}
 }
 
 func sampleRequest(t *testing.T, name string) protocol.Envelope {

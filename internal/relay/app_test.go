@@ -3,13 +3,16 @@ package relay_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 
 	"clauderc/internal/protocol"
+	"clauderc/internal/relay"
 	"clauderc/internal/relay/store"
 )
 
@@ -188,5 +191,86 @@ func TestAppRequestToOfflineMachine(t *testing.T) {
 	}
 	if res.Error == nil || res.Error.Code != protocol.CodeMachineOffline {
 		t.Fatalf("error = %+v, want machineOffline", res.Error)
+	}
+}
+
+// A machine whose send queue is full keeps its connection, which every
+// phone shares: only the request that does not fit fails, answered to the
+// phone that sent it.
+func TestAppRequestToBusyMachine(t *testing.T) {
+	r := startRelay(t, func(o *relay.Options) {
+		// The stalled agent must not be dropped for missing pongs.
+		o.HeartbeatInterval = time.Minute
+		o.HeartbeatTimeout = time.Minute
+	})
+	conn, status := r.dial(t, agentQuery, enrollKey)
+	if status != http.StatusSwitchingProtocols {
+		t.Fatalf("agent: status %d", status)
+	}
+	conn.SetReadLimit(protocol.MaxMessageBytes)
+	eventually(t, time.Second, "m-1 online", func() bool {
+		m, ok := r.machine("m-1")
+		return ok && m.Online
+	})
+	r.pairDevice(t, "d-1", "tok-1")
+	p := r.phone(t, "tok-1")
+
+	// The agent reads nothing yet. A message larger than the socket buffers
+	// stalls the relay's writer to it, then small ones fill the queue.
+	big := json.RawMessage(`{"sessionId":"a1","text":"` + strings.Repeat("x", 10<<20) + `"}`)
+	p.send(protocol.Envelope{V: 1, Kind: protocol.KindRequest, ID: "r-big", Method: protocol.MethodChatSend, Machine: "m-1", Body: big})
+	var refused protocol.Envelope
+fill:
+	for i := 0; ; i++ {
+		if i == 500 {
+			t.Fatal("the queue to the agent never filled")
+		}
+		p.send(protocol.Envelope{V: 1, Kind: protocol.KindRequest, ID: fmt.Sprintf("r-%d", i), Method: protocol.MethodChatSend, Machine: "m-1", Body: json.RawMessage(`{"sessionId":"a1","text":"hi"}`)})
+		select {
+		case refused = <-p.msgs:
+			break fill
+		case err := <-p.closed:
+			t.Fatalf("phone connection closed: %v", err)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if refused.Kind != protocol.KindResponse || !strings.HasPrefix(refused.ID, "r-") || refused.Method != protocol.MethodChatSend ||
+		refused.Machine != "m-1" || refused.Error == nil || *refused.Error != (protocol.Error{Code: protocol.CodeMachineBusy, Message: "目标机暂时忙不过来，请稍后重试"}) {
+		t.Fatalf("phone got %+v, want the request refused as machineBusy", refused)
+	}
+	if m, _ := r.machine("m-1"); !m.Online {
+		t.Fatal("m-1 went offline")
+	}
+
+	// Once the agent reads again, the connection works both ways.
+	agent := newClient(t, conn)
+	var req protocol.Envelope
+	select {
+	case req = <-agent.msgs:
+	case err := <-agent.closed:
+		t.Fatalf("agent connection closed: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the agent got nothing")
+	}
+	if req.ID != "r-big" {
+		t.Fatalf("agent got %s first, want r-big", req.ID)
+	}
+	agent.send(protocol.Envelope{V: 1, Kind: protocol.KindResponse, ID: "r-big", Method: protocol.MethodChatSend, Client: req.Client, Body: json.RawMessage(`{}`)})
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case env := <-p.msgs:
+			if env.ID == "r-big" {
+				if env.Error != nil {
+					t.Fatalf("r-big answered %+v", env.Error)
+				}
+				return
+			}
+			if env.Error == nil || env.Error.Code != protocol.CodeMachineBusy {
+				t.Fatalf("phone got %+v", env)
+			}
+		case <-deadline:
+			t.Fatal("the agent's answer never reached the phone")
+		}
 	}
 }

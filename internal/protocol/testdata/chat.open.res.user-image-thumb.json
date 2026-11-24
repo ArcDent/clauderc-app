@@ -1,0 +1,26 @@
+{
+  "v": 1,
+  "kind": "res",
+  "id": "r-010",
+  "method": "chat.open",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {
+    "items": [
+      {
+        "seq": 1,
+        "kind": "user",
+        "text": "看这张图",
+        "images": [
+          {"mediaType": "image/jpeg", "data": "/9j/4AAQ", "id": "usr-6cbceb2c-343c-432b-b686-a0cbb8482651.0", "width": 1600, "height": 1200, "size": 4194304}
+        ],
+        "uuid": "6cbceb2c-343c-432b-b686-a0cbb8482651"
+      }
+    ],
+    "hasMore": false,
+    "state": "idle",
+    "model": "claude-opus-4-1",
+    "permissionMode": "default",
+    "pending": null
+  }
+}

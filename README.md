@@ -57,7 +57,7 @@ APK、各平台的二进制和 `compose.yaml` 都在 [Releases](../../releases/l
 
 ```sh
 docker run -d --name clauderc-relay --restart unless-stopped \
-  -e PUBLIC_URL=wss://relay.example.com \
+  -e PUBLIC_URL=wss://relay.example.com -e TRUSTED_PROXIES=172.17.0.1/32 \
   -p 127.0.0.1:8787:8787 -v clauderc-relay:/data \
   ghcr.io/arcdent/clauderc-relay:latest
 ```
@@ -85,6 +85,7 @@ scripts/deploy-relay.sh <ssh 主机> wss://relay.example.com
 | `.env` 的 `PUBLIC_URL` | 必填 | 手机和目标机使用的 `wss://` 地址 |
 | `.env` 的 `RELAY_BIND` | `127.0.0.1:8787` | 服务在宿主机上监听的地址 |
 | `.env` 的 `RELAY_IMAGE` | `ghcr.io/arcdent/clauderc-relay:latest` | 要运行的镜像，可以换成镜像站的地址，或固定版本如 `ghcr.io/arcdent/clauderc-relay:1.2.3` |
+| `.env` 的 `TRUSTED_PROXIES` | `172.30.87.1/32` | 信任哪些地址发来的 `X-Forwarded-For`，多个网段用逗号或空格分开，单个地址写成 `/32`。默认是 Compose 网络的网关，宿主机上的反向代理从这个地址连进容器；设为空就不信任任何代理 |
 | 本机环境变量 `SSH` | `ssh` | 部署脚本用的 ssh 命令，可以带参数，如 `SSH="ssh -p 2222"` |
 | 本机环境变量 `REMOTE_DIR` | `/opt/clauderc-relay` | 部署脚本在服务器上用的目录 |
 | 本机环境变量 `RELAY_IMAGE` | 不设置 | 设置后部署脚本把它写进服务器的 `.env` |
@@ -99,7 +100,7 @@ relay.example.com {
 }
 ```
 
-nginx 要带上升级头：
+nginx 要带上升级头和 `X-Forwarded-For`：
 
 ```nginx
 location / {
@@ -107,9 +108,12 @@ location / {
 	proxy_http_version 1.1;
 	proxy_set_header Upgrade $http_upgrade;
 	proxy_set_header Connection "upgrade";
+	proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 	proxy_read_timeout 120s;
 }
 ```
+
+中转服务器按 `X-Forwarded-For` 分别统计每台手机的配对失败次数，Caddy 默认就会加这个头。上面 `docker run` 里的 `172.17.0.1` 是 Docker 默认网桥的网关，可用 `docker network inspect bridge` 核对。
 
 `curl https://relay.example.com/healthz` 返回 200 说明服务正常。
 
@@ -207,7 +211,7 @@ clauderc revoke <id>     # 吊销一台手机，它的连接会立即断开
 <details>
 <summary>中转服务器 <code>relay.toml</code>，只在不用 Docker 时手写</summary>
 
-用 Docker 部署时，容器按 `PUBLIC_URL` 自动生成这个文件，不用手写。
+用 Docker 部署时，容器按 `PUBLIC_URL` 和 `TRUSTED_PROXIES` 自动生成这个文件，不用手写。
 
 | 键 | 必填 | 说明 |
 |---|---|---|
@@ -215,6 +219,7 @@ clauderc revoke <id>     # 吊销一台手机，它的连接会立即断开
 | `public_url` | 是 | 手机和目标机使用的 `wss://` 地址，会直接写进配对二维码 |
 | `enroll_key_file` | 是 | 注册密钥文件，权限必须是 600 或更严 |
 | `state_file` | 是 | 状态文件路径，存目标机列表和已配对手机的凭证摘要，权限 600 |
+| `trusted_proxies` | 否 | 可信代理的网段列表，如 `["172.30.87.1/32"]`。直连地址在这些网段里时，才按 `X-Forwarded-For` 认出手机的地址。回环地址总是可信，反向代理和中转服务器在同一台机器上直接运行时不用写 |
 
 </details>
 

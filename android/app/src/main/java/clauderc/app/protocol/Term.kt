@@ -16,7 +16,13 @@ data class TermScreen(
     val cursorRow: Int = 0,
     val cursorCol: Int = 0,
     val cursor: Boolean = false,
+    val rev: Long? = null,
+    val subId: String? = null,
 )
+
+/** term.close; [subId] matches the subscription term.open returned. */
+@Serializable
+data class TermCloseRequest(val sessionId: String, val subId: String? = null)
 
 /** term.key presses [key]: up, down, left, right, enter, esc, tab, backspace or a digit 0 to 9. */
 @Serializable

@@ -7,7 +7,8 @@
 // It draws the input box between two rules, a status line that Shift+Tab
 // cycles and Ctrl+L redraws, a /model picker (the one recorded from
 // Claude Code 2.1.323) that arrows move in, s picks from and Esc closes,
-// and with RewindEnv a /rewind panel laid out as Claude Code 2.1.330 does.
+// with RewindEnv a /rewind panel laid out as Claude Code 2.1.330 does, and
+// with PermissionEnv a permission prompt at start that Enter or Esc answers.
 // Only tests import this package; their TestMain calls RunIfFake first.
 package fakeattach
 
@@ -40,6 +41,7 @@ const (
 	envRewQ  = "FAKE_ATTACH_REWIND_QUOTE"
 	envRewB  = "FAKE_ATTACH_REWIND_BROKEN"
 	envRewK  = "FAKE_ATTACH_REWIND_STICKY"
+	envPerm  = "FAKE_ATTACH_PERMISSION"
 )
 
 // Command is the argv of a fake attach to session id: the running test
@@ -133,6 +135,15 @@ func RewindStickyEnv() string {
 	return envRewK + "=1"
 }
 
+// PermissionEnv makes the fake start on a permission prompt in place of
+// the input box, the cursor hidden, as for a session blocked on one. Enter
+// allows and Esc denies; either brings the input box back. Like Claude
+// Code before the tool's result, the prompt writes nothing to the
+// transcript.
+func PermissionEnv() string {
+	return envPerm + "=1"
+}
+
 // Gone reports whether no process with pid exists.
 func Gone(pid int) bool {
 	return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
@@ -182,6 +193,7 @@ func run() error {
 		}
 		in.rows, in.options = cfg.Rows, cfg.Options
 	}
+	in.prompt = os.Getenv(envPerm) == "1"
 	in.render()
 	buf := make([]byte, 4096)
 	for {
@@ -212,6 +224,8 @@ type input struct {
 	picker  bool
 	cursor  int
 	confirm bool
+	// prompt is true while the permission prompt of PermissionEnv shows.
+	prompt bool
 	// status is the status line drawn above the input box, "" for none.
 	status string
 	// text is what the input box shows, which only the rewind panel puts there.
@@ -261,6 +275,12 @@ func (in *input) render() {
 	var b strings.Builder
 	b.WriteString("\x1b[2J\x1b[H")
 	switch {
+	case in.prompt:
+		// Laid out as Claude Code draws a Bash permission prompt, no input
+		// box on screen and the cursor hidden.
+		b.WriteString("\x1b[?25l" + strings.Repeat("─", 40) + "\r\n Bash command\r\n\r\n   touch marker.txt\r\n   Create an empty marker file\r\n\r\n" +
+			" Do you want to proceed?\r\n ❯ 1. Yes\r\n   2. Yes, and don't ask again for touch commands in /Users/me/project\r\n" +
+			"   3. No, and tell Claude what to do differently (esc)\r\n")
 	case in.picker:
 		b.WriteString("   Select model\r\n\r\n")
 		for i, it := range pickerItems {
@@ -340,6 +360,10 @@ func (in *input) key(k string) bool {
 		return true
 	}
 	switch {
+	case in.prompt && (k == "\r" || k == "\x1b"):
+		// Allowed or denied: the input box comes back with the cursor.
+		in.prompt = false
+		_, _ = in.out.WriteString("\x1b[?25h")
 	case k == "\x0c":
 	case k == "\x1b[Z" && !in.picker:
 		in.mode = (in.mode + 1) % len(in.modes)

@@ -1,21 +1,26 @@
 package clauderc.app.chat
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.foundation.background
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,12 +36,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.foundation.background
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.AlignmentLine
+import androidx.compose.ui.layout.HorizontalAlignmentLine
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -44,6 +54,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -61,13 +72,13 @@ import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.Symbols
-import clauderc.app.ui.theme.pressShrink
-import clauderc.app.ui.theme.styled
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
+import kotlin.math.max
+import kotlin.math.min
 
 // Rewinding from a message (round 9): the user's message slides left as a whole row and lays bare a
-// round rewind button; the button opens a sheet that quotes the message and offers the ways back.
+// rewind button; the button opens a sheet that quotes the message and offers the ways back.
 
 /** How far a message slides open: the room of the rewind button. */
 private val RewindWidth = 60.dp
@@ -86,8 +97,8 @@ internal val LocalRewind = staticCompositionLocalOf<RewindHub?> { null }
 
 /**
  * The user's message [item] as a row that slides left when [LocalRewind] lets it and the message is in
- * the transcript, its button coming in from the right edge. Only the sideways overflow is clipped, so
- * 贴纸's hard shadow under the bubble stays.
+ * the transcript, its button coming in from the right edge beside what the message marked with
+ * [rewindBand]. Only the sideways overflow is clipped.
  */
 @Composable
 internal fun RewindRow(item: ChatItem, content: @Composable BoxScope.(Modifier) -> Unit) {
@@ -111,8 +122,13 @@ internal fun RewindRow(item: ChatItem, content: @Composable BoxScope.(Modifier) 
         hub.open = null
         hub.ask(item)
     }
-    Box(
-        Modifier
+    Layout(
+        content = {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { content(Modifier.graphicsLayer { translationX = slide.value }) }
+            val out by remember { derivedStateOf { slide.value < 0f } }
+            if (out) RewindButton(ask, { (-slide.value / width).coerceIn(0f, 1f) }, Modifier.graphicsLayer { translationX = width + slide.value })
+        },
+        modifier = Modifier
             .fillMaxWidth()
             .drawWithContent { clipRect(top = -size.height, bottom = size.height * 2) { this@drawWithContent.drawContent() } }
             .draggable(
@@ -131,41 +147,94 @@ internal fun RewindRow(item: ChatItem, content: @Composable BoxScope.(Modifier) 
             )
             .semantics { if (hub.enabled) customActions = listOf(CustomAccessibilityAction("回溯") { ask(); true }) }
             .testTag("userRow:${item.seq}"),
-        contentAlignment = Alignment.CenterEnd,
-    ) {
-        content(Modifier.graphicsLayer { translationX = slide.value })
-        val out by remember { derivedStateOf { slide.value < 0f } }
-        if (out) {
-            // Below the 8dp the row keeps above its bubble, so the button centres on the bubble.
-            Box(Modifier.matchParentSize().padding(top = Clauderc.spacing.sp2)) {
-                RewindButton(ask, Modifier.align(Alignment.CenterEnd).width(RewindWidth).graphicsLayer { translationX = width + slide.value })
-            }
+    ) { parts, constraints ->
+        val row = parts[0].measure(constraints)
+        // Read only while the button shows: the stretch the message marked with rewindBand, or the whole row.
+        val top = if (parts.size > 1) row[BandTop].takeUnless { it == AlignmentLine.Unspecified } ?: 0 else 0
+        val bottom = if (parts.size > 1) row[BandBottom].takeUnless { it == AlignmentLine.Unspecified } ?: row.height else 0
+        val button = parts.getOrNull(1)?.measure(Constraints.fixed(RewindWidth.roundToPx(), (bottom - top).coerceAtLeast(0)))
+        layout(row.width, row.height) {
+            row.place(0, 0)
+            button?.place(row.width - button.width, top)
         }
     }
 }
 
+/** Where the stretch a rewind button lines up with starts and ends down its row (rewindBand). */
+private val BandTop = HorizontalAlignmentLine(::min)
+private val BandBottom = HorizontalAlignmentLine(::max)
+
 /**
- * The round rewind button, no word under it: as tall as a one-line bubble so its edges line up with
- * one, in the bubble's own black (清玻), a square (格栅), or the accent outlined in ink (贴纸).
+ * Marks what a user message's rewind button lines up with: its text bubble, or its pictures when it has
+ * no text. The button takes that stretch of the row's height and centres its icon in it, so under a
+ * message's pictures it faces the bubble, not the middle of the row.
+ */
+internal fun Modifier.rewindBand(): Modifier = layout { measurable, constraints ->
+    val p = measurable.measure(constraints)
+    layout(p.width, p.height, mapOf(BandTop to 0, BandBottom to p.height)) { p.place(0, 0) }
+}
+
+/**
+ * The rewind button, no word under it, as the style picked it (round 11), at [progress] of the slide
+ * from 0 shut to 1 open: 贴纸 a 36dp card-white circle in an ink line, no hard shadow, growing from 0.6
+ * as it fades in; 格栅 an empty square as tall as a one-line bubble in a thin grey line, only sliding
+ * in with the row; 清玻 the bare icon, turning back 120° like a clock's hand as it fades in. A press only
+ * changes colours, in durS, since the slide already drives the size and turn: 贴纸 fills with the accent
+ * under an on-accent icon; 格栅 fills with the text colour under an icon in the page colour; 清玻's icon
+ * turns the text colour on a round 10% tint of it.
  */
 @Composable
-private fun RewindButton(onClick: () -> Unit, modifier: Modifier) {
+private fun RewindButton(onClick: () -> Unit, progress: () -> Float, modifier: Modifier) {
     val c = Clauderc.colors
     val press = remember { MutableInteractionSource() }
-    // A one-line bubble: its line at 15sp × 1.55 and 10dp above and below.
-    val side = with(LocalDensity.current) { (15 * 1.55f).sp.toDp() } + 20.dp
-    val knob = when (Clauderc.style) {
-        UiStyle.Clear -> Modifier.size(side).clip(CircleShape).background(c.fg)
-        UiStyle.Grid -> Modifier.size(side).background(c.fg)
-        UiStyle.Sticker -> Modifier.size(side).sticker(c.accent, c.ink, side / 2, drop = 3.dp, source = press)
-    }
-    val tint = if (Clauderc.style == UiStyle.Sticker) c.onAccent else c.bg
+    val pressed by press.collectIsPressedAsState()
+    val on by animateFloatAsState(if (pressed) 1f else 0f, tween(Clauderc.motion.durS, easing = LinearEasing), label = "rewindPress")
     Box(
         modifier.clickable(press, null, onClick = onClick).semantics { contentDescription = "回溯" }.testTag("rewindAction"),
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.pressShrink(press).then(knob), contentAlignment = Alignment.Center) {
-            Icon(Symbols.History.styled, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+        when (Clauderc.style) {
+            UiStyle.Sticker -> {
+                val fill = lerp(c.card, c.accent, on)
+                Box(
+                    Modifier
+                        .graphicsLayer {
+                            val p = progress()
+                            alpha = p
+                            scaleX = 0.6f + 0.4f * p
+                            scaleY = scaleX
+                        }
+                        .size(36.dp)
+                        .sticker(fill, c.ink, 18.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Symbols.HistoryRegular, contentDescription = null, tint = lerp(c.fg, c.onAccent, on), modifier = Modifier.size(20.dp))
+                }
+            }
+            UiStyle.Grid -> {
+                // A one-line bubble: its line at 15sp × 1.55 and 10dp above and below. The text rounds its line
+                // to whole pixels, so beside a one-line bubble the square takes the bubble's own height.
+                val side = with(LocalDensity.current) { (15 * 1.55f).sp.toDp() } + 20.dp
+                val square = Modifier.heightIn(max = side).fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true)
+                Box(square.background(c.fg.copy(alpha = on)).border(1.5.dp, lerp(c.surface2, c.fg, on)), contentAlignment = Alignment.Center) {
+                    Icon(Symbols.History, contentDescription = null, tint = lerp(c.fg2, c.bg, on), modifier = Modifier.size(20.dp))
+                }
+            }
+            // rotationZ turns clockwise, so coming back from 120° the icon turns the other way, as a clock set back.
+            // The tint is the icon's 22dp plus 8dp all round (border-radius: 50%; box-shadow: 0 0 0 8px).
+            UiStyle.Clear -> Icon(
+                Symbols.HistoryRegular,
+                contentDescription = null,
+                tint = lerp(c.fg2, c.fg, on),
+                modifier = Modifier
+                    .graphicsLayer {
+                        val p = progress()
+                        alpha = p
+                        rotationZ = 120f * (1f - p)
+                    }
+                    .drawBehind { drawCircle(c.fg.copy(alpha = 0.1f * on), radius = size.minDimension / 2 + 8.dp.toPx()) }
+                    .size(22.dp),
+            )
         }
     }
 }

@@ -53,6 +53,10 @@ type TermScreen struct {
 	CursorCol int `json:"cursorCol"`
 	// Cursor is false while Claude Code hides the cursor, as in a panel.
 	Cursor bool `json:"cursor"`
+	// Rev orders term.open answers against term.screen pushes.
+	Rev int64 `json:"rev,omitempty"`
+	// SubID identifies this phone's subscription on term.open responses.
+	SubID string `json:"subId,omitempty"`
 }
 
 // TermKeyRequest presses Key in the session's terminal view, which must be
@@ -62,7 +66,8 @@ type TermKeyRequest struct {
 	Key       TermKey `json:"key"`
 }
 
-// TermCloseRequest closes the terminal view.
+// TermCloseRequest closes the terminal view; SubID matches term.open's.
 type TermCloseRequest struct {
 	SessionID string `json:"sessionId"`
+	SubID     string `json:"subId,omitempty"`
 }

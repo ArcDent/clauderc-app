@@ -7,9 +7,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"clauderc/internal/agent"
 	"clauderc/internal/agent/chat"
 	"clauderc/internal/agent/fakeattach"
 	"clauderc/internal/protocol"
@@ -448,5 +450,40 @@ func TestRewindPlacesTheMessageAgainWithTheTerminal(t *testing.T) {
 	f.ok(t, "c1", protocol.MethodChatRewind, protocol.ChatRewindRequest{SessionID: shortID, UUID: rewindTwoUUID, Restore: protocol.RewindCode})
 	if got := f.keyLog(); got != openRewind+up+up+up+"\r"+down+down+"\r" {
 		t.Errorf("keys %q", got)
+	}
+}
+
+// The /rewind panel of chat.rewind is not followed as a rewind made by
+// hand: the agent takes the messages away itself once it is done, not the
+// open chat's screen reads while it runs. The input box keeps the message,
+// so chat.rewind holds the terminal a while after the panel closed.
+func TestRewindIsNotFollowedOnTheScreen(t *testing.T) {
+	s := setup{attachEnv: []string{fakeattach.RewindEnv(rewindRows, rewindOptions), fakeattach.RewindStickyEnv()}}
+	var mu sync.Mutex
+	var removedAt []time.Time
+	s.opts = func(o *chat.Options) {
+		push := o.Push
+		o.Push = agent.PusherFunc(func(e protocol.Envelope) {
+			var ev protocol.ChatItemsEvent
+			if e.Method == protocol.EventChatItems && json.Unmarshal(e.Body, &ev) == nil && slices.ContainsFunc(ev.Items, func(it protocol.ChatItem) bool { return it.Kind == protocol.ItemRemoved }) {
+				mu.Lock()
+				removedAt = append(removedAt, time.Now())
+				mu.Unlock()
+			}
+			push.Push(e)
+		})
+	}
+	f := rewindFixture(t, s)
+	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
+	f.ok(t, "c1", protocol.MethodChatRewind, protocol.ChatRewindRequest{SessionID: shortID, UUID: rewindTwoUUID, Restore: protocol.RewindBoth})
+	done := time.Now()
+	time.Sleep(1500 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(removedAt) != 1 {
+		t.Fatalf("%d chat.items took messages away, want one", len(removedAt))
+	}
+	if d := done.Sub(removedAt[0]); d > 400*time.Millisecond {
+		t.Errorf("messages taken away %v before chat.rewind was done", d)
 	}
 }

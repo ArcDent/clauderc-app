@@ -58,6 +58,7 @@ func (s *Server) handleApp(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	for _, a := range notify {
+		a.dropClient(app.id)
 		a.peer.sendEnvelope(protocol.Envelope{
 			V: protocol.Version, Kind: protocol.KindEvent, Method: protocol.EventClientGone,
 			Client: app.id, Body: []byte(`{}`),
@@ -85,7 +86,7 @@ func (s *Server) fromApp(app *appConn, data []byte) {
 		app.machines[env.Machine] = true
 	}
 	s.mu.Unlock()
-	if a == nil {
+	if a == nil || !a.trackRequest(app.id, env.ID, env.Method) {
 		app.peer.sendEnvelope(protocol.Envelope{
 			V: protocol.Version, Kind: protocol.KindResponse, ID: env.ID, Method: env.Method,
 			Machine: env.Machine,
@@ -94,7 +95,17 @@ func (s *Server) fromApp(app *appConn, data []byte) {
 		return
 	}
 	env.Client = app.id
-	a.peer.sendEnvelope(env)
+	// A machine that cannot keep up keeps its connection, which every
+	// phone shares; only this request fails.
+	if !a.peer.trySend(env) {
+		if a.untrackRequest(app.id, env.ID) {
+			app.peer.sendEnvelope(protocol.Envelope{
+				V: protocol.Version, Kind: protocol.KindResponse, ID: env.ID, Method: env.Method,
+				Machine: env.Machine,
+				Error:   &protocol.Error{Code: protocol.CodeMachineBusy, Message: "目标机暂时忙不过来，请稍后重试"},
+			})
+		}
+	}
 }
 
 func randomHex(n int) string {

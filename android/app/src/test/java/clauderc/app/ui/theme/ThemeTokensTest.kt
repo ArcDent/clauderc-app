@@ -47,11 +47,17 @@ class ThemeTokensTest {
     /** The --k- variables of the three styles; each style sets only its own, the rest stay transparent. */
     private fun extras(c: ClaudercColors) = mapOf(
         "--k-ink" to c.ink, "--k-p2" to c.hue2, "--k-p3" to c.hue3, "--k-p4" to c.hue4, "--k-p5" to c.hue5,
-        "--k-glass" to c.panel, "--k-float" to c.float, "--k-dot" to c.dot,
+        "--k-glass" to c.panel, "--k-float" to c.float, "--k-dot" to c.dot, "--k-glow-2" to c.glow2,
         "--k-pane" to c.pane, "--k-rimc" to c.rim, "--k-edgec" to c.edge, "--k-lens" to c.lens,
     )
 
+    /** color-mix(in srgb, var(--c-accent) N%, transparent): the accent at N% alpha, as the share N / 100. */
+    private fun parseAccentShare(css: String): Float =
+        Regex("""color-mix\(in srgb, var\(--c-accent\) ([0-9.]+)%, transparent\)""").matchEntire(css)?.groupValues?.get(1)?.toFloat()?.div(100)
+            ?: error("unsupported accent share $css")
+
     private fun parseColor(css: String): Int {
+        if (css == "transparent") return Color.Transparent.toArgb()
         Regex("""#([0-9A-Fa-f]{6})""").matchEntire(css)?.let { return (0xFF000000 or it.groupValues[1].toLong(16)).toInt() }
         val m = Regex("""rgba\((\d+),\s*(\d+),\s*(\d+),\s*([0-9.]+)\)""").matchEntire(css) ?: error("unsupported color $css")
         val (r, g, b) = m.groupValues.drop(1).take(3).map { it.toInt() }
@@ -96,6 +102,15 @@ class ThemeTokensTest {
                 val expected = k[name]?.let(::parseColor) ?: Color.Transparent.toArgb()
                 assertEquals("$style $name", expected, color.toArgb())
             }
+            assertEquals("$style --k-glow-1", k["--k-glow-1"]?.let(::parseAccentShare) ?: 0f, tokens.glow1, 1e-6f)
+        }
+    }
+
+    /** 贴纸's paper: one dot every --k-dot-gap, each --k-dot-r round, the same in light and dark. */
+    @Test fun stickerDotsMatchMockup() {
+        for (block in listOf(styleLight("sticker"), styleDark("sticker"))) {
+            assertEquals(block.getValue("--k-dot-gap").removeSuffix("px").toFloat(), StickerDotGap.value, 0f)
+            assertEquals(block.getValue("--k-dot-r").removeSuffix("px").toFloat(), StickerDotRadius.value, 0f)
         }
     }
 

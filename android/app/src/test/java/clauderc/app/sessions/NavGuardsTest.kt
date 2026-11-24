@@ -20,11 +20,13 @@ import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.ChatRoute
 import clauderc.app.ClaudercNavHost
 import clauderc.app.HomeRoute
 import clauderc.app.navigateFrom
+import clauderc.app.navigateWhenResumed
 import clauderc.app.popFrom
 import clauderc.app.ui.theme.ClaudercTheme
 import org.junit.Assert.assertEquals
@@ -164,5 +166,42 @@ class NavGuardsTest {
         compose.mainClock.advanceTimeBy(1_000)
         assertTrue(nav.currentBackStackEntry!!.destination.hasRoute<HomeRoute>())
         compose.onNodeWithTag("chat").assertDoesNotExist()
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun worktreeFinishingWhilePausedNavigatesOnceResumed() {
+        val created = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.BUFFERED)
+        val owner = androidx.lifecycle.testing.TestLifecycleOwner(androidx.lifecycle.Lifecycle.State.RESUMED, kotlinx.coroutines.test.UnconfinedTestDispatcher())
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                nav = rememberNavController()
+                ClaudercNavHost(nav, startDestination = HomeRoute) {
+                    composable<HomeRoute> {
+                        Text("会话列表", Modifier.fillMaxSize().testTag("home"))
+                    }
+                    composable<ChatRoute> { entry ->
+                        val r = entry.toRoute<ChatRoute>()
+                        if (r.sessionId == "s-1") {
+                            androidx.compose.runtime.LaunchedEffect(Unit) {
+                                for (id in created) nav.navigateWhenResumed(owner, ChatRoute("m-1", id))
+                            }
+                        }
+                        Text("聊天:${r.sessionId}", Modifier.fillMaxSize().testTag("chat:${r.sessionId}"))
+                    }
+                }
+            }
+        }
+        compose.runOnUiThread { nav.navigate(ChatRoute("m-1", "s-1")) }
+        compose.waitForIdle()
+        // Pause the page (e.g. user switched apps), then the worktree creation finishes.
+        compose.runOnUiThread { owner.currentState = androidx.lifecycle.Lifecycle.State.STARTED }
+        created.trySend("s-wt")
+        compose.waitForIdle()
+        assertEquals("paused: stays on s-1 until foreground returns", 1, chats())
+        // Return to the foreground: navigates to the new worktree session at once.
+        compose.runOnUiThread { owner.currentState = androidx.lifecycle.Lifecycle.State.RESUMED }
+        compose.waitForIdle()
+        assertEquals(2, chats())
+        assertEquals("s-wt", nav.currentBackStackEntry!!.toRoute<ChatRoute>().sessionId)
     }
 }

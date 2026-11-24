@@ -5,9 +5,11 @@ import androidx.lifecycle.viewModelScope
 import clauderc.app.data.DraftStore
 import clauderc.app.data.Fleet
 import clauderc.app.net.ConnectionState
+import clauderc.app.net.NotConnectedException
 import clauderc.app.net.Relay
 import clauderc.app.net.RemoteException
 import clauderc.app.net.call
+import clauderc.app.sessions.CREATE_SESSION_TIMEOUT_MILLIS
 import clauderc.app.protocol.Answer
 import clauderc.app.protocol.AutoResume
 import clauderc.app.protocol.ChatAutoResumeRequest
@@ -51,13 +53,16 @@ import clauderc.app.protocol.SessionCreateRequest
 import clauderc.app.protocol.SessionCreateResponse
 import clauderc.app.protocol.SessionIdRequest
 import clauderc.app.protocol.SessionState
+import clauderc.app.protocol.ToolImage
 import clauderc.app.protocol.ToolResult
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.channels.Channel
@@ -72,13 +77,19 @@ import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** A picture waiting in the composer, already resized and re-encoded as JPEG. */
-class Attachment(val name: String, val jpeg: ByteArray)
+private val attachmentIds = AtomicLong()
+
+/** A picture waiting in the composer, already resized and re-encoded as JPEG; [id] identifies it even as earlier ones are removed. */
+class Attachment(val name: String, val jpeg: ByteArray, val id: Long = attachmentIds.incrementAndGet())
+
+/** A picture as chat.image brought it: its bytes and the media type the agent named, which saving it goes by. */
+class WholeImage(val bytes: ByteArray, val mediaType: String)
 
 /** The pictures' size together, which [ChatLimits.MAX_IMAGES_TOTAL_BYTES] bounds. */
 val List<Attachment>.bytes: Long get() = sumOf { it.jpeg.size.toLong() }
@@ -102,13 +113,24 @@ data class Outgoing(
     val afterSeq: Long,
     val queued: Boolean = false,
     val delivered: Boolean = false,
+    /** True while sent before chat.open brought the session's tip seq; anchored once that snapshot arrives. */
+    val beforeOpen: Boolean = false,
+    /** True when the connection dropped or timed out mid-send; reconciled on the next chat.open snapshot. */
+    val uncertain: Boolean = false,
+    /** True when sent from the composer and backed by DraftStore. */
+    val draft: Boolean = true,
+    /** Stable per-send id for agent-side deduplication. */
+    val clientReqId: String = java.util.UUID.randomUUID().toString(),
 )
 
 /** A send that failed; [out] goes back to the composer unless the transcript showed it meanwhile. */
-data class SendFailure(val message: String, val out: Outgoing?)
+data class SendFailure(val message: String, val out: Outgoing?, val kept: Job? = null)
 
-/** Text put back into the composer after a failed send; [id] tells two restores of the same text apart. */
-data class Restore(val id: Long, val text: String, val replace: Boolean = false)
+/**
+ * Text put back into the composer; [id] tells two restores of the same text apart.
+ * [replace] replaces whatever was typed (a rewind); [append] adds to what is already there (a failed send).
+ */
+data class Restore(val id: Long, val text: String, val replace: Boolean = false, val append: Boolean = false)
 
 /** Drops the outgoing messages that [delivered] user items or slash command rows show, oldest first. */
 fun settleOutgoing(outgoing: List<Outgoing>, delivered: List<ChatItem>): List<Outgoing> {
@@ -139,7 +161,7 @@ private fun matchOutgoing(outgoing: List<Outgoing>, delivered: List<ChatItem>): 
             else -> continue
         }
         val hit = left.firstOrNull { o ->
-            item.seq > o.afterSeq && if (o.text.isEmpty()) !item.images.isNullOrEmpty() else text.endsWith(squeezeBang(o.text))
+            !o.beforeOpen && item.seq > o.afterSeq && if (o.text.isEmpty()) !item.images.isNullOrEmpty() else text.endsWith(squeezeBang(o.text))
         }
         if (hit != null) {
             left.remove(hit)
@@ -178,6 +200,21 @@ class ChatCache(private val capacity: Int = 8) {
     class Outbox {
         val outgoing = MutableStateFlow<List<Outgoing>>(emptyList())
         val failed = MutableStateFlow<List<SendFailure>>(emptyList())
+        val draftLock = Mutex()
+        private val keptDrafts = HashMap<Long, Job>()
+        private val localImages = HashMap<String, WholeImage>()
+
+        @Synchronized fun putKept(id: Long, job: Job?) {
+            if (job != null) keptDrafts[id] = job
+        }
+
+        @Synchronized fun takeKept(id: Long): Job? = keptDrafts.remove(id)
+
+        @Synchronized fun putLocalImages(map: Map<String, WholeImage>) {
+            localImages.putAll(map)
+        }
+
+        @Synchronized fun localImagesSnapshot(): Map<String, WholeImage> = HashMap(localImages)
     }
 
     private val outboxes = HashMap<String, Outbox>()
@@ -204,6 +241,8 @@ data class ChatUiState(
     val items: List<ChatItem> = emptyList(),
     val hasMore: Boolean = false,
     val loadingOlder: Boolean = false,
+    /** Loading an older page failed: the top of the list offers a retry instead of a spinner. */
+    val olderFailed: Boolean = false,
     val state: SessionState = SessionState.Idle,
     val model: String = "",
     val permissionMode: String = "",
@@ -231,10 +270,14 @@ data class ChatUiState(
     /** The tool_use ids whose whole result is on its way. */
     val fetchingResults: Set<String> = emptySet(),
     /** Pictures of tool results fetched with chat.image for the viewer, by picture id. */
-    val wholeImages: Map<String, ByteArray> = emptyMap(),
+    val wholeImages: Map<String, WholeImage> = emptyMap(),
     val fetchingImages: Set<String> = emptySet(),
     /** Pictures chat.image could not bring; opening one again tries again. */
     val failedImages: Set<String> = emptySet(),
+    /** Pictures on their way into the gallery, by picture id; another tap on one writes nothing. */
+    val savingImages: Set<String> = emptySet(),
+    /** Pictures saved while the viewer showed them: their button stays a tick until the viewer closes. */
+    val savedImages: Set<String> = emptySet(),
     /** True while the session is blocked on a panel or dialog the agent does not know; the page offers the terminal. */
     val unknownDialog: Boolean = false,
     /** Claude Code's status line while it works, e.g. 「Whirring… (20s · ↓ 2.4k tokens)」; null falls back to 「工作中 · N 秒」. */
@@ -328,6 +371,10 @@ class ChatViewModel(
     private val agentId: String? = null,
     /** Where the composer's unsent text is kept; null keeps none. */
     private val drafts: DraftStore? = null,
+    /** Where the viewer saves pictures; null saves nothing. */
+    private val saver: ImageSaver? = null,
+    /** Reports the outcome of an app-scoped operation that finished after the page closed. */
+    private val onNotice: (String) -> Unit = {},
 ) : ViewModel() {
     private val cacheKey = "$machineId/$sessionId" + agentId?.let { "/$it" }.orEmpty()
     private val outbox = cache.outbox(cacheKey)
@@ -343,7 +390,12 @@ class ChatViewModel(
             } ?: ChatUiState()
         ).let { s ->
             val out = outbox.outgoing.value
-            s.copy(outgoing = out, waking = s.state == SessionState.Stopped && out.any { !it.delivered && !it.queued }, opened = false)
+            s.copy(
+                outgoing = out,
+                waking = s.state == SessionState.Stopped && out.any { !it.delivered && !it.queued },
+                opened = false,
+                wholeImages = outbox.localImagesSnapshot(),
+            )
         },
     )
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
@@ -358,8 +410,20 @@ class ChatViewModel(
     /** The wait before a text typed while the auto-send is on goes to the agent. */
     private var resuming: Job? = null
 
+    /** Serializes chat.autoResume requests; stale responses and errors are dropped once a newer toggle exists. */
+    private data class AutoResumeOp(val seq: Long, val on: Boolean, val text: String, val prior: Limit)
+    private val resumeOps = Channel<AutoResumeOp>(Channel.UNLIMITED)
+    private var resumeSeq = 0L
+    private var resumeSettled = 0L
+
     /** The tool_use id this phone just answered, so its own answer is not reported as handled elsewhere. */
     private var answered: String? = null
+
+    /** Counts what the agent said about the panel, by chat.pending or chat.open; a refused answer defers to anything newer. */
+    private var pendingNews = 0L
+
+    /** True while chat.interrupt is on its way; another tap sends nothing. */
+    private var interrupting = false
 
     /** True while chat.open is outstanding. */
     private var opening = false
@@ -367,17 +431,68 @@ class ChatViewModel(
     /** True once chat.open was answered, or failed; a reconnect opens again. */
     private var opened = false
 
+    /** Last seen agent connection id; a change means the agent reconnected without an offline event. */
+    private var lastConnId: String? = null
+
+    /** Highest rev applied per stream; reset whenever the machine reconnects so a fresh agent session starts from 1. */
+    private var itemsRev = 0L
+    private var stateRev = 0L
+    private var pendingRev = 0L
+    private var tasksRev = 0L
+
+    /** Subscription id returned by the latest chat.open, echoed in chat.close on leave. */
+    @Volatile private var subId: String? = null
+
     /** Typed text not saved as the draft yet, and the wait before it is. */
     private var unsaved: String? = null
     private var saving: Job? = null
 
+    /** The picture the viewer shows, or null; read where a save ends, off the main thread. */
+    @Volatile private var viewing: String? = null
+
+    /** True once the page has closed; app-scoped completions report through [onNotice] instead of [_messages]. */
+    @Volatile private var cleared = false
+
     init {
-        // The draft goes back into the composer, the cursor after it; not when it is a message still on its way.
+        // The draft goes back into the composer, the cursor after it; not when it is a message still on its way or already being restored from a failure.
         if (drafts != null && agentId == null) {
             viewModelScope.launch {
                 val d = drafts.draft(machineId, sessionId).first()
-                if (d.isNotBlank() && outbox.outgoing.value.none { it.text == d.trim() }) {
-                    _state.update { it.copy(restore = Restore(cache.nextId(), d)) }
+                if (d.isNotBlank() && outbox.outgoing.value.none { it.text == d.trim() } && outbox.failed.value.isEmpty()) {
+                    _state.update { if (it.restore == null) it.copy(restore = Restore(cache.nextId(), d)) else it }
+                }
+            }
+        }
+        viewModelScope.launch {
+            for (op in resumeOps) {
+                if (op.seq != resumeSeq) continue
+                try {
+                    val res = relay.call(
+                        Method.CHAT_AUTO_RESUME, machineId, ChatAutoResumeRequest(sessionId, op.on, op.text.takeIf { op.on }),
+                        ChatAutoResumeRequest.serializer(), ChatAutoResumeResponse.serializer(),
+                    )
+                    if (op.seq == resumeSeq) {
+                        resumeSettled = op.seq
+                        if (resuming?.isActive != true) {
+                            _state.update { it.withLimit(res.limit) }
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (op.seq == resumeSeq) {
+                        resumeSettled = op.seq
+                        if (resuming?.isActive != true) {
+                            _state.update { if (it.limit?.resetsAt == op.prior.resetsAt) it.copy(limit = op.prior) else it }
+                            _messages.send(
+                                when {
+                                    e is RemoteException && e.code == ErrorCode.UNKNOWN_METHOD -> "这台目标机的程序还不支持自动发送"
+                                    e is RemoteException -> e.message ?: "设置自动发送失败"
+                                    else -> "设置自动发送失败：${e.message}"
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -398,9 +513,18 @@ class ChatViewModel(
                         machine != null && !machine.online -> "已离线 · 最后在线 ${clauderc.app.ui.TimeText.clock(machine.lastSeenAt)}"
                         else -> ""
                     }
-                    val reopen = online && !_state.value.online
+                    val connId = machine?.connId?.takeIf { it.isNotEmpty() }
+                    val connChanged = online && connId != null && lastConnId != null && connId != lastConnId
+                    if (online && connId != null) lastConnId = connId
+                    val reopen = (online && !_state.value.online) || connChanged
                     _state.update { it.copy(session = session ?: it.session, online = online, offlineText = text) }
-                    if (reopen || (online && !opened && !opening)) open()
+                    if (reopen) {
+                        resetRevs()
+                        subId = null
+                        open()
+                    } else if (online && !opened && !opening) {
+                        open()
+                    }
                 }
         }
         viewModelScope.launch {
@@ -411,22 +535,73 @@ class ChatViewModel(
                 .collect { e ->
                     when (e) {
                         is ChatItemsEvent -> {
-                            val before = outbox.outgoing.getAndUpdate { settleOutgoing(it, e.items) }
-                            _state.update {
-                                // The written reply takes over the bubble its screen preview was typing in.
-                                val taker = takeOver(it.partial, e.items)
-                                it.copy(
-                                    items = mergeNewer(it.items, e.items), notice = null,
-                                    outgoing = outbox.outgoing.value,
-                                    keys = it.keys + deliveredKeys(before, e.items) + listOfNotNull(taker?.let { t -> t.seq to it.partial!!.key }),
-                                    partial = if (taker != null) null else it.partial,
-                                )
+                            val rev = e.rev ?: 0L
+                            if (rev > 0L && rev < itemsRev) return@collect
+                            if (rev > 0L) itemsRev = rev
+                            if (e.reset == true) {
+                                val fresh = mergeItems(emptyList(), e.items)
+                                val before = outbox.outgoing.getAndUpdate { o ->
+                                    settleOutgoing(o.map { it.copy(afterSeq = 0L) }, fresh)
+                                }
+                                val localImgs = rememberSentImages(before, fresh)
+                                _state.update {
+                                    it.copy(
+                                        items = fresh,
+                                        hasMore = false,
+                                        olderFailed = false,
+                                        fullResults = emptyMap(),
+                                        fetchingResults = emptySet(),
+                                        wholeImages = it.wholeImages + localImgs,
+                                        notice = null,
+                                        partial = null,
+                                        outgoing = outbox.outgoing.value,
+                                        keys = deliveredKeys(before, fresh),
+                                    )
+                                }
+                            } else {
+                                val settledUncertain = mutableListOf<Outgoing>()
+                                val before = outbox.outgoing.getAndUpdate { o ->
+                                    val matched = matchOutgoing(o, e.items).map { it.first.id }.toSet()
+                                    if (matched.isEmpty()) o
+                                    else {
+                                        o.filter { it.id in matched && it.uncertain }.forEach { settledUncertain += it }
+                                        o.filter { it.id !in matched }
+                                    }
+                                }
+                                settledUncertain.forEach(::clearSettledDraft)
+                                val localImgs = rememberSentImages(before, e.items)
+                                _state.update {
+                                    // The written reply takes over the bubble its screen preview was typing in.
+                                    val taker = takeOver(it.partial, e.items)
+                                    it.copy(
+                                        items = mergeNewer(it.items, e.items), notice = null,
+                                        outgoing = outbox.outgoing.value,
+                                        wholeImages = it.wholeImages + localImgs,
+                                        keys = it.keys + deliveredKeys(before, e.items) + listOfNotNull(taker?.let { t -> t.seq to it.partial!!.key }),
+                                        partial = if (taker != null) null else it.partial,
+                                    )
+                                }
                             }
                         }
-                        is ChatPendingEvent -> onPending(e.pending)
-                        is ChatTasksEvent -> _state.update { it.copy(tasks = e.tasks) }
-                        is ChatStateEvent -> _state.update {
-                            applyStatus(it, e.state, e.model, e.permissionMode).copy(unknownDialog = e.unknownDialog == true).withScreen(e.state, e.activity, e.partial).withLimit(e.limit)
+                        is ChatPendingEvent -> {
+                            val rev = e.rev ?: 0L
+                            if (rev > 0L && rev < pendingRev) return@collect
+                            if (rev > 0L) pendingRev = rev
+                            onPending(e.pending)
+                        }
+                        is ChatTasksEvent -> {
+                            val rev = e.rev ?: 0L
+                            if (rev > 0L && rev < tasksRev) return@collect
+                            if (rev > 0L) tasksRev = rev
+                            _state.update { it.copy(tasks = e.tasks) }
+                        }
+                        is ChatStateEvent -> {
+                            val rev = e.rev ?: 0L
+                            if (rev > 0L && rev < stateRev) return@collect
+                            if (rev > 0L) stateRev = rev
+                            _state.update {
+                                applyStatus(it, e.state, e.model, e.permissionMode).copy(unknownDialog = e.unknownDialog == true).withScreen(e.state, e.activity, e.partial).withLimit(e.limit)
+                            }
                         }
                     }
                 }
@@ -465,10 +640,16 @@ class ChatViewModel(
         )
     }
 
-    /** The agent's [limit]; a text the agent is newly set to send replaces what was typed. */
+    /** The agent's [limit]; a text the agent is newly set to send replaces what was typed unless the user has unsent edits or a toggle in flight. */
     private fun ChatUiState.withLimit(limit: Limit?): ChatUiState {
-        val set = limit?.autoResume?.text
-        return copy(limit = limit, resumeText = if (set != null && set != this.limit?.autoResume?.text) set else resumeText)
+        val pending = resumeSeq > resumeSettled || resuming?.isActive == true
+        val keepPending = pending && limit != null && this.limit?.resetsAt == limit.resetsAt
+        val effective = if (keepPending) limit.copy(autoResume = this.limit.autoResume) else limit
+        val set = effective?.autoResume?.text
+        return copy(
+            limit = effective,
+            resumeText = if (!keepPending && set != null && set != this.limit?.autoResume?.text) set else resumeText,
+        )
     }
 
     private fun onPending(p: Pending?) {
@@ -476,7 +657,15 @@ class ChatViewModel(
         if (p == null && old != null && old.toolUseId != answered) {
             _messages.trySend("已在电脑上处理")
         }
+        pendingNews++
         _state.update { it.copy(pending = p) }
+    }
+
+    private fun resetRevs() {
+        itemsRev = 0L
+        stateRev = 0L
+        pendingRev = 0L
+        tasksRev = 0L
     }
 
     private fun open() {
@@ -486,31 +675,91 @@ class ChatViewModel(
                 val res = withContext(background) {
                     relay.call(Method.CHAT_OPEN, machineId, ChatOpenRequest(sessionId, agentId = agentId), ChatOpenRequest.serializer(), ChatOpenResponse.serializer())
                 }
+                if (!res.subId.isNullOrEmpty()) subId = res.subId
+                val rev = res.rev ?: 0L
+                val itemsFresh = rev == 0L || rev >= itemsRev
+                val stateFresh = rev == 0L || rev >= stateRev
+                val pendingFresh = rev == 0L || rev >= pendingRev
+                val tasksFresh = rev == 0L || rev >= tasksRev
+                if (rev > 0L) {
+                    if (itemsFresh) itemsRev = rev
+                    if (stateFresh) stateRev = rev
+                    if (pendingFresh) pendingRev = rev
+                    if (tasksFresh) tasksRev = rev
+                }
+                val snap = mergeItems(emptyList(), res.items)
                 // A delivered message missing from the page came before it, e.g. while the page was closed.
-                val before = outbox.outgoing.getAndUpdate { o -> settleOutgoing(o, res.items).filter { !it.delivered } }
+                // A message sent before chat.open answered is anchored at this snapshot's tip so an older matching item cannot settle it.
+                // An uncertain send (disconnected mid-flight) is settled if present here, or returned to the composer if absent.
+                val tip = snap.lastOrNull()?.seq ?: 0L
+                val uncertainFound = mutableListOf<Outgoing>()
+                val uncertainLost = mutableListOf<Outgoing>()
+                val before = outbox.outgoing.getAndUpdate { o ->
+                    uncertainFound.clear()
+                    uncertainLost.clear()
+                    val matched = matchOutgoing(o, snap).map { it.first.id }.toSet()
+                    buildList {
+                        for (item in o) {
+                            when {
+                                item.id in matched -> if (item.uncertain) uncertainFound += item
+                                item.uncertain -> uncertainLost += item
+                                item.delivered && !item.beforeOpen -> Unit
+                                item.beforeOpen -> add(item.copy(afterSeq = maxOf(item.afterSeq, tip), beforeOpen = false))
+                                else -> add(item)
+                            }
+                        }
+                    }
+                }
+                uncertainFound.forEach(::clearSettledDraft)
+                val localImgs = rememberSentImages(before, snap)
+                if (pendingFresh) pendingNews++
+                opened = true
                 _state.update {
-                    applyStatus(it, res.state, res.model, res.permissionMode).copy(
+                    val firstSnapSeq = snap.firstOrNull()?.seq
+                    val older = if (res.hasMore && firstSnapSeq != null) it.items.filter { item -> item.seq < firstSnapSeq } else emptyList()
+                    val nextItems = when {
+                        !itemsFresh -> mergeItems(snap, it.items)
+                        older.isNotEmpty() -> mergeItems(older, snap)
+                        else -> snap
+                    }
+                    val nextHasMore = if (older.isNotEmpty()) it.hasMore else res.hasMore
+                    val withStatus = if (stateFresh) {
+                        applyStatus(it, res.state, res.model, res.permissionMode)
+                            .copy(unknownDialog = res.unknownDialog == true)
+                            .withScreen(res.state, res.activity, res.partial)
+                            .withLimit(res.limit)
+                    } else {
+                        it
+                    }
+                    withStatus.copy(
                         loading = false,
                         opened = true,
-                        items = mergeItems(emptyList(), res.items),
-                        hasMore = res.hasMore,
-                        pending = res.pending,
-                        tasks = if (agentId == null) res.tasks.orEmpty() else emptyList(),
-                        unknownDialog = res.unknownDialog == true,
+                        items = nextItems,
+                        hasMore = nextHasMore,
+                        olderFailed = false,
+                        pending = if (pendingFresh) res.pending else it.pending,
+                        tasks = if (tasksFresh) (if (agentId == null) res.tasks.orEmpty() else emptyList()) else it.tasks,
+                        wholeImages = it.wholeImages + localImgs,
                         outgoing = outbox.outgoing.value,
-                        keys = it.keys + deliveredKeys(before, res.items),
-                    ).let { s -> s.withScreen(res.state, res.activity, res.partial).withLimit(res.limit) }
+                        keys = it.keys + deliveredKeys(before, snap),
+                    )
+                }
+                for (lost in uncertainLost) {
+                    takeBack(SendFailure("消息没有送到，请重试", lost, outbox.takeKept(lost.id)))
                 }
             } catch (e: RemoteException) {
-                _state.update { it.copy(loading = false, opened = true) }
+                val transient = e.code == ErrorCode.MACHINE_OFFLINE || e.code == ErrorCode.MACHINE_BUSY || e.code == ErrorCode.TIMEOUT
+                if (!transient) opened = true
+                _state.update { it.copy(loading = false, opened = if (transient) it.opened else true) }
                 _messages.send(e.message ?: "打不开这个会话")
             } catch (e: Exception) {
-                _state.update { it.copy(loading = false, opened = true) }
+                if (e is CancellationException && e !is TimeoutCancellationException) throw e
+                // Network-like failures leave [opened] false so reconnecting opens again.
+                _state.update { it.copy(loading = false) }
             } finally {
                 opening = false
-                opened = true
             }
-            if (agentId != null) return@launch
+            if (!opened || agentId != null) return@launch
             runCatching {
                 relay.call(Method.CHAT_COMMANDS, machineId, SessionIdRequest(sessionId), SessionIdRequest.serializer(), ChatCommandsResponse.serializer())
             }.onSuccess { r -> _state.update { it.copy(commands = r.commands) } }
@@ -520,7 +769,7 @@ class ChatViewModel(
     fun loadOlder() {
         val s = _state.value
         if (!s.hasMore || s.loadingOlder || s.items.isEmpty() || !s.online) return
-        _state.update { it.copy(loadingOlder = true) }
+        _state.update { it.copy(loadingOlder = true, olderFailed = false) }
         viewModelScope.launch {
             val res = runCatching {
                 withContext(background) {
@@ -528,8 +777,8 @@ class ChatViewModel(
                 }
             }.getOrNull()
             _state.update {
-                if (res == null) it.copy(loadingOlder = false)
-                else it.copy(loadingOlder = false, items = mergeItems(res.items, it.items), hasMore = res.hasMore)
+                if (res == null) it.copy(loadingOlder = false, olderFailed = true)
+                else it.copy(loadingOlder = false, olderFailed = false, items = mergeItems(res.items, it.items), hasMore = res.hasMore)
             }
         }
     }
@@ -552,20 +801,22 @@ class ChatViewModel(
     private fun send(text: String, command: Boolean): Boolean {
         val s = _state.value
         val images = if (command) emptyList() else s.attachments
-        if (!s.online || s.sending || (text.isBlank() && images.isEmpty())) return false
+        // While a rewind is under way the text would land in Claude Code's /rewind panel.
+        if (!s.online || s.sending || s.rewinding || (text.isBlank() && images.isEmpty())) return false
         if (!command) {
             saving?.cancel()
             unsaved = null
         }
-        val out = Outgoing(cache.nextId(), text.trim(), images, afterSeq = s.items.lastOrNull()?.seq ?: 0)
+        val stopped = s.state == SessionState.Stopped
+        val out = Outgoing(cache.nextId(), text.trim(), images, afterSeq = s.items.lastOrNull()?.seq ?: 0, beforeOpen = !opened, draft = !command)
         outbox.outgoing.update { it + out }
         _state.update {
             it.copy(
-                sending = true, waking = it.state == SessionState.Stopped, notice = null, outgoing = outbox.outgoing.value,
+                sending = true, waking = stopped, notice = null, outgoing = outbox.outgoing.value,
                 attachments = if (command) it.attachments else emptyList(), attachError = if (command) it.attachError else null,
             )
         }
-        val job = appScope.launch { deliver(out, text, draft = !command) }
+        val job = appScope.launch { deliver(out, text, draft = !command, wake = stopped) }
         viewModelScope.launch {
             job.join()
             _state.update { it.copy(sending = false) }
@@ -573,64 +824,133 @@ class ChatViewModel(
         return true
     }
 
-    private suspend fun deliver(out: Outgoing, text: String, draft: Boolean) {
+    private suspend fun deliver(out: Outgoing, text: String, draft: Boolean, wake: Boolean = false) {
         // The text stays the draft until the send succeeds, so a failed one is not lost with the page.
-        val kept = if (draft) drafts?.let { d -> appScope.launch { d.set(machineId, sessionId, text) } } else null
+        val kept = if (draft) drafts?.let { d -> appScope.launch { outbox.draftLock.withLock { d.set(machineId, sessionId, text) } } } else null
+        outbox.putKept(out.id, kept)
         try {
             val images = withContext(background) { out.attachments.map { Image("image/jpeg", Base64.getEncoder().encodeToString(it.jpeg)) } }
             val res = relay.call(
-                Method.CHAT_SEND, machineId, ChatSendRequest(sessionId, text, images.ifEmpty { null }), ChatSendRequest.serializer(), ChatSendResponse.serializer(),
-                timeoutMillis = SEND_IMAGES_TIMEOUT_MILLIS.takeIf { images.isNotEmpty() },
+                Method.CHAT_SEND, machineId, ChatSendRequest(sessionId, text, images.ifEmpty { null }, clientReqId = out.clientReqId), ChatSendRequest.serializer(), ChatSendResponse.serializer(),
+                timeoutMillis = SEND_IMAGES_TIMEOUT_MILLIS.takeIf { images.isNotEmpty() || wake },
             )
             val queued = res.queued == true
-            outbox.outgoing.update { o -> o.map { if (it.id == out.id) it.copy(queued = queued, delivered = !queued) else it } }
-            kept?.join()
-            if (draft) drafts?.clear(machineId, sessionId, text)
+            outbox.outgoing.update { o -> o.map { if (it.id == out.id) it.copy(queued = queued, delivered = !queued, uncertain = false) else it } }
+            outbox.takeKept(out.id)?.join()
+            if (draft) drafts?.let { d -> outbox.draftLock.withLock { d.clear(machineId, sessionId, text) } }
         } catch (e: RemoteException) {
-            fail(out, if (e.code == ErrorCode.NOT_DELIVERED) "消息没有送达，请重试" else e.message ?: "发送失败")
+            if (e.code == ErrorCode.MACHINE_OFFLINE) {
+                markUncertain(out, reopenIfOnline = false)
+            } else {
+                fail(out, if (e.code == ErrorCode.NOT_DELIVERED) "消息没有送达，请重试" else e.message ?: "发送失败", draft, outbox.takeKept(out.id))
+            }
+        } catch (e: TimeoutCancellationException) {
+            markUncertain(out, reopenIfOnline = true)
+        } catch (e: NotConnectedException) {
+            markUncertain(out, reopenIfOnline = false)
+        } catch (e: java.io.IOException) {
+            markUncertain(out, reopenIfOnline = false)
         } catch (e: Exception) {
-            fail(out, "发送失败：${e.message}")
+            if (e is CancellationException) throw e
+            fail(out, "发送失败：${e.message}", draft, outbox.takeKept(out.id))
         }
     }
 
-    private fun fail(out: Outgoing, message: String) {
+    /** Leaves the bubble pending confirmation without restoring the composer; the next chat.open snapshot decides its fate. */
+    private fun markUncertain(out: Outgoing, reopenIfOnline: Boolean) {
+        outbox.outgoing.update { o -> o.map { if (it.id == out.id) it.copy(uncertain = true) else it } }
+        _state.update { it.copy(waking = false) }
+        if (reopenIfOnline && _state.value.online && !opening) open()
+    }
+
+    /** Pairs outgoing attachments with the agent-assigned ids in delivered items so opening them uses local bytes without chat.image. */
+    private fun rememberSentImages(outgoing: List<Outgoing>, delivered: List<ChatItem>): Map<String, WholeImage> {
+        val added = LinkedHashMap<String, WholeImage>()
+        for ((o, item) in matchOutgoing(outgoing, delivered)) {
+            if (o.attachments.isEmpty() || item.images.isNullOrEmpty()) continue
+            item.images.forEachIndexed { idx, img ->
+                val id = img.id
+                if (id != null && idx < o.attachments.size) {
+                    added[id] = WholeImage(o.attachments[idx].jpeg, "image/jpeg")
+                }
+            }
+        }
+        if (added.isNotEmpty()) outbox.putLocalImages(added)
+        return added
+    }
+
+    private fun clearSettledDraft(out: Outgoing) {
+        val kept = outbox.takeKept(out.id)
+        if (!out.draft || drafts == null || agentId != null) return
+        appScope.launch {
+            kept?.join()
+            outbox.draftLock.withLock { drafts.clear(machineId, sessionId, out.text) }
+        }
+    }
+
+    private fun fail(out: Outgoing, message: String, draft: Boolean, kept: Job? = null) {
         // The transcript may have shown it already; then there is nothing to take back.
         val local = outbox.outgoing.getAndUpdate { o -> o.filter { it.id != out.id } }.any { it.id == out.id }
-        outbox.failed.update { it + SendFailure(message, out.takeIf { local }) }
+        val keptOut = out.takeIf { local }
+        val all = outbox.failed.updateAndGet { it + SendFailure(message, keptOut, kept) }
+        if (draft && keptOut != null && keptOut.text.isNotEmpty() && drafts != null && agentId == null) {
+            val combined = all.mapNotNull { it.out?.text?.takeIf(String::isNotEmpty) }.joinToString("\n")
+            if (combined.isNotEmpty()) {
+                appScope.launch {
+                    kept?.join()
+                    outbox.draftLock.withLock { drafts.set(machineId, sessionId, combined) }
+                }
+            }
+        }
     }
 
     private fun takeBack(f: SendFailure) {
         val out = f.out
+        var merged: String? = null
         _state.update { s ->
+            val nextRestore = if (out != null && out.text.isNotEmpty()) {
+                val prev = s.restore
+                val joined = prev != null && !prev.replace && prev.text.isNotBlank()
+                val text = if (joined) "${prev.text}\n${out.text}" else out.text
+                if (joined) merged = text
+                Restore(cache.nextId(), text, append = true)
+            } else {
+                s.restore
+            }
             s.copy(
                 waking = false,
                 attachments = if (out != null) (out.attachments + s.attachments).fitting() else s.attachments,
-                restore = if (out != null && out.text.isNotEmpty()) Restore(out.id, out.text) else s.restore,
+                restore = nextRestore,
             )
+        }
+        merged?.let { text ->
+            if (agentId == null) drafts?.let { d ->
+                appScope.launch {
+                    f.kept?.join()
+                    outbox.draftLock.withLock { d.set(machineId, sessionId, text) }
+                }
+            }
         }
         _messages.trySend(f.message)
     }
 
-    fun allow() {
-        answer(ChatAnswerRequest(sessionId, currentToolUse() ?: return, decision = Decision.ALLOW))
-    }
+    /** Each answer names the panel it was tapped on, by [toolUseId]. */
+    fun allow(toolUseId: String) = answer(ChatAnswerRequest(sessionId, toolUseId, decision = Decision.ALLOW))
 
-    fun deny() {
-        answer(ChatAnswerRequest(sessionId, currentToolUse() ?: return, decision = Decision.DENY))
-    }
+    fun deny(toolUseId: String) = answer(ChatAnswerRequest(sessionId, toolUseId, decision = Decision.DENY))
 
-    fun answerQuestions(answers: List<Answer>) {
-        answer(ChatAnswerRequest(sessionId, currentToolUse() ?: return, answers = answers))
-    }
+    fun answerQuestions(toolUseId: String, answers: List<Answer>) = answer(ChatAnswerRequest(sessionId, toolUseId, answers = answers))
 
-    private fun currentToolUse() = _state.value.pending?.toolUseId
-
-    /** Closes the panel at once; a refused answer brings it back unless a newer one came meanwhile. */
+    /**
+     * Sends nothing when the tapped panel is no longer the session's request: it is already giving way to the new one.
+     * Closes the panel at once; a refused answer brings it back unless the agent said anything about the panel meanwhile.
+     */
     private fun answer(req: ChatAnswerRequest) {
+        val asked = _state.value.pending?.takeIf { it.toolUseId == req.toolUseId } ?: return
         answered = req.toolUseId
-        val asked = _state.value.pending
+        val seen = pendingNews
         _state.update { if (it.pending?.toolUseId == req.toolUseId) it.copy(pending = null) else it }
-        fun putBack() = _state.update { if (it.pending == null) it.copy(pending = asked) else it }
+        fun putBack() = _state.update { if (it.pending == null && pendingNews == seen) it.copy(pending = asked) else it }
         viewModelScope.launch {
             try {
                 relay.call(Method.CHAT_ANSWER, machineId, req, ChatAnswerRequest.serializer(), Empty.serializer())
@@ -679,23 +999,56 @@ class ChatViewModel(
         }
         _state.update { it.copy(fetchingImages = it.fetchingImages + id, failedImages = it.failedImages - id) }
         viewModelScope.launch {
-            val bytes = runCatching {
+            val whole = runCatching {
                 withContext(background) {
-                    val res = relay.call(Method.CHAT_IMAGE, machineId, ChatImageRequest(sessionId, id), ChatImageRequest.serializer(), ChatImageResponse.serializer())
-                    java.util.Base64.getDecoder().decode(res.data)
+                    val res = relay.call(Method.CHAT_IMAGE, machineId, ChatImageRequest(sessionId, id, agentId), ChatImageRequest.serializer(), ChatImageResponse.serializer())
+                    WholeImage(java.util.Base64.getDecoder().decode(res.data), res.mediaType)
                 }
             }.getOrNull()
             _state.update { s ->
                 s.copy(
                     fetchingImages = s.fetchingImages - id,
-                    wholeImages = if (bytes != null) s.wholeImages + (id to bytes) else s.wholeImages,
-                    failedImages = if (bytes == null) s.failedImages + id else s.failedImages,
+                    wholeImages = if (whole != null) s.wholeImages + (id to whole) else s.wholeImages,
+                    failedImages = if (whole == null) s.failedImages + id else s.failedImages,
                 )
             }
         }
     }
 
+    /** The viewer shows the picture [id], or closed with null: what it saved can be saved again the next time it opens. */
+    fun viewImage(id: String?) {
+        viewing = id
+        if (id == null) _state.update { it.copy(savedImages = emptySet()) }
+    }
+
+    /**
+     * Saves [image] into the gallery as it came, from [local] bytes when the phone has them, else the ones chat.image
+     * brought, in the format chat.image named. It runs on the app's scope, the saver writing on the IO threads, so
+     * leaving the page does not stop it. A tap while it saves, or after it saved with the viewer still open, writes
+     * nothing. Saved with the viewer on it, its button turns into a tick and that is all; saved after the viewer closed,
+     * the snackbar says so. A failure always does.
+     */
+    fun saveImage(image: ToolImage, local: ByteArray? = null) {
+        val id = image.id
+        val whole = _state.value.wholeImages[id]
+        val bytes = local ?: whole?.bytes ?: return
+        val saver = saver ?: return
+        val before = _state.getAndUpdate { if (id in it.savingImages || id in it.savedImages) it else it.copy(savingImages = it.savingImages + id) }
+        if (id in before.savingImages || id in before.savedImages) return
+        appScope.launch {
+            val ok = runCatching { saver.save(bytes, image.name, whole?.mediaType ?: image.mediaType) }.isSuccess
+            val shown = viewing == id
+            _state.update { it.copy(savingImages = it.savingImages - id, savedImages = if (ok && shown) it.savedImages + id else it.savedImages) }
+            when {
+                !ok -> _messages.trySend("保存失败")
+                !shown -> _messages.trySend("已保存到相册")
+            }
+        }
+    }
+
     fun interrupt() {
+        if (interrupting) return
+        interrupting = true
         _state.update { it.copy(notice = INTERRUPTED) }
         viewModelScope.launch {
             try {
@@ -703,6 +1056,8 @@ class ChatViewModel(
             } catch (e: Exception) {
                 _state.update { if (it.notice == INTERRUPTED) it.copy(notice = null) else it }
                 _messages.send("中断失败：${e.message}")
+            } finally {
+                interrupting = false
             }
         }
     }
@@ -745,28 +1100,42 @@ class ChatViewModel(
      * agent says went wrong after a rewind, and why one failed, when [onFailed] also opens the terminal
      * view to look or do it by hand.
      */
-    fun rewind(item: ChatItem, restore: String, onFailed: () -> Unit) {
+    fun rewind(item: ChatItem, restore: String, onFailed: (String) -> Unit) {
         val uuid = item.uuid ?: return
         if (_state.value.rewinding || !_state.value.online) return
         _state.update { it.copy(rewinding = true) }
-        viewModelScope.launch {
+        appScope.launch {
             try {
                 val res = relay.call(
                     Method.CHAT_REWIND, machineId, ChatRewindRequest(sessionId, uuid, restore),
                     ChatRewindRequest.serializer(), ChatRewindResponse.serializer(), timeoutMillis = CHAT_REWIND_TIMEOUT_MILLIS,
                 )
+                if (restore != RewindRestore.CODE) {
+                    // Save as draft directly so leaving the page before chat.rewind returns never loses the message.
+                    drafts?.set(machineId, sessionId, item.text.orEmpty())
+                }
                 _state.update {
                     if (restore == RewindRestore.CODE) it.copy(rewinding = false)
                     else it.copy(rewinding = false, restore = Restore(cache.nextId(), item.text.orEmpty(), replace = true))
                 }
-                when {
-                    res.notice != null -> _messages.send(res.notice)
-                    restore == RewindRestore.CODE -> _messages.send("代码已回到这条消息之前")
+                val note = when {
+                    res.notice != null -> res.notice
+                    restore == RewindRestore.CODE -> "代码已回到这条消息之前"
+                    cleared -> "已回溯，原消息已放进草稿"
+                    else -> null
+                }
+                if (note != null) {
+                    if (cleared) onNotice(note) else _messages.send(note)
                 }
             } catch (e: Exception) {
+                val reason = "没能回溯：${e.message}"
                 _state.update { it.copy(rewinding = false) }
-                _messages.send("没能回溯：${e.message}")
-                if (e is RemoteException && e.code == ErrorCode.REWIND_FAILED) onFailed()
+                if (cleared) {
+                    onNotice(reason)
+                } else {
+                    _messages.send(reason)
+                    if (e is RemoteException && e.code == ErrorCode.REWIND_FAILED) onFailed(reason)
+                }
             }
         }
     }
@@ -806,7 +1175,7 @@ class ChatViewModel(
         }
     }
 
-    fun removeImage(index: Int) = _state.update { s -> s.copy(attachments = s.attachments.filterIndexed { i, _ -> i != index }, attachError = null) }
+    fun removeImage(id: Long) = _state.update { s -> s.copy(attachments = s.attachments.filter { it.id != id }, attachError = null) }
 
     /**
      * Turns on or off the message the agent sends once the usage limit is lifted, with the typed text. The
@@ -818,25 +1187,9 @@ class ChatViewModel(
         val text = s.resumeText.trim()
         if (!s.online || (on && text.isEmpty())) return
         resuming?.cancel()
+        val seq = ++resumeSeq
         _state.update { it.copy(limit = limit.copy(autoResume = if (on) AutoResume(text, limit.resetsAt.plusSeconds(RESUME_DELAY_SECONDS)) else null)) }
-        viewModelScope.launch {
-            try {
-                val res = relay.call(
-                    Method.CHAT_AUTO_RESUME, machineId, ChatAutoResumeRequest(sessionId, on, text.takeIf { on }),
-                    ChatAutoResumeRequest.serializer(), ChatAutoResumeResponse.serializer(),
-                )
-                _state.update { it.withLimit(res.limit) }
-            } catch (e: Exception) {
-                _state.update { if (it.limit?.resetsAt == limit.resetsAt) it.copy(limit = limit) else it }
-                _messages.send(
-                    when {
-                        e is RemoteException && e.code == ErrorCode.UNKNOWN_METHOD -> "这台目标机的程序还不支持自动发送"
-                        e is RemoteException -> e.message ?: "设置自动发送失败"
-                        else -> "设置自动发送失败：${e.message}"
-                    },
-                )
-            }
-        }
+        resumeOps.trySend(AutoResumeOp(seq, on, text, limit))
     }
 
     /** The text to send once the limit is lifted was edited; while the auto-send is on, it goes to the agent once typing pauses. */
@@ -863,22 +1216,30 @@ class ChatViewModel(
             return
         }
         _state.update { it.copy(creatingWorktree = true, worktreeError = null) }
-        viewModelScope.launch {
+        appScope.launch {
             val request = SessionCreateRequest(
                 fromSession = session.id,
                 cwd = session.dir ?: session.cwd,
                 prompt = prompt.trim().ifEmpty { null },
                 worktree = name,
+                clientReqId = java.util.UUID.randomUUID().toString(),
             )
             try {
-                val res = relay.call(Method.SESSION_CREATE, machineId, request, SessionCreateRequest.serializer(), SessionCreateResponse.serializer())
+                val res = relay.call(
+                    Method.SESSION_CREATE, machineId, request, SessionCreateRequest.serializer(), SessionCreateResponse.serializer(),
+                    timeoutMillis = CREATE_SESSION_TIMEOUT_MILLIS,
+                )
                 fleet.refresh(machineId)
                 _state.update { it.copy(creatingWorktree = false) }
-                _created.send(res.sessionId)
+                if (cleared) onNotice("新 worktree 会话已启动") else _created.send(res.sessionId)
             } catch (e: RemoteException) {
-                _state.update { it.copy(creatingWorktree = false, worktreeError = e.message ?: "新建失败") }
+                val msg = e.message ?: "新建失败"
+                _state.update { it.copy(creatingWorktree = false, worktreeError = msg) }
+                if (cleared) onNotice(msg)
             } catch (e: Exception) {
-                _state.update { it.copy(creatingWorktree = false, worktreeError = "新建失败：${e.message}") }
+                val msg = "新建失败：${e.message}"
+                _state.update { it.copy(creatingWorktree = false, worktreeError = msg) }
+                if (cleared) onNotice(msg)
             }
         }
     }
@@ -898,7 +1259,11 @@ class ChatViewModel(
         }
     }
 
+    /** The composer has dealt with the [Restore] of [id]: it goes, so the page shown again does not put it back. */
+    fun restored(id: Long) = _state.update { if (it.restore?.id == id) it.copy(restore = null) else it }
+
     override fun onCleared() {
+        cleared = true
         // Leaving the page keeps what was typed in the last half second too.
         unsaved?.let { text -> drafts?.let { d -> appScope.launch { d.set(machineId, sessionId, text) } } }
         val s = _state.value
@@ -906,8 +1271,9 @@ class ChatViewModel(
             val kept = s.items.takeLast(ChatCache.KEEP)
             cache.put(cacheKey, ChatCache.Entry(kept, s.hasMore || kept.size < s.items.size, s.state, s.model, s.permissionMode, s.workingSinceMillis))
         }
+        val closeSubId = subId
         appScope.launch {
-            runCatching { relay.call(Method.CHAT_CLOSE, machineId, ChatCloseRequest(sessionId, agentId), ChatCloseRequest.serializer(), Empty.serializer()) }
+            runCatching { relay.call(Method.CHAT_CLOSE, machineId, ChatCloseRequest(sessionId, agentId, closeSubId), ChatCloseRequest.serializer(), Empty.serializer()) }
         }
     }
 }

@@ -1,6 +1,7 @@
 package attach_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -27,11 +28,11 @@ func TestKeyEncodings(t *testing.T) {
 		return protocol.Question{MultiSelect: multi, Options: opts}
 	}
 	answer := func(qs []protocol.Question, as []protocol.Answer) string {
-		steps, err := attach.AnswerKeys(qs, as)
+		groups, err := attach.AnswerKeys(qs, as)
 		if err != nil {
 			t.Fatalf("AnswerKeys: %v", err)
 		}
-		return joined(steps)
+		return joined(slices.Concat(groups...))
 	}
 	cases := []struct{ name, got, want string }{
 		{"send", joined(attach.SendKeys("你好", nil, 0)), "\x15\x1b[200~你好\x1b[201~\r"},
@@ -63,15 +64,48 @@ func TestKeyEncodings(t *testing.T) {
 	}
 }
 
+// The keys of an answer come question by question, the review page's Enter
+// on its own, so the screen can be checked in between.
+func TestAnswerKeysGroups(t *testing.T) {
+	q := protocol.Question{Options: []protocol.Option{{Label: "a"}, {Label: "b"}}}
+	multi := protocol.Question{MultiSelect: true, Options: q.Options}
+	cases := []struct {
+		name string
+		qs   []protocol.Question
+		want []string
+	}{
+		{"one question", []protocol.Question{q}, []string{"\x1b[B\r"}},
+		{"two questions", []protocol.Question{q, q}, []string{"\x1b[B\r", "\x1b[B\r", "\r"}},
+		{"multi select", []protocol.Question{multi}, []string{"\x1b[B\r\x1b[C", "\r"}},
+	}
+	for _, c := range cases {
+		as := make([]protocol.Answer, len(c.qs))
+		for i := range as {
+			as[i] = protocol.Answer{Selected: []int{1}}
+		}
+		groups, err := attach.AnswerKeys(c.qs, as)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, g := range groups {
+			got = append(got, joined(g))
+		}
+		if !slices.Equal(got, c.want) {
+			t.Errorf("%s: groups %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 // Each key is written as typed, so a line break in a custom answer would
 // be an Enter that submits the prompt early; it is typed as a space.
 func TestCustomAnswerLineBreaksAreTypedAsSpaces(t *testing.T) {
 	q := protocol.Question{Options: []protocol.Option{{Label: "a"}, {Label: "b"}}}
-	steps, err := attach.AnswerKeys([]protocol.Question{q}, []protocol.Answer{{Custom: "第一行\n第二行\r\n第三行\r"}})
+	groups, err := attach.AnswerKeys([]protocol.Question{q}, []protocol.Answer{{Custom: "第一行\n第二行\r\n第三行\r"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := joined(steps)
+	got := joined(slices.Concat(groups...))
 	if want := "\x1b[B\x1b[B第一行 第二行 第三行 \r"; got != want {
 		t.Errorf("keys %q, want %q", got, want)
 	}
@@ -132,11 +166,11 @@ func TestSentTextIsCleaned(t *testing.T) {
 // (ESC[Z) in it would act on the prompt.
 func TestCustomAnswerIsCleaned(t *testing.T) {
 	q := protocol.Question{Options: []protocol.Option{{Label: "a"}, {Label: "b"}}}
-	steps, err := attach.AnswerKeys([]protocol.Question{q}, []protocol.Answer{{Custom: "好\x1b[Z的\x03\t了\n"}})
+	groups, err := attach.AnswerKeys([]protocol.Question{q}, []protocol.Answer{{Custom: "好\x1b[Z的\x03\t了\n"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := joined(steps)
+	got := joined(slices.Concat(groups...))
 	if want := "\x1b[B\x1b[B好[Z的了 \r"; got != want {
 		t.Errorf("keys %q, want %q", got, want)
 	}

@@ -16,6 +16,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.protocol.ChatItem
 import clauderc.app.protocol.Command
@@ -232,5 +234,31 @@ class SubagentTermScreenTest {
         compose.onNodeWithTag("blockedRow").assertIsDisplayed()
         compose.onNodeWithText("打开终端").performClick()
         assertEquals(2, terms)
+    }
+
+    @Test @Config(qualifiers = "w390dp-h844dp-xxhdpi")
+    fun newOutputDoesNotYankTerminalBackToBottomWhenScrolledUp() {
+        var screen by mutableStateOf(TermScreen("s-work", List(60) { r -> "第 $r 行" }))
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                TerminalScreen(TermUiState(session = session("s-work", "修复重连", SessionState.Idle, "default"), loading = false, screen = screen), onBack = {}, onKey = {})
+            }
+        }
+        compose.waitForIdle()
+        val atBottomY = compose.onNodeWithTag("termText").fetchSemanticsNode().positionInRoot.y
+
+        // Scroll up to read older lines.
+        repeat(3) {
+            compose.onNodeWithTag("termViewport").performTouchInput { swipeDown() }
+            compose.waitForIdle()
+        }
+        val scrolledUpY = compose.onNodeWithTag("termText").fetchSemanticsNode().positionInRoot.y
+        assertTrue("scrolled up toward top ($scrolledUpY > $atBottomY)", scrolledUpY > atBottomY + 50f)
+
+        // More lines arrive at the bottom: view stays where the user scrolled instead of jumping to bottom.
+        compose.runOnUiThread { screen = TermScreen("s-work", List(75) { r -> "第 $r 行" }) }
+        compose.waitForIdle()
+        val afterOutputY = compose.onNodeWithTag("termText").fetchSemanticsNode().positionInRoot.y
+        assertEquals("did not jump back to bottom on new output", scrolledUpY, afterOutputY, 2f)
     }
 }

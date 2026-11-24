@@ -27,6 +27,8 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import clauderc.app.data.Appearance
 import clauderc.app.data.ThemeMode
 import kotlin.math.hypot
@@ -119,6 +121,15 @@ fun ThemeRevealHost(key: Any, content: @Composable () -> Unit) {
             },
     ) {
         CompositionLocalProvider(LocalThemeReveal provides reveal, content = content)
+        // While the old theme's picture shows, what is under a finger is not what it sees there.
+        if (reveal.running) Box(Modifier.matchParentSize().swallowTouches())
+    }
+}
+
+/** Takes every touch that lands on it, so nothing under it is pressed: for a layer drawn over the page, while it is drawn. */
+fun Modifier.swallowTouches(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
     }
 }
 

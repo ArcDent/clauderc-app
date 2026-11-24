@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -54,6 +55,8 @@ import androidx.compose.ui.unit.sp
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.pressShrink
+import clauderc.app.ui.theme.StickerPress
+import clauderc.app.ui.theme.stickerPushed
 import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.HazeBlurStyle
@@ -66,8 +69,8 @@ data class NavTab(val label: String, val icon: ImageVector, val selectedIcon: Im
 /**
  * The bottom navigation. 清玻: a blurred, tinted glass pill floating 12dp above the bottom edge, with
  * bright rims and a lens over the picked tab. 格栅: a bar docked to the bottom under a heavy rule, the
- * picked tab a solid block with its icon and label reversed out. 贴纸: an ink-outlined capsule on a
- * hard shadow, the picked tab a yellow sticker. Switching tabs moves the indicator's leading edge
+ * picked tab a solid block with its icon and label reversed out. 贴纸: an ink-outlined capsule, the
+ * picked tab a yellow sticker. Switching tabs moves the indicator's leading edge
  * first and lets the trailing edge catch up, in step with the page swap.
  */
 @Composable
@@ -168,7 +171,7 @@ fun GlassNavBar(
                 .fillMaxHeight()
             when (ui) {
                 UiStyle.Grid -> Box(indicator.clip(RoundedCornerShape(2.dp)).background(c.fg))
-                UiStyle.Sticker -> Box(indicator.sticker(c.hue2, c.ink, 27.dp, drop = 0.dp))
+                UiStyle.Sticker -> Box(indicator.sticker(c.hue2, c.ink, 27.dp))
                 UiStyle.Clear -> Box(
                     indicator
                         .shadow(6.dp, RoundedCornerShape(26.dp), ambientColor = c.glassShadow, spotColor = c.glassShadow)
@@ -206,6 +209,8 @@ private fun NavCell(tab: NavTab, selected: Boolean, modifier: Modifier, onClick:
         }
     }
     val press = remember { MutableInteractionSource() }
+    // 贴纸 keeps a pressed tab where it is and only squashes and tilts its sticker icon.
+    val pushed by stickerPushed(press)
     val corner = when (ui) {
         UiStyle.Grid -> 2.dp
         UiStyle.Sticker -> 27.dp
@@ -213,7 +218,7 @@ private fun NavCell(tab: NavTab, selected: Boolean, modifier: Modifier, onClick:
     }
     Box(
         modifier
-            .pressShrink(press)
+            .pressShrink(press, StickerPress.Still)
             .fillMaxHeight()
             .clip(RoundedCornerShape(corner))
             .selectable(selected = selected, interactionSource = press, indication = LocalIndication.current, role = Role.Tab, onClick = onClick),
@@ -221,7 +226,14 @@ private fun NavCell(tab: NavTab, selected: Boolean, modifier: Modifier, onClick:
     ) {
         val iconSize = if (ui == UiStyle.Sticker) 25.dp else if (ui == UiStyle.Grid) 18.dp else 24.dp
         val icon: @Composable () -> Unit = {
-            Box(Modifier.size(iconSize).graphicsLayer { popScale(pop.value).let { (x, y, dy) -> scaleX = x; scaleY = y; translationY = dy * density } }) {
+            Box(
+                Modifier.size(iconSize).graphicsLayer {
+                    val p = if (ui == UiStyle.Sticker) pushed else 0f
+                    val held = 1f - 0.18f * p
+                    popScale(pop.value).let { (x, y, dy) -> scaleX = x * held; scaleY = y * held; translationY = dy * density }
+                    rotationZ = -12f * p
+                },
+            ) {
                 Icon(tab.icon.styled, contentDescription = null, tint = tint, modifier = Modifier.fillMaxSize().alpha(1f - on))
                 Icon(tab.selectedIcon.styled, contentDescription = null, tint = tint, modifier = Modifier.fillMaxSize().alpha(on))
             }
@@ -239,9 +251,9 @@ private fun NavCell(tab: NavTab, selected: Boolean, modifier: Modifier, onClick:
         }
         if (tab.dot) {
             val dot = if (ui == UiStyle.Grid) {
-                Modifier.align(Alignment.TopEnd).offset(x = (-10).dp, y = 0.dp).size(7.dp).background(c.accent)
+                Modifier.align(Alignment.TopEnd).offset(x = (-10).dp, y = 0.dp).size(7.dp).background(c.accent).testTag("navDot")
             } else {
-                Modifier.align(Alignment.TopCenter).offset(x = 10.5.dp, y = 3.dp).size(7.dp).clip(CircleShape).background(c.accent)
+                Modifier.align(Alignment.TopCenter).offset(x = 10.5.dp, y = 3.dp).size(7.dp).clip(CircleShape).background(c.accent).testTag("navDot")
             }
             Box(dot)
         }

@@ -1,12 +1,17 @@
 package clauderc.app.pair
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.ui.theme.ClaudercMotion
@@ -22,7 +27,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** The scan page opens its camera only once it has slid in, and its scan line crosses in 3.6s. */
+/** The scan page opens its camera only once it has slid in, its scan line crosses in 3.6s, and each refusal has its own sheet. */
 @RunWith(AndroidJUnit4::class)
 @Config(qualifiers = "w390dp-h844dp")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -61,6 +66,18 @@ class PairScreenTest {
         assertEquals("at the old 2.6s the line has not reached the bottom yet", black, shot().at(bottom))
         compose.mainClock.advanceTimeBy(1_000 + 16)
         assertNotEquals("at 3.6s the line is at the bottom", black, shot().at(bottom))
+    }
+
+    @Test fun aRedeemedCodeSaysItWasPairedAndAnInvalidOneKeepsItsText() {
+        var state by mutableStateOf<PairUiState>(PairUiState.Redeemed)
+        compose.setContent { ClaudercTheme(darkTheme = false) { PairScreen(state, {}, {}, scanner = { m, _ -> Box(m) }) } }
+        compose.onNodeWithText("二维码已经用过").assertIsDisplayed()
+        compose.onNodeWithText("这个二维码已经配对过，请在目标机上重新生成。").assertIsDisplayed()
+
+        state = PairUiState.Used
+        compose.onNodeWithText("二维码无效").assertIsDisplayed()
+        compose.onNodeWithText("它可能已经被用过，每个二维码只能用一次。").assertIsDisplayed()
+        compose.onNodeWithText("二维码已经用过").assertDoesNotExist()
     }
 
     private fun shot(): ImageBitmap = compose.onRoot().captureToImage()

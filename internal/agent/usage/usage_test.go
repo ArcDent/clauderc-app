@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,6 +35,8 @@ type fixture struct {
 	cred   Credential
 	err    error
 	logs   bytes.Buffer
+	// gate, when set, holds each request until it is closed.
+	gate atomic.Pointer[chan struct{}]
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -46,6 +49,13 @@ func newFixture(t *testing.T) *fixture {
 		if r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("anthropic-beta") != betaHeader {
 			http.Error(w, "bad headers", http.StatusBadRequest)
 			return
+		}
+		if gate := f.gate.Load(); gate != nil {
+			select {
+			case <-*gate:
+			case <-r.Context().Done():
+				return
+			}
 		}
 		status := int(f.status.Load())
 		w.WriteHeader(status)
@@ -73,6 +83,29 @@ func newFixture(t *testing.T) *fixture {
 
 // later moves past the TTL so the next Get reads again.
 func (f *fixture) later() { f.now = f.now.Add(DefaultTTL + time.Second) }
+
+// hold keeps the endpoint's answers back until release is called, at the
+// latest when the test ends.
+func (f *fixture) hold(t *testing.T) (release func()) {
+	gate := make(chan struct{})
+	f.gate.Store(&gate)
+	var once sync.Once
+	release = func() { once.Do(func() { close(gate) }) }
+	t.Cleanup(release)
+	return release
+}
+
+// waitHits waits until the endpoint has received n requests.
+func (f *fixture) waitHits(t *testing.T, n int32) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for f.hits.Load() < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d requests reached the endpoint, want %d", f.hits.Load(), n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
 
 func TestGetReadsBothWindows(t *testing.T) {
 	f := newFixture(t)
@@ -155,6 +188,59 @@ func TestAnswerIsReusedWithinTTL(t *testing.T) {
 	f.h.Get(context.Background())
 	if n := f.hits.Load(); n != 2 {
 		t.Errorf("%d requests after the TTL, want 2", n)
+	}
+}
+
+// While one read waits on the endpoint, a usage.get whose ctx ends returns
+// at once instead of queueing behind it.
+func TestCancelledGetDoesNotWaitForARead(t *testing.T) {
+	f := newFixture(t)
+	release := f.hold(t)
+	first := make(chan protocol.UsageResponse, 1)
+	go func() { first <- f.h.Get(context.Background()) }()
+	f.waitHits(t, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	answered := make(chan struct{})
+	go func() {
+		defer close(answered)
+		f.h.Handle(ctx, protocol.Envelope{V: protocol.Version, Kind: protocol.KindRequest, ID: "r2", Method: protocol.MethodUsageGet})
+	}()
+	cancel()
+	select {
+	case <-answered:
+	case <-time.After(time.Second):
+		t.Fatal("usage.get kept waiting for the other read after its ctx ended")
+	}
+
+	release()
+	if got := <-first; !got.Available || got.Stale != "" || got.FiveHour == nil {
+		t.Errorf("the read in progress answered %+v", got)
+	}
+}
+
+// A read cut short by its caller's ctx is not kept: the next usage.get
+// reads again instead of answering with that failure.
+func TestCancelledReadIsNotCached(t *testing.T) {
+	f := newFixture(t)
+	release := f.hold(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cut := make(chan struct{})
+	go func() {
+		defer close(cut)
+		f.h.Get(ctx)
+	}()
+	f.waitHits(t, 1)
+	cancel()
+	<-cut
+
+	release()
+	got := f.h.Get(context.Background())
+	if !got.Available || got.Stale != "" || got.FiveHour == nil {
+		t.Errorf("Get after a cancelled read = %+v, want a fresh answer", got)
+	}
+	if n := f.hits.Load(); n != 2 {
+		t.Errorf("%d requests, want the cancelled one and a new one", n)
 	}
 }
 

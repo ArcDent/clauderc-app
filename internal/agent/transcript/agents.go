@@ -226,6 +226,9 @@ type metaFile struct {
 
 // metaCache keeps each meta file as last read, with the size and
 // modification time it had then, so an unchanged file is not read again.
+// A file that could not be read or parsed is not kept: it may have been
+// caught half written, and finishing the write need not change its size or
+// modification time.
 type metaCache struct {
 	files map[string]cachedMeta
 	reads int // times a meta file was read
@@ -235,7 +238,6 @@ type cachedMeta struct {
 	size int64
 	mod  time.Time
 	mf   metaFile
-	ok   bool
 }
 
 // read returns the meta file of subagent id in dir.
@@ -250,15 +252,19 @@ func (m *metaCache) read(dir, id string) (metaFile, bool) {
 		return metaFile{}, false
 	}
 	if c, hit := m.files[path]; hit && c.size == fi.Size() && c.mod.Equal(fi.ModTime()) {
-		return c.mf, c.ok
+		return c.mf, true
 	}
 	m.reads++
 	mf, ok := readMeta(path, id)
+	if !ok {
+		delete(m.files, path)
+		return metaFile{}, false
+	}
 	if m.files == nil {
 		m.files = map[string]cachedMeta{}
 	}
-	m.files[path] = cachedMeta{size: fi.Size(), mod: fi.ModTime(), mf: mf, ok: ok}
-	return mf, ok
+	m.files[path] = cachedMeta{size: fi.Size(), mod: fi.ModTime(), mf: mf}
+	return mf, true
 }
 
 // scan returns every meta file in dir, by the tool_use id of its call.

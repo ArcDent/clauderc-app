@@ -1,6 +1,15 @@
 package clauderc.app.ui.theme
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
@@ -20,7 +29,6 @@ import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.unit.Constraints
 import clauderc.app.data.UiStyle
-import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
@@ -71,21 +79,61 @@ private class PressLayerNode(private val source: InteractionSource, private val 
 /**
  * Moves the whole element while [source] is pressed, the way the style presses: 格栅 shrinks it and
  * springs it back, 清玻 spreads it like a drop of liquid and lets it overshoot once on release, 贴纸
- * sinks it [PushDepth] onto its hard shadow (a [sticker] surface with the same source drops the
- * shadow in step). Goes before clip and background so they move too; the clickable after them gets
- * the same [source].
+ * moves it as [sticker] says, in durS on the spring curve both ways. Goes before clip and background
+ * so they move too; the clickable after them gets the same [source].
  */
-fun Modifier.pressShrink(source: InteractionSource): Modifier = this then PressShrinkElement(source)
+fun Modifier.pressShrink(source: InteractionSource, sticker: StickerPress = StickerPress.Plain): Modifier =
+    this then PressShrinkElement(source, sticker)
 
-/** How far 贴纸 sinks a pressed element: as far as its buttons' hard shadow reaches. */
-val PushDepth = 3.dp
-
-private data class PressShrinkElement(val source: InteractionSource) : ModifierNodeElement<PressShrinkNode>() {
-    override fun create() = PressShrinkNode(source)
-    override fun update(node: PressShrinkNode) = node.follow(source)
+/**
+ * How 贴纸 moves a pressed element (the demo's .is-pressed rules): with no shadow to sink onto, each kind
+ * of control moves its own way, so what was pressed reads at a glance. [scale] and [turn] (degrees,
+ * clockwise) are the pose held while pressed.
+ */
+enum class StickerPress(val scale: Float, val turn: Float = 0f) {
+    /** Anything not named below: a little smaller. */
+    Plain(0.95f),
+    /** A pill button or a text button that is not quiet: smaller and leaning left, like a rubber stamp. */
+    Button(0.96f, -1.5f),
+    /** The send button: leans far back, like a bow drawn. */
+    Send(0.84f, -14f),
+    /** An icon button. */
+    Icon(0.88f, -10f),
+    /** A machine card: a hair smaller and askew. */
+    Card(0.985f, -0.8f),
+    /** Stays put while a part of it moves instead: a nav item's icon, an option's thumbnail. */
+    Still(1f),
 }
 
-private class PressShrinkNode(private var source: InteractionSource) :
+/** 贴纸: how far [source] is pressed in, 0 to 1, moving in durS on the spring curve both ways (.is-pressed). */
+@Composable
+fun stickerPushed(source: InteractionSource): State<Float> {
+    val pressed by source.collectIsPressedAsState()
+    return animateFloatAsState(if (pressed) 1f else 0f, Motion.push(), label = "stickerPushed")
+}
+
+/**
+ * How far [source] is pressed in, 0 to 1, as the demo's :active looks with no transition in: on the
+ * moment the press lands, and back off in durS along [easing] once it lets go.
+ */
+@Composable
+fun snapPressed(source: InteractionSource, easing: Easing): State<Float> {
+    val pressed by source.collectIsPressedAsState()
+    val p = remember { Animatable(0f) }
+    val back = Clauderc.motion.durS
+    LaunchedEffect(pressed) { if (pressed) p.snapTo(1f) else p.animateTo(0f, tween(back, easing = easing)) }
+    return p.asState()
+}
+
+private data class PressShrinkElement(val source: InteractionSource, val sticker: StickerPress) : ModifierNodeElement<PressShrinkNode>() {
+    override fun create() = PressShrinkNode(source, sticker)
+    override fun update(node: PressShrinkNode) {
+        node.sticker = sticker
+        node.follow(source)
+    }
+}
+
+private class PressShrinkNode(private var source: InteractionSource, var sticker: StickerPress) :
     Modifier.Node(), LayoutModifierNode, CompositionLocalConsumerModifierNode {
     private val scaleX = Animatable(1f)
     private val scaleY = Animatable(1f)
@@ -126,12 +174,13 @@ private class PressShrinkNode(private var source: InteractionSource) :
 
     override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
         val placeable = measurable.measure(constraints)
-        val depth = PushDepth.toPx()
         return layout(placeable.width, placeable.height) {
             placeable.placeWithLayer(0, 0) {
-                scaleX = this@PressShrinkNode.scaleX.value
-                scaleY = this@PressShrinkNode.scaleY.value
-                translationY = push.value * depth
+                val p = push.value
+                val pushed = 1f + (sticker.scale - 1f) * p
+                scaleX = this@PressShrinkNode.scaleX.value * pushed
+                scaleY = this@PressShrinkNode.scaleY.value * pushed
+                rotationZ = sticker.turn * p
             }
         }
     }

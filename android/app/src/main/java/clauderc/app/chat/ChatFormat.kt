@@ -312,10 +312,13 @@ fun byteSize(n: Long): String = when {
     else -> String.format(java.util.Locale.ROOT, "%.1f MB", n / (1024.0 * 1024.0))
 }
 
-/** The line under a picture's name in the viewer: 「720 × 1560 · PNG · 212 KB」, without the size when it is not known. */
+/**
+ * The line under a picture's name in the viewer: 「720 × 1560 · PNG · 212 KB」, without the size when it is not
+ * known, and without the format for a picture with no name, which the format titles.
+ */
 fun imageLabel(img: ToolImage): String = listOfNotNull(
     if ((img.width ?: 0) > 0 && (img.height ?: 0) > 0) "${img.width} × ${img.height}" else null,
-    imageType(img.mediaType).ifEmpty { null },
+    if (img.name != null) imageType(img.mediaType).ifEmpty { null } else null,
     if (img.size > 0) byteSize(img.size) else null,
 ).joinToString(" · ")
 

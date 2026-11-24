@@ -3,9 +3,11 @@ package chat_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -211,5 +213,189 @@ func TestAutoResumeRefused(t *testing.T) {
 	res = f.call(t, "c1", protocol.MethodChatAutoResume, protocol.ChatAutoResumeRequest{SessionID: shortID, On: true, Text: "  "})
 	if res.Error == nil || res.Error.Code != protocol.CodeInvalidParams {
 		t.Fatalf("empty text: %+v, want invalidParams", res.Error)
+	}
+}
+
+// wakeFunc is a chat.Waker.
+type wakeFunc func(ctx context.Context, sessionID string, hold func(context.Context, string) (func(), error)) error
+
+func (w wakeFunc) Wake(ctx context.Context, sessionID string, hold func(context.Context, string) (func(), error)) error {
+	return w(ctx, sessionID, hold)
+}
+
+// sendingResume starts sending the waiting message 继续 of a stopped
+// session whose limit was lifted, and returns once the Waker has it. The
+// Waker then waits for release and returns what wake does.
+func sendingResume(t *testing.T, wake func(f *fixture, hold func(context.Context, string) (func(), error)) error) (f *fixture, c *clock, file string, release func()) {
+	t.Helper()
+	c = newClock(limitHit.Add(time.Minute))
+	file = filepath.Join(t.TempDir(), "resume.json")
+	waking, released := make(chan struct{}), make(chan struct{})
+	var wakeOnce, releaseOnce sync.Once
+	f = newFixture(t, setup{status: "idle", state: "done", pid: "null", opts: func(o *chat.Options) {
+		resumeOpts(c, file, nil)(o)
+		o.Waker = wakeFunc(func(_ context.Context, _ string, hold func(context.Context, string) (func(), error)) error {
+			wakeOnce.Do(func() { close(waking) })
+			<-released
+			return wake(f, hold)
+		})
+	}})
+	release = func() { releaseOnce.Do(func() { close(released) }) }
+	t.Cleanup(release)
+	f.appendTranscript(t, limitLine(denverLimit))
+	f.setResume(t, true, "继续")
+	c.set(limitResets.Add(time.Minute))
+	select {
+	case <-waking:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiting message was not sent")
+	}
+	return f, c, file, release
+}
+
+// resumeTexts reads the texts of the waiting messages from the resume
+// file, by short session id.
+func resumeTexts(t *testing.T, file string) map[string]string {
+	t.Helper()
+	var entries map[string]struct {
+		Text string `json:"text"`
+	}
+	if b, err := os.ReadFile(file); err == nil {
+		if err := json.Unmarshal(b, &entries); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := map[string]string{}
+	for id, e := range entries {
+		out[id] = e.Text
+	}
+	return out
+}
+
+// Turned off while its message was being sent, an automatic message that
+// then failed to go out does not come back.
+func TestAutoResumeTurnedOffWhileSending(t *testing.T) {
+	f, _, file, release := sendingResume(t, func(*fixture, func(context.Context, string) (func(), error)) error {
+		return errors.New("resume failed")
+	})
+	f.setResume(t, false, "")
+	release()
+	time.Sleep(500 * time.Millisecond)
+	if got := resumeTexts(t, file); len(got) != 0 {
+		t.Fatalf("waiting messages = %v, want none", got)
+	}
+}
+
+// Changed while its message was being sent, an automatic message that
+// then went out keeps the new setting.
+func TestAutoResumeChangedWhileSending(t *testing.T) {
+	f, c, file, release := sendingResume(t, func(f *fixture, _ func(context.Context, string) (func(), error)) error {
+		f.setAgents(t, "idle", "done", "7") // the session runs again
+		return nil
+	})
+	// Not due, the new setting stays to be looked at.
+	c.set(limitResets)
+	f.setResume(t, true, "换个说法")
+	release()
+	f.waitKeys(t, "\x1b[200~继续\x1b[201~\r")
+	time.Sleep(500 * time.Millisecond)
+	if got := resumeTexts(t, file); got[shortID] != "换个说法" {
+		t.Fatalf("waiting messages = %v, want 换个说法 kept", got)
+	}
+}
+
+// Close waits for the automatic message being sent before it closes the
+// attaches.
+func TestCloseWaitsForAutoResume(t *testing.T) {
+	held := make(chan error, 1)
+	f, _, _, release := sendingResume(t, func(_ *fixture, hold func(context.Context, string) (func(), error)) error {
+		done, err := hold(context.Background(), shortID)
+		if err == nil {
+			done()
+		}
+		held <- err
+		return errors.New("resume failed")
+	})
+	closed := make(chan struct{})
+	go func() {
+		f.h.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		t.Fatal("Close returned while the message was being sent")
+	case <-time.After(300 * time.Millisecond):
+	}
+	release()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return once the message ended")
+	}
+	if err := <-held; err != nil {
+		t.Fatalf("the attaches were closed before the message ended: %v", err)
+	}
+}
+
+// A text update that arrives at the agent while waiting on usage.get cannot
+// race past a turn-off for the same session and turn auto-resume back on.
+func TestAutoResumeSerializedPerSession(t *testing.T) {
+	c := newClock(limitHit.Add(time.Minute))
+	reset := limitHit.Add(3 * time.Hour)
+	file := filepath.Join(t.TempDir(), "resume.json")
+	inUsage, releaseUsage := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	f := newFixture(t, setup{opts: func(o *chat.Options) {
+		resumeOpts(c, file, nil)(o)
+		o.Usage = func(ctx context.Context) protocol.UsageResponse {
+			once.Do(func() { close(inUsage) })
+			<-releaseUsage
+			return protocol.UsageResponse{Available: true, FiveHour: &protocol.UsageWindow{ResetsAt: &reset}}
+		}
+	}})
+	f.appendTranscript(t, limitLine("You've hit your 5-hour limit · resets soon (Mars/Base)"))
+
+	editDone := make(chan protocol.Envelope, 1)
+	go func() {
+		editDone <- f.call(t, "c1", protocol.MethodChatAutoResume, protocol.ChatAutoResumeRequest{SessionID: shortID, On: true, Text: "换个说法"})
+	}()
+	select {
+	case <-inUsage:
+	case <-time.After(5 * time.Second):
+		t.Fatal("edit request never reached usage.get")
+	}
+
+	offDone := make(chan protocol.Envelope, 1)
+	go func() {
+		offDone <- f.call(t, "c1", protocol.MethodChatAutoResume, protocol.ChatAutoResumeRequest{SessionID: shortID, On: false})
+	}()
+	select {
+	case <-offDone:
+		t.Fatal("turn-off bypassed the in-flight edit instead of waiting its turn")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(releaseUsage)
+	if res := <-editDone; res.Error != nil {
+		t.Fatalf("edit error: %+v", res.Error)
+	}
+	offRes := <-offDone
+	if offRes.Error != nil {
+		t.Fatalf("turn-off error: %+v", offRes.Error)
+	}
+	var body protocol.ChatAutoResumeResponse
+	if err := json.Unmarshal(offRes.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Limit == nil || body.Limit.AutoResume != nil {
+		t.Fatalf("turn-off reply limit = %+v, want auto-resume off", body.Limit)
+	}
+	if got := resumeTexts(t, file); len(got) != 0 {
+		t.Fatalf("saved resumes = %v, want none", got)
+	}
+	c.set(reset.Add(2 * time.Minute))
+	time.Sleep(300 * time.Millisecond)
+	if strings.Contains(f.keyLog(), "换个说法") {
+		t.Fatal("turned-off auto-resume still sent a message")
 	}
 }

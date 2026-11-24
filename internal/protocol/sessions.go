@@ -97,6 +97,9 @@ type SessionContext struct {
 type SessionList struct {
 	Sessions []Session `json:"sessions"`
 	Profiles []Profile `json:"profiles"`
+	// Rev increases with every change pushed by the agent; a phone drops a
+	// response or event with a smaller Rev than one it already applied.
+	Rev int64 `json:"rev,omitempty"`
 }
 
 // SessionCreateRequest starts a background session (design D8) on one of
@@ -132,6 +135,8 @@ type SessionCreateRequest struct {
 	// Worktree, when set, starts the session in a new git worktree of Cwd
 	// by that name (claude -w); letters, digits, ".", "_" and "-" only.
 	Worktree string `json:"worktree,omitempty"`
+	// ClientReqID, when set, deduplicates retries within 10 minutes on the agent.
+	ClientReqID string `json:"clientReqId,omitempty"`
 }
 
 // ModelTier is one model setting of a new session, each backed by one

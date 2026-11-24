@@ -38,6 +38,7 @@ var httpErrorStatus = map[protocol.ErrorCode]int{
 	protocol.CodeInvalidParams:   400,
 	protocol.CodeUnauthenticated: 401,
 	protocol.CodePairCodeInvalid: 404,
+	protocol.CodePairCodeUsed:    409,
 	protocol.CodePairCodeExpired: 410,
 	protocol.CodeRateLimited:     429,
 	protocol.CodeDeviceNotFound:  404,
@@ -45,7 +46,7 @@ var httpErrorStatus = map[protocol.ErrorCode]int{
 }
 
 // Error samples the phone relies on.
-var requiredHTTPSamples = []string{"pair.res.404", "pair.res.410", "pair.res.429", "ws.app.res.401"}
+var requiredHTTPSamples = []string{"pair.res.404", "pair.res.409", "pair.res.410", "pair.res.429", "ws.app.res.401"}
 
 func TestHTTPSamplesRoundTrip(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join("testdata", "http", "*.json"))

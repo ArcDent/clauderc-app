@@ -19,10 +19,12 @@ data class MachinesUiState(
     val relays: List<RelayLink> = emptyList(),
     /** Null while the first machines.list is outstanding. */
     val rows: List<MachineRow>? = null,
+    /** True when the first machines.list failed: show a retry action instead of a spinner. */
+    val loadFailed: Boolean = false,
 )
 
-class MachinesViewModel(fleet: Fleet, relays: Flow<List<RelayLink>>) : ViewModel() {
-    val state: StateFlow<MachinesUiState> = combine(fleet.machines, fleet.sessions, relays) { machines, sessions, links ->
+class MachinesViewModel(private val fleet: Fleet, relays: Flow<List<RelayLink>>) : ViewModel() {
+    val state: StateFlow<MachinesUiState> = combine(fleet.machines, fleet.machinesFailed, fleet.sessions, relays) { machines, failed, sessions, links ->
         MachinesUiState(
             relays = links,
             rows = machines
@@ -31,6 +33,9 @@ class MachinesViewModel(fleet: Fleet, relays: Flow<List<RelayLink>>) : ViewModel
                     val list = sessions[m.id]?.takeIf { m.online }
                     MachineRow(m, list?.sessions?.size, list?.sessions?.count { it.state == SessionState.Pending } ?: 0)
                 },
+            loadFailed = failed && machines == null,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MachinesUiState())
+
+    fun retry() = fleet.retryMachines()
 }

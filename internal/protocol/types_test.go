@@ -273,6 +273,7 @@ func TestEnumValues(t *testing.T) {
 var errorCodes = map[protocol.ErrorCode]string{
 	protocol.CodeUnauthenticated:       "unauthenticated",
 	protocol.CodeMachineOffline:        "machineOffline",
+	protocol.CodeMachineBusy:           "machineBusy",
 	protocol.CodeUnknownMethod:         "unknownMethod",
 	protocol.CodeInvalidParams:         "invalidParams",
 	protocol.CodeSessionNotFound:       "sessionNotFound",
@@ -291,6 +292,7 @@ var errorCodes = map[protocol.ErrorCode]string{
 	protocol.CodeInternal:              "internal",
 	protocol.CodePairCodeExpired:       "pairCodeExpired",
 	protocol.CodePairCodeInvalid:       "pairCodeInvalid",
+	protocol.CodePairCodeUsed:          "pairCodeUsed",
 	protocol.CodeRateLimited:           "rateLimited",
 	protocol.CodeDeviceNotFound:        "deviceNotFound",
 	protocol.CodeMachineInUse:          "machineInUse",

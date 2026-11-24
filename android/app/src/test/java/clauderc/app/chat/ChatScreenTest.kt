@@ -2,6 +2,29 @@ package clauderc.app.chat
 
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.viewModelScope
+import clauderc.app.data.Fleet
+import clauderc.app.protocol.ChatImageResponse
+import clauderc.app.protocol.ChatOpenResponse
+import clauderc.app.protocol.Image
+import clauderc.app.protocol.MachinesListResponse
+import clauderc.app.protocol.Method
+import clauderc.app.protocol.SessionList
+import clauderc.app.testing.FakeRelay
+import clauderc.app.testing.decode
+import clauderc.app.testing.machine
+import clauderc.app.testing.sampleSessions
+import clauderc.app.ui.components.SnackState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.getValue
@@ -28,6 +51,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.runtime.snapshots.Snapshot
 import clauderc.app.testing.ShadowMagnifier
@@ -249,6 +273,64 @@ class ChatScreenTest {
         assertTrue("selected text shows in the selection colour: $hits pixels", hits > 50)
     }
 
+    /** Round 12: 贴纸's bubbles keep their 2dp ink outline but no longer sit on a hard ink shadow. */
+    @Test fun stickersBubblesHaveNoShadow() {
+        var colors: ClaudercColors? = null
+        val items = listOf(ChatItem(1, ItemKind.USER, text = "跑一遍 go vet 再提交"), ChatItem(2, ItemKind.ASSISTANT, text = "好的，我先跑一遍。"))
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Sticker) {
+                colors = Clauderc.colors
+                ChatScreen(baseState().copy(items = items, hasMore = false), ChatActions())
+            }
+        }
+        compose.waitForIdle()
+        val ink = colors!!.ink
+        val image = compose.onRoot().captureToImage().toPixelMap()
+        val d = compose.density.density
+        for (text in items.map { it.text!! }) {
+            // Down the middle from under the text: the padding, the outline, then the page; a shadow would make the ink run longer.
+            val b = compose.onNodeWithText(text).getBoundsInRoot()
+            val x = ((b.left + b.right) / 2).value * d
+            var run = 0
+            var longest = 0
+            for (y in (b.bottom.value * d).toInt() + 1 until ((b.bottom.value + 20) * d).toInt()) {
+                val p = image[x.toInt(), y]
+                run = if ((abs(p.red - ink.red) + abs(p.green - ink.green) + abs(p.blue - ink.blue)) / 3 < 0.1f) run + 1 else 0
+                longest = maxOf(longest, run)
+            }
+            assertTrue("「$text」: only the outline is ink, ${longest / d}dp", longest / d in 1f..3.5f)
+        }
+    }
+
+    /** Round 12: 格栅's code block is ringed in a 1dp line of the text colour, so its grey tells from the page. */
+    @Test fun gridsCodeBlockHasAThinLineInTheTextColour() {
+        var colors: ClaudercColors? = null
+        val reply = ChatItem(1, ItemKind.ASSISTANT, text = "看这段：\n\n```go\nfunc backoff(n int) time.Duration {\n\treturn time.Second << n\n}\n```")
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Grid) {
+                colors = Clauderc.colors
+                ChatScreen(baseState().copy(items = listOf(reply), hasMore = false), ChatActions())
+            }
+        }
+        compose.waitForIdle()
+        val c = colors!!
+        val image = compose.onRoot().captureToImage().toPixelMap()
+        val d = compose.density.density
+        val b = compose.onNodeWithTag("codeBlock").getBoundsInRoot()
+        val left = b.left.value * d
+        val top = b.top.value * d
+        val right = b.right.value * d
+        val middle = (b.top + b.bottom).value / 2 * d
+        fun near(what: String, want: androidx.compose.ui.graphics.Color, x: Float, y: Float) {
+            val p = image[x.toInt(), y.toInt()]
+            assertTrue("$what: $p, want $want", (abs(p.red - want.red) + abs(p.green - want.green) + abs(p.blue - want.blue)) / 3 < 0.03f)
+        }
+        near("the left line", c.fg, left + 0.5f * d, middle)
+        near("the right line", c.fg, right - 0.5f * d, middle)
+        near("the top line", c.fg, (left + right) / 2, top + 0.5f * d)
+        near("the grey inside", c.surface, left + 4 * d, middle)
+    }
+
     @Test fun opensAtTheBottomWithToolRowsFolded() {
         show(baseState())
         compose.onNodeWithText("先别提交\n跑一遍 go vet").assertIsDisplayed()
@@ -449,10 +531,60 @@ class ChatScreenTest {
         assertEquals(1, allowed)
     }
 
+    @Test fun tappingAllowOnAnOutgoingPermissionPanelSendsNothing() {
+        val x1 = Pending("toolu_X1", PendingKind.PERMISSION, "Bash", buildJsonObject { put("command", "echo one") })
+        val x2 = Pending("toolu_X2", PendingKind.PERMISSION, "Bash", buildJsonObject { put("command", "echo two") })
+        val live = showLive(emptyList()) {
+            respond(Method.CHAT_OPEN, ChatOpenResponse.serializer(), ChatOpenResponse(items = emptyList(), state = SessionState.Pending, pending = x1))
+        }
+        compose.onNodeWithText("echo one").assertIsDisplayed()
+        compose.mainClock.autoAdvance = false
+        live.relay.event(Method.CHAT_PENDING, "m-1", clauderc.app.protocol.ChatPendingEvent.serializer(), clauderc.app.protocol.ChatPendingEvent("s-need", x2))
+        compose.mainClock.advanceTimeByFrame()
+        // X1 is leaving while X2 enters: tapping X1's 「允许」 carries toolu_X1 and sends nothing.
+        val allowButtons = compose.onAllNodesWithText("允许")
+        val x1Panel = compose.onAllNodes(hasTestTag("pendingPanel") and androidx.compose.ui.test.hasAnyDescendant(hasText("echo one")))
+        assertTrue(x1Panel.fetchSemanticsNodes().isNotEmpty())
+        compose.onNode(hasText("允许") and hasAnyAncestor(hasTestTag("pendingPanel") and androidx.compose.ui.test.hasAnyDescendant(hasText("echo one")))).performClick()
+        assertTrue("tapping the stale panel sent no chat.answer", live.relay.sent(Method.CHAT_ANSWER).isEmpty())
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        compose.onNodeWithText("echo two").assertIsDisplayed()
+        live.close()
+    }
+
+    /**
+     * The permission panel takes the composer's place until it is answered: half a message typed before it
+     * is there when the composer comes back, and the old draft brought in on opening does not come back over it.
+     */
+    @Test fun whatWasTypedOutlivesThePermissionPanel() {
+        val drafts = mutableListOf<String>()
+        var state by mutableStateOf(baseState().copy(hasMore = false, restore = Restore(1, "上次没发的草稿")))
+        // As the view model does: the panel goes at once on an answer, and a restore once dealt with.
+        val actions = ChatActions(
+            onAllow = { state = state.copy(state = SessionState.Working, pending = null) },
+            onDraft = { drafts += it },
+            onRestored = { id -> if (state.restore?.id == id) state = state.copy(restore = null) },
+        )
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, actions) } }
+        compose.waitForIdle()
+        assertEquals("上次没发的草稿", composerText())
+        compose.onNodeWithTag("composer").performTextReplacement("先别合并，等")
+
+        state = state.copy(state = SessionState.Pending, pending = Pending("toolu_01B", PendingKind.PERMISSION, "Bash", buildJsonObject { put("command", "touch marker.txt") }))
+        compose.waitForIdle()
+        compose.onNodeWithTag("composer").assertDoesNotExist()
+        compose.onNodeWithText("允许").performClick()
+        compose.waitForIdle()
+
+        assertEquals("先别合并，等", composerText())
+        assertEquals("the draft is what was typed last", "先别合并，等", drafts.last())
+    }
+
     @Test fun singleChoiceSubmitsOnTapAndOtherSubmitsWithTheArrow() {
         val answers = mutableListOf<List<Answer>>()
         val q = Pending("toolu_01C", PendingKind.QUESTION, questions = listOf(Question("你喜欢哪种颜色", options = listOf(Option("红"), Option("绿"), Option("蓝")))))
-        show(baseState().copy(pending = q), ChatActions(onAnswer = { answers += it }))
+        show(baseState().copy(pending = q), ChatActions(onAnswer = { _, a -> answers += a }))
         compose.onNodeWithText("绿").performClick()
         assertEquals(listOf(listOf(Answer(selected = listOf(1)))), answers)
         // 「其他」 is a choice like the rest: picked, it opens a field, and only the arrow sends.
@@ -473,7 +605,7 @@ class ChatScreenTest {
                 Question("你喜欢哪种动物？", options = listOf(Option("猫"), Option("狗"))),
             ),
         )
-        show(baseState().copy(pending = q), ChatActions(onAnswer = { answers += it }))
+        show(baseState().copy(pending = q), ChatActions(onAnswer = { _, a -> answers += a }))
         val red = compose.onNodeWithText("红")
         val other = compose.onAllNodesWithText("其他")[0]
         red.performClick()
@@ -493,7 +625,7 @@ class ChatScreenTest {
     @Test fun inAMultiSelectQuestionOtherIsTickedAlongWithTheOptions() {
         val answers = mutableListOf<List<Answer>>()
         val q = Pending("toolu_01F", PendingKind.QUESTION, questions = listOf(Question("为哪些消息补样例？", multiSelect = true, options = listOf(Option("请求"), Option("响应"), Option("事件")))))
-        show(baseState().copy(pending = q), ChatActions(onAnswer = { answers += it }))
+        show(baseState().copy(pending = q), ChatActions(onAnswer = { _, a -> answers += a }))
         compose.onNodeWithText("请求").performClick()
         compose.onNodeWithText("事件").performClick()
         compose.onNodeWithText("其他").performScrollTo().performClick()
@@ -508,7 +640,7 @@ class ChatScreenTest {
         val answers = mutableListOf<List<Answer>>()
         val options = listOf("Use this MCP server", "Use this and all future MCP servers in this project", "Continue without using this MCP server")
         val d = Pending("dialog-3f9a1c0b7e21", PendingKind.DIALOG, questions = listOf(Question("New MCP server found in this project: remote-ssh", options = options.map { Option(it) })))
-        show(baseState().copy(state = SessionState.Pending, pending = d), ChatActions(onAnswer = { answers += it }))
+        show(baseState().copy(state = SessionState.Pending, pending = d), ChatActions(onAnswer = { _, a -> answers += a }))
         compose.onNodeWithText("等你选择").assertIsDisplayed()
         compose.onNodeWithText("New MCP server found in this project: remote-ssh").assertIsDisplayed()
         options.forEach { compose.onNodeWithText(it).assertIsDisplayed() }
@@ -526,7 +658,7 @@ class ChatScreenTest {
                 Question("样例放在哪？", options = listOf(Option("testdata"), Option("samples"))),
             ),
         )
-        show(baseState().copy(pending = q), ChatActions(onAnswer = { answers += it }))
+        show(baseState().copy(pending = q), ChatActions(onAnswer = { _, a -> answers += a }))
         compose.onNodeWithText("等你回答 · 2 题").assertIsDisplayed()
         compose.onNodeWithText("提交").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText("请求").performScrollTo().performClick()
@@ -887,7 +1019,7 @@ class ChatScreenTest {
         assertEquals(listOf("toolu_I.0"), asked)
 
         val whole = java.util.Base64.getDecoder().decode(pngThumb(720, 1560))
-        state = state.copy(fetchingImages = emptySet(), wholeImages = mapOf("toolu_I.0" to whole))
+        state = state.copy(fetchingImages = emptySet(), wholeImages = mapOf("toolu_I.0" to WholeImage(whole, "image/png")))
         // Decoded off the main thread, then the line fades out.
         compose.waitUntil(5_000) { compose.onAllNodesWithText("正在取原图").fetchSemanticsNodes().isEmpty() }
         compose.onNodeWithContentDescription("关闭").performClick()
@@ -925,6 +1057,174 @@ class ChatScreenTest {
         compose.onNodeWithText("clauderc show readme-hero.png").assertDoesNotExist()
     }
 
+    // ---------- 2026-11-22: saving the picture in the viewer ----------
+
+    private val saveButton get() = compose.onNodeWithContentDescription("保存到相册")
+
+    private fun openShot() {
+        compose.onNodeWithTag("toolThumb").performClick()
+        compose.waitForIdle()
+    }
+
+    @Test fun theSaveButtonWaitsForThePicturesBytesAndThenSaves() {
+        val saves = mutableListOf<Pair<ToolImage, ByteArray?>>()
+        var state by mutableStateOf(baseState().copy(items = listOf(readImage()), hasMore = false))
+        val actions = ChatActions(onImage = { state = state.copy(fetchingImages = state.fetchingImages + it) }, onSaveImage = { img, local -> saves += img to local })
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, actions) } }
+        openShot()
+        saveButton.assertIsNotEnabled().performClick()
+        assertTrue(saves.isEmpty())
+
+        val whole = java.util.Base64.getDecoder().decode(pngThumb(720, 1560))
+        compose.runOnUiThread { state = state.copy(fetchingImages = emptySet(), wholeImages = mapOf(shot.id to WholeImage(whole, "image/png"))) }
+        compose.waitForIdle()
+        saveButton.assertIsEnabled().performClick()
+        val (img, local) = saves.single()
+        assertEquals(shot.id, img.id)
+        assertEquals("named after the file it was read from", "chat.png", img.name)
+        assertEquals("fetched, not the phone's own", null, local)
+    }
+
+    /** A chat page on a real view model over a scripted relay, which opens the session on [items]. */
+    private class Live(val relay: FakeRelay, val vm: ChatViewModel, val scope: CoroutineScope) {
+        fun close() {
+            vm.viewModelScope.cancel()
+            scope.cancel()
+        }
+    }
+
+    private fun showLive(items: List<ChatItem>, saver: ImageSaver = ImageSaver { _, _, _ -> }, script: FakeRelay.() -> Unit = {}): Live {
+        val relay = FakeRelay().apply {
+            respond(Method.MACHINES_LIST, MachinesListResponse.serializer(), MachinesListResponse(listOf(machine("m-1", "mac-mini"))))
+            respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), sampleSessions)
+            respond(Method.CHAT_OPEN, ChatOpenResponse.serializer(), ChatOpenResponse(items = items, state = SessionState.Idle))
+            script()
+        }
+        val scope = CoroutineScope(Dispatchers.Unconfined + Job())
+        val vm = ChatViewModel("m-1", "s-need", relay, Fleet(relay, scope), scope, compress = { it }, background = Dispatchers.Unconfined, saver = saver)
+        compose.setContent {
+            val s by vm.state.collectAsState()
+            ClaudercTheme(darkTheme = false) {
+                ChatScreen(
+                    s,
+                    ChatActions(
+                        onImage = vm::loadImage, onSaveImage = vm::saveImage, onViewer = vm::viewImage,
+                        onAllow = vm::allow, onDeny = vm::deny, onAnswer = vm::answerQuestions,
+                    ),
+                )
+            }
+        }
+        compose.waitForIdle()
+        return Live(relay, vm, scope)
+    }
+
+    @Test fun aSavedPictureIsATickUntilTheViewerCloses() {
+        val writes = mutableListOf<ByteArray>()
+        val png = pngThumb(720, 1560)
+        val live = showLive(listOf(readImage()), saver = { b, _, _ -> writes += b }) {
+            respond(Method.CHAT_IMAGE, ChatImageResponse.serializer(), ChatImageResponse("image/png", png))
+        }
+        openShot()
+        saveButton.assertIsEnabled()
+        val ready = saveButton.captureToImage().asAndroidBitmap()
+        saveButton.performClick()
+        compose.waitForIdle()
+        saveButton.assertIsNotEnabled().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已保存"))
+        assertFalse("the download icon turned into a tick", saveButton.captureToImage().asAndroidBitmap().sameAs(ready))
+
+        compose.onNodeWithContentDescription("关闭").performClick()
+        compose.waitForIdle()
+        openShot()
+        saveButton.assertIsEnabled().assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+        assertTrue("opened again, it is the download icon", saveButton.captureToImage().asAndroidBitmap().sameAs(ready))
+        assertEquals(1, writes.size)
+        assertTrue(writes.single().contentEquals(java.util.Base64.getDecoder().decode(png)))
+        live.close()
+    }
+
+    @Test fun theViewerTakesEveryTouchAndATapOnItsBlackClosesIt() {
+        var allowed = 0
+        var denied = 0
+        val permission = Pending("toolu_01B", PendingKind.PERMISSION, "Bash", buildJsonObject { put("command", "touch marker.txt") })
+        var state by mutableStateOf(baseState().copy(items = listOf(readImage()), hasMore = false, state = SessionState.Pending, pending = permission))
+        val actions = ChatActions(onAllow = { allowed++ }, onDeny = { denied++ }, onImage = { state = state.copy(fetchingImages = state.fetchingImages + it) })
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, actions) } }
+        for (button in listOf("允许", "拒绝")) {
+            val under = compose.onNodeWithText(button).fetchSemanticsNode().boundsInRoot.center
+            openShot()
+            compose.onNodeWithTag("imageViewer").performTouchInput { click(under) }
+            compose.waitForIdle()
+            compose.onNodeWithTag("imageViewer").assertDoesNotExist()
+        }
+        assertEquals("the buttons under the viewer got no tap", 0 to 0, allowed to denied)
+    }
+
+    @Test fun theSnackbarShowsOverTheViewerInLightGrey() {
+        val snack = SnackState()
+        var state by mutableStateOf(baseState().copy(items = listOf(readImage()), hasMore = false))
+        val actions = ChatActions(onImage = { state = state.copy(fetchingImages = state.fetchingImages + it) })
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, actions, snack) } }
+        openShot()
+        compose.runOnUiThread { snack.show("保存失败") }
+        compose.waitForIdle()
+        val text = compose.onNodeWithText("保存失败").fetchSemanticsNode().boundsInRoot
+        val inside = with(compose.density) { 8.dp.toPx() }
+        // Left of the words, inside the snackbar's padding: its own grey, not the viewer's black or the theme's dark grey.
+        val px = compose.onRoot().captureToImage().toPixelMap()[(text.left - inside).toInt(), text.center.y.toInt()]
+        assertEquals(Color(0xFFE6E6E6), px)
+    }
+
+    @Test fun bytesThatCannotBeDecodedStillEndTheWaitAndCanBeSaved() {
+        val saves = mutableListOf<String>()
+        // An id of its own: the decoded pictures are kept app-wide, and another test decoded shot's.
+        val broken = shot.copy(id = "toolu_D.0")
+        var state by mutableStateOf(baseState().copy(items = listOf(readImage(broken)), hasMore = false))
+        val actions = ChatActions(
+            onImage = { state = state.copy(wholeImages = mapOf(it to WholeImage(byteArrayOf(1, 2, 3), "image/png"))) },
+            onSaveImage = { img, _ -> saves += img.id },
+        )
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, actions) } }
+        openShot()
+        compose.onNodeWithText("正在取原图").assertDoesNotExist()
+        compose.onNodeWithText("图片取不到").assertDoesNotExist()
+        saveButton.assertIsEnabled().performClick()
+        assertEquals(listOf(broken.id), saves)
+    }
+
+    @Test fun aPictureInTheUsersMessageOpensAndSavesFromThePhone() {
+        val data = pngThumb(300, 200)
+        val bytes = java.util.Base64.getDecoder().decode(data)
+        val message = ChatItem(1, ItemKind.USER, text = "照这张改", images = listOf(Image("image/png", data)), uuid = "u-1")
+        val writes = mutableListOf<Triple<ByteArray, String?, String?>>()
+        val live = showLive(listOf(message, ChatItem(2, ItemKind.ASSISTANT, text = "好的。")), saver = { b, name, type -> writes += Triple(b, name, type) })
+        // The bubble's picture is decoded off the main thread; its size names the picture in the viewer.
+        compose.waitUntil(5_000) { ImageCache.shared.peek(data) != null }
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("userPicture").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("imageViewer").assertIsDisplayed()
+        compose.onNode(hasText("PNG") and hasAnyAncestor(hasTestTag("imageViewer")), useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("300 × 200 · ${byteSize(bytes.size.toLong())}").assertIsDisplayed()
+        compose.onNodeWithText("正在取原图").assertDoesNotExist()
+        saveButton.assertIsEnabled().performClick()
+        compose.waitForIdle()
+        val (saved, name, type) = writes.single()
+        assertTrue(saved.contentEquals(bytes))
+        assertEquals(null, name)
+        assertEquals("image/png", type)
+        assertTrue("nothing asked of the agent", live.relay.sent(Method.CHAT_IMAGE).isEmpty())
+
+        // Sliding the message from its picture lays bare the rewind button and opens nothing.
+        compose.onNodeWithContentDescription("关闭").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("userPicture").performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        compose.onNodeWithTag("imageViewer").assertDoesNotExist()
+        compose.onNodeWithTag("rewindAction").assertIsDisplayed()
+        live.close()
+    }
+
     // No count limit: the bar shows the size used against the total and always offers another picture.
     @Test fun attachBarShowsTheSizeUsedAndAlwaysOffersMore() {
         var state by mutableStateOf(baseState().copy(hasMore = false, attachments = List(2) { Attachment("p$it.jpg", ByteArray(1_258_291)) }))
@@ -934,6 +1234,52 @@ class ChatScreenTest {
         state = state.copy(attachments = List(6) { Attachment("p$it.jpg", ByteArray(1_000)) })
         compose.onNodeWithText("0.0 / 11 MB").assertIsDisplayed()
         compose.onNodeWithContentDescription("再添加图片").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun photoTakenBeforeActivityRecreationStillAttaches() {
+        val captured = mutableListOf<android.net.Uri>()
+        var start: ((android.net.Uri) -> Unit)? = null
+        var finish: ((Boolean) -> Unit)? = null
+        val tester = androidx.compose.ui.test.junit4.StateRestorationTester(compose)
+        tester.setContent {
+            val pair = clauderc.app.rememberPhotoCapture(onCaptured = { captured += it }, launch = {})
+            start = pair.first
+            finish = pair.second
+        }
+        val uri = android.net.Uri.parse("content://clauderc.app.files/camera/photo-1.jpg")
+        compose.runOnUiThread { start!!.invoke(uri) }
+        compose.waitForIdle()
+        tester.emulateSavedInstanceStateRestore()
+        compose.runOnUiThread { finish!!.invoke(true) }
+        compose.waitForIdle()
+        assertEquals(listOf(uri), captured)
+    }
+
+    @Test fun removingFirstAttachmentShowsSecondAndDoubleTapDeletesOnlyOne() {
+        fun solidPng(argb: Int): ByteArray {
+            val bmp = android.graphics.Bitmap.createBitmap(16, 16, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(argb) }
+            val out = java.io.ByteArrayOutputStream()
+            bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+            return out.toByteArray()
+        }
+        val red = solidPng(android.graphics.Color.RED)
+        val green = solidPng(android.graphics.Color.GREEN)
+        val live = showLive(emptyList())
+        live.vm.addImage("a.png", red.size.toLong()) { red }
+        live.vm.addImage("b.png", green.size.toLong()) { green }
+        compose.waitForIdle()
+        val firstId = live.vm.state.value.attachments[0].id
+        // Rapid double-tap on A's remove button sends A's id twice: only A is removed, B stays.
+        live.vm.removeImage(firstId)
+        live.vm.removeImage(firstId)
+        compose.waitForIdle()
+        assertEquals(listOf("b.png"), live.vm.state.value.attachments.map { it.name })
+        compose.waitUntil(5_000) { ImageCache.shared.peek(live.vm.state.value.attachments.single()) != null }
+        compose.waitForIdle()
+        val px = compose.onNodeWithContentDescription("b.png").captureToImage().toPixelMap()
+        val mid = px[px.width / 2, px.height / 2]
+        assertTrue("remaining slot shows B's green, not A's red: $mid", mid.green > 0.8f && mid.red < 0.2f)
+        live.close()
     }
 
     // ---------- Round 9: formulas in replies ----------
@@ -1000,5 +1346,146 @@ class ChatScreenTest {
             val off = abs(ink.red - fg.red) + abs(ink.green - fg.green) + abs(ink.blue - fg.blue)
             assertTrue("$style dark=$dark: formula ink $ink, text $fg", off < 0.06f)
         }
+    }
+
+    @Test fun multiQuestionSelectionsAndDialogsSurviveActivityRecreation() {
+        val answered = mutableListOf<List<Answer>>()
+        val questions = Pending(
+            "toolu_multi",
+            PendingKind.QUESTION,
+            questions = listOf(
+                Question("要跑哪些测试？", options = listOf(Option("单元测试"), Option("端到端测试"), Option("截图测试")), multiSelect = true),
+                Question("发版吗？", options = listOf(Option("发正式版"), Option("先不发")), multiSelect = false),
+            ),
+        )
+        val state = baseState().copy(hasMore = false, pending = questions)
+        val tester = androidx.compose.ui.test.junit4.StateRestorationTester(compose)
+        tester.setContent {
+            ClaudercTheme(darkTheme = false) {
+                ChatScreen(state, ChatActions(onAnswer = { _, list -> answered += list }))
+            }
+        }
+        compose.onNodeWithText("单元测试").performClick()
+        compose.onNodeWithText("截图测试").performClick()
+        compose.onNodeWithText("先不发").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("提交").assertIsEnabled()
+
+        // Recreate Activity (rotation): both questions' selections stay intact.
+        tester.emulateSavedInstanceStateRestore()
+        compose.waitForIdle()
+        compose.onNodeWithText("提交").assertIsEnabled().performClick()
+        assertEquals(
+            listOf(listOf(Answer(selected = listOf(0, 2)), Answer(selected = listOf(1)))),
+            answered,
+        )
+    }
+
+    @Test fun openForkDialogAndTypedTextSurviveActivityRecreation() {
+        val state = baseState().copy(hasMore = false)
+        val tester = androidx.compose.ui.test.junit4.StateRestorationTester(compose)
+        tester.setContent {
+            ClaudercTheme(darkTheme = false) {
+                ChatScreen(state, ChatActions())
+            }
+        }
+        compose.onNodeWithContentDescription("git").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Fork").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("forkInstruction").performTextInput("只改协议部分")
+        compose.waitForIdle()
+
+        tester.emulateSavedInstanceStateRestore()
+        compose.waitForIdle()
+        compose.onNodeWithText("Fork 这个会话").assertIsDisplayed()
+        compose.onNodeWithTag("forkInstruction").assert(hasText("只改协议部分"))
+    }
+
+    @Test fun twoSimultaneousFailedSendsReturnBothTextsToTheComposer() {
+        var state by mutableStateOf(baseState().copy(hasMore = false))
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                ChatScreen(
+                    state,
+                    ChatActions(onRestored = { id -> if (state.restore?.id == id) state = state.copy(restore = null) }),
+                )
+            }
+        }
+        // First failure restores into the empty composer; second failure appends rather than dropping its text.
+        compose.runOnUiThread { state = state.copy(restore = Restore(1, "第一条失败的字", append = true)) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("composer").assert(hasText("第一条失败的字"))
+        compose.runOnUiThread { state = state.copy(restore = Restore(2, "第二条失败的字", append = true)) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("composer").assert(hasText("第一条失败的字\n第二条失败的字"))
+    }
+
+    @Test fun userMessageThumbnailFetchesOriginalViaChatImageAndSavesOriginal() {
+        val thumbB64 = pngThumb(240, 180)
+        val originalB64 = pngThumb(640, 480)
+        val originalBytes = java.util.Base64.getDecoder().decode(originalB64)
+        val message = ChatItem(
+            1,
+            ItemKind.USER,
+            text = "看这张原图",
+            images = listOf(Image("image/jpeg", thumbB64, id = "usr-remote.0", width = 640, height = 480, size = originalBytes.size.toLong())),
+            uuid = "u-remote",
+        )
+        val writes = mutableListOf<Triple<ByteArray, String?, String?>>()
+        val live = showLive(listOf(message), saver = { b, name, type -> writes += Triple(b, name, type) }) {
+            respond(Method.CHAT_IMAGE, ChatImageResponse.serializer(), ChatImageResponse("image/png", originalB64))
+        }
+        compose.waitUntil(5_000) { ImageCache.shared.peek(thumbB64) != null }
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("userPicture").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("imageViewer").assertIsDisplayed()
+        assertEquals(1, live.relay.sent(Method.CHAT_IMAGE).size)
+        val req = live.relay.sent(Method.CHAT_IMAGE).single().decode(clauderc.app.protocol.ChatImageRequest.serializer())
+        assertEquals("usr-remote.0", req.id)
+
+        saveButton.assertIsEnabled().performClick()
+        compose.waitForIdle()
+        val (saved, _, type) = writes.single()
+        assertTrue("viewer saved original bytes, not thumbnail", saved.contentEquals(originalBytes))
+        assertEquals("image/png", type)
+        live.close()
+    }
+
+    @Test fun justSentUserMessageImageOpensFromLocalBytesWithoutChatImage() {
+        val originalB64 = pngThumb(320, 240)
+        val originalBytes = java.util.Base64.getDecoder().decode(originalB64)
+        val thumbB64 = pngThumb(160, 120)
+        val writes = mutableListOf<Triple<ByteArray, String?, String?>>()
+        val live = showLive(emptyList(), saver = { b, name, type -> writes += Triple(b, name, type) }) {
+            respond(Method.CHAT_SEND, clauderc.app.protocol.ChatSendResponse.serializer(), clauderc.app.protocol.ChatSendResponse())
+        }
+        compose.runOnUiThread {
+            live.vm.addImage("local.jpg", originalBytes.size.toLong()) { originalBytes }
+            live.vm.send("我刚发的图")
+        }
+        compose.waitForIdle()
+        val delivered = ChatItem(
+            1,
+            ItemKind.USER,
+            text = "[Image #1] 我刚发的图",
+            images = listOf(Image("image/jpeg", thumbB64, id = "usr-justsent.0", width = 320, height = 240, size = originalBytes.size.toLong())),
+            uuid = "u-justsent",
+        )
+        live.relay.event(Method.CHAT_ITEMS, "m-1", clauderc.app.protocol.ChatItemsEvent.serializer(), clauderc.app.protocol.ChatItemsEvent("s-need", listOf(delivered)))
+        compose.waitUntil(5_000) { ImageCache.shared.peek(thumbB64) != null }
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("userPicture").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("imageViewer").assertIsDisplayed()
+        assertTrue("no chat.image sent for picture still held locally", live.relay.sent(Method.CHAT_IMAGE).isEmpty())
+        saveButton.assertIsEnabled().performClick()
+        compose.waitForIdle()
+        val (saved, _, _) = writes.single()
+        assertTrue("saved local original bytes", saved.contentEquals(originalBytes))
+        live.close()
     }
 }

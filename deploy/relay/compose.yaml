@@ -1,14 +1,19 @@
 # clauderc relay. Put PUBLIC_URL in .env next to this file, then run
 # docker compose up -d. The port is published on 127.0.0.1 only; an HTTPS
 # reverse proxy in front forwards to it. Optional .env settings:
-#   RELAY_BIND   listen address on the host, default 127.0.0.1:8787
-#   RELAY_IMAGE  image to run, e.g. a mirror or a pinned version
+#   RELAY_BIND       listen address on the host, default 127.0.0.1:8787
+#   RELAY_IMAGE      image to run, e.g. a mirror or a pinned version
+#   TRUSTED_PROXIES  CIDRs, comma or space separated, whose X-Forwarded-For
+#                    is read for the client address; default 172.30.87.1/32,
+#                    the gateway of the network below, which the host's
+#                    reverse proxy connects from; empty trusts none
 services:
   relay:
     image: ${RELAY_IMAGE:-ghcr.io/arcdent/clauderc-relay:latest}
     restart: unless-stopped
     environment:
       PUBLIC_URL: ${PUBLIC_URL:?请在 .env 里设置 PUBLIC_URL，例如 wss://relay.example.com}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES-172.30.87.1/32}
     ports:
       - ${RELAY_BIND:-127.0.0.1:8787}:8787
     volumes:
@@ -20,6 +25,14 @@ services:
       start_period: 10s
       start_interval: 1s
       retries: 3
+
+# A fixed subnet keeps the gateway address in TRUSTED_PROXIES stable.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.87.0/24
+          gateway: 172.30.87.1
 
 volumes:
   data:

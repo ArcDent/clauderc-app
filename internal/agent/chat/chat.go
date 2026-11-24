@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"clauderc/internal/agent"
@@ -104,21 +105,81 @@ func (h *Handler) hold(ctx context.Context, id string) (func(), error) {
 // types into an attach of the main pool.
 const wakeLinger = time.Second
 
+type openKind int
+
+const (
+	openChat openKind = iota
+	openAgentChat
+	openTerm
+)
+
+// openAttempt tracks an in-flight chat.open or term.open so ClientGone,
+// AllClientsGone or a matching close cancels it before it can register a
+// subscription.
+type openAttempt struct {
+	kind     openKind
+	client   string
+	id       string // short session id, or agentKey for openAgentChat
+	cancel   context.CancelFunc
+	canceled bool
+}
+
 // Handler implements agent.Handler and agent.ClientTracker for chats.
 type Handler struct {
 	opts  Options
 	pool  *attach.Pool
 	wakes *attach.Pool // see hold
 
-	mu     sync.Mutex
-	chats  map[string]*session   // by short session id
-	agents map[string]*agentChat // by agentKey
-	terms  map[string]*termView  // by short session id
-	closed bool
+	subSeq atomic.Int64
+	// sendDedup deduplicates chat.send requests carrying ClientReqID within 10 minutes.
+	sendDedup *agent.Dedup[protocol.ChatSendResponse]
+
+	mu      sync.Mutex
+	chats   map[string]*session   // by short session id
+	agents  map[string]*agentChat // by agentKey
+	terms   map[string]*termView  // by short session id
+	opening map[*openAttempt]struct{}
+	// sending holds, by short session id, the chat.send under way (see
+	// lockSend); autoResuming serializes chat.autoResume per session;
+	// driving counts the operations of withTerm under way.
+	sending      map[string]chan struct{}
+	autoResuming map[string]chan struct{}
+	driving      map[string]int
+	closed       bool
 
 	resumes    *resumes
 	stopResume context.CancelFunc
 	resumeDone chan struct{}
+	// bg counts the state polls of open chats (see statePolls) and the
+	// automatic messages being sent; Close waits for them.
+	bg sync.WaitGroup
+}
+
+func (h *Handler) nextSubID() string {
+	return "sub-" + strconv.FormatInt(h.subSeq.Add(1), 10)
+}
+
+func (h *Handler) beginOpen(ctx context.Context, kind openKind, client, id string) (context.Context, *openAttempt, func()) {
+	octx, cancel := context.WithCancel(ctx)
+	a := &openAttempt{kind: kind, client: client, id: id, cancel: cancel}
+	h.mu.Lock()
+	closed := h.closed
+	if closed {
+		a.canceled = true
+	} else {
+		h.opening[a] = struct{}{}
+	}
+	h.mu.Unlock()
+	if closed {
+		cancel()
+	}
+	done := func() {
+		h.mu.Lock()
+		delete(h.opening, a)
+		h.mu.Unlock()
+		cancel()
+	}
+	return octx, a, done
 }
 
 // New returns a Handler; call Close when done.
@@ -150,7 +211,10 @@ func New(opts Options) *Handler {
 	}
 	wake := opts.Attach
 	wake.Linger = wakeLinger
-	h := &Handler{opts: opts, pool: attach.NewPool(opts.Attach), wakes: attach.NewPool(wake), chats: map[string]*session{}, agents: map[string]*agentChat{}, terms: map[string]*termView{}}
+	h := &Handler{opts: opts, pool: attach.NewPool(opts.Attach), wakes: attach.NewPool(wake),
+		sendDedup: agent.NewDedup[protocol.ChatSendResponse](agent.DefaultDedupTTL, opts.Now),
+		chats:     map[string]*session{}, agents: map[string]*agentChat{}, terms: map[string]*termView{},
+		opening: map[*openAttempt]struct{}{}, sending: map[string]chan struct{}{}, autoResuming: map[string]chan struct{}{}, driving: map[string]int{}}
 	h.resumes = loadResumes(opts.ResumeFile)
 	ctx, cancel := context.WithCancel(context.Background())
 	h.stopResume, h.resumeDone = cancel, make(chan struct{})
@@ -191,9 +255,9 @@ func (h *Handler) Handle(ctx context.Context, req protocol.Envelope) protocol.En
 			return failWith(req, errBadRequest)
 		}
 		if body.AgentID != "" {
-			h.leaveAgent(req.Client, agentKey(body.SessionID, body.AgentID))
+			h.leaveAgent(req.Client, agentKey(body.SessionID, body.AgentID), body.SubID)
 		} else {
-			h.leave(req.Client, body.SessionID)
+			h.leave(req.Client, body.SessionID, body.SubID)
 		}
 		return agent.Reply(req, struct{}{})
 	case protocol.MethodChatSend:
@@ -258,12 +322,11 @@ func (h *Handler) open(ctx context.Context, req protocol.Envelope) protocol.Enve
 	if body.AgentID != "" {
 		return h.openAgent(ctx, req, body)
 	}
-	target, err := h.lookup(ctx, body.SessionID)
-	if err != nil {
-		return failWith(req, err)
-	}
-
 	if body.Before > 0 {
+		target, err := h.lookup(ctx, body.SessionID)
+		if err != nil {
+			return failWith(req, err)
+		}
 		// An older page; the chat's subscription is unchanged.
 		var items []transcript.Item
 		var more bool
@@ -273,10 +336,22 @@ func (h *Handler) open(ctx context.Context, req protocol.Envelope) protocol.Enve
 		return agent.Reply(req, protocol.ChatOpenResponse{Items: toProtocol(items), HasMore: more})
 	}
 
+	octx, attempt, finish := h.beginOpen(ctx, openChat, req.Client, body.SessionID)
+	defer finish()
+	target, err := h.lookup(octx, body.SessionID)
+	if err != nil {
+		return failWith(req, err)
+	}
+
+	subID := h.nextSubID()
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
 		return agent.Fail(req, protocol.CodeInternal, "目标机程序正在退出，请稍后重试")
+	}
+	if attempt.canceled {
+		h.mu.Unlock()
+		return agent.Fail(req, protocol.CodeInternal, "请求已取消")
 	}
 	s := h.chats[target.ID]
 	if s == nil {
@@ -284,26 +359,37 @@ func (h *Handler) open(ctx context.Context, req protocol.Envelope) protocol.Enve
 		h.chats[target.ID] = s
 	}
 	s.mu.Lock()
-	s.clients[req.Client] = true
+	s.clients[req.Client] = subID
 	s.target = target
 	s.mu.Unlock()
 	h.mu.Unlock()
 
-	return agent.Reply(req, s.snapshot())
+	return agent.Reply(req, s.snapshot(subID))
 }
 
-// leave drops client from the chat of session id, ending the chat when it
-// was the last one.
-func (h *Handler) leave(client, id string) {
+// leave drops client from the chat of session id when subID matches (or is
+// empty), ending the chat when it was the last one. An empty subID also
+// cancels any in-flight open of this client for this session.
+func (h *Handler) leave(client, id, subID string) {
 	h.mu.Lock()
+	if subID == "" {
+		for a := range h.opening {
+			if a.kind == openChat && a.client == client && a.id == id {
+				a.canceled = true
+				a.cancel()
+			}
+		}
+	}
 	s := h.chats[id]
 	var stop *session
 	if s != nil {
 		s.mu.Lock()
-		delete(s.clients, client)
-		if len(s.clients) == 0 {
-			delete(h.chats, id)
-			stop = s
+		if cur, ok := s.clients[client]; ok && (subID == "" || cur == subID) {
+			delete(s.clients, client)
+			if len(s.clients) == 0 {
+				delete(h.chats, id)
+				stop = s
+			}
 		}
 		s.mu.Unlock()
 	}
@@ -316,6 +402,12 @@ func (h *Handler) leave(client, id string) {
 // ClientGone implements agent.ClientTracker.
 func (h *Handler) ClientGone(client string) {
 	h.mu.Lock()
+	for a := range h.opening {
+		if a.client == client {
+			a.canceled = true
+			a.cancel()
+		}
+	}
 	var stops []*session
 	for id, s := range h.chats {
 		s.mu.Lock()
@@ -352,6 +444,10 @@ func (h *Handler) ClientGone(client string) {
 // AllClientsGone implements agent.ClientTracker.
 func (h *Handler) AllClientsGone() {
 	h.mu.Lock()
+	for a := range h.opening {
+		a.canceled = true
+		a.cancel()
+	}
 	chats, agents, terms := h.chats, h.agents, h.terms
 	h.chats, h.agents, h.terms = map[string]*session{}, map[string]*agentChat{}, map[string]*termView{}
 	h.mu.Unlock()
@@ -374,8 +470,38 @@ func (h *Handler) Close() {
 	h.stopResume()
 	<-h.resumeDone
 	h.AllClientsGone()
+	// An automatic message being sent may still use the attaches.
+	h.bg.Wait()
 	h.pool.Close()
 	h.wakes.Close()
+}
+
+// statePolls runs poll every StateInterval on a goroutine of its own until
+// ctx ends, and signals on the returned channel after each run: a slow
+// `claude agents` or usage request holds up neither a chat's transcript
+// polls nor its stop. It is started where the chat is added, under h.mu
+// and not once closed, so Close's wait counts it.
+func (h *Handler) statePolls(ctx context.Context, poll func(context.Context)) <-chan struct{} {
+	polled := make(chan struct{}, 1)
+	h.bg.Add(1)
+	go func() {
+		defer h.bg.Done()
+		tick := time.NewTicker(h.opts.StateInterval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+			poll(ctx)
+			select {
+			case polled <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	return polled
 }
 
 // openFollower opens the session's transcript, or returns nil while there
@@ -446,9 +572,13 @@ type session struct {
 	sessionID string
 	cancel    context.CancelFunc
 	done      chan struct{}
+	// pushMu serializes snapshots and pushes so rev orders them strictly;
+	// taken before mu.
+	pushMu sync.Mutex
 
 	mu       sync.Mutex
-	clients  map[string]bool
+	clients  map[string]string // client -> subID
+	rev      int64
 	follower *transcript.Follower
 	// target is the session as claude last reported it.
 	target discovery.Target
@@ -491,13 +621,14 @@ func (h *Handler) newSession(t discovery.Target) *session {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &session{
 		h: h, id: t.ID, sessionID: t.SessionID, cancel: cancel, done: make(chan struct{}),
-		clients:  map[string]bool{},
+		clients:  map[string]string{},
+		rev:      1,
 		follower: openFollower(h.opts.Source.ClaudeDir, t.SessionID),
 		target:   t,
 	}
 	s.status, s.pending = s.compute()
 	s.tasks.read(h.taskDir(t.SessionID))
-	go s.run(ctx)
+	go s.run(ctx, h.statePolls(ctx, s.pollState))
 	return s
 }
 
@@ -535,17 +666,27 @@ func (s *session) compute() (protocol.ChatStatus, *protocol.Pending) {
 	return status, pending
 }
 
-// snapshot is the chat.open answer for the latest page.
-func (s *session) snapshot() protocol.ChatOpenResponse {
+// snapshot is the chat.open answer for the latest page. It does not update
+// s.status or s.pending, so a second phone opening while a change arrived
+// never suppresses the push to phones already watching.
+func (s *session) snapshot(subID string) protocol.ChatOpenResponse {
+	s.pushMu.Lock()
+	defer s.pushMu.Unlock()
+	s.switchTranscriptLocked()
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.status, s.pending = s.compute()
+	status, pending := s.compute()
+	rev := s.rev
 	var items []transcript.Item
 	var more bool
 	if s.follower != nil {
 		items, more = s.follower.Page(0, protocol.ChatPageSize)
 	}
-	return protocol.ChatOpenResponse{Items: toProtocol(items), HasMore: more, ChatStatus: s.status, Pending: s.pending, Tasks: s.tasks.current()}
+	tasks := s.tasks.current()
+	s.mu.Unlock()
+	return protocol.ChatOpenResponse{
+		Items: toProtocol(items), HasMore: more, ChatStatus: status, Pending: pending, Tasks: tasks,
+		Rev: rev, SubID: subID,
+	}
 }
 
 func (s *session) stop() {
@@ -554,18 +695,19 @@ func (s *session) stop() {
 	s.mu.Lock()
 	attached := s.attached
 	s.attached = false
+	s.conn = nil
 	s.mu.Unlock()
 	if attached {
 		s.h.pool.Release(s.id)
 	}
 }
 
-func (s *session) run(ctx context.Context) {
+// run polls the chat until ctx ends; polled signals each state poll done
+// apart (see statePolls).
+func (s *session) run(ctx context.Context, polled <-chan struct{}) {
 	defer close(s.done)
 	poll := time.NewTicker(s.h.opts.PollInterval)
 	defer poll.Stop()
-	state := time.NewTicker(s.h.opts.StateInterval)
-	defer state.Stop()
 	screen := time.NewTicker(screenInterval)
 	defer screen.Stop()
 	s.ensureAttach(ctx)
@@ -576,12 +718,13 @@ func (s *session) run(ctx context.Context) {
 		case <-poll.C:
 			s.pollTranscript()
 			s.pollTasks()
-		case <-state.C:
-			s.pollState(ctx)
+		case <-polled:
 			s.ensureAttach(ctx)
+			s.pollTranscript()
+			s.pollTasks()
 			s.pollDialog()
 		case <-screen.C:
-			s.pollScreen()
+			s.pollScreen(ctx)
 		}
 		s.pushChanges()
 	}
@@ -592,15 +735,26 @@ func (s *session) run(ctx context.Context) {
 // works. A screen without the status line is taken for a frame caught
 // mid-draw and keeps what the last one showed: once the turn ends,
 // compute drops them anyway.
-func (s *session) pollScreen() {
+func (s *session) pollScreen(ctx context.Context) {
 	s.mu.Lock()
 	conn := s.conn
 	s.mu.Unlock()
+	if conn != nil && conn.Ended() {
+		s.ensureAttach(ctx)
+		return
+	}
 	if conn == nil {
 		return
 	}
+	driven := s.h.driven(s.id)
 	lines := conn.View().Lines
-	s.watchRewind(strings.Join(lines, "\n"))
+	// chat.rewind takes its messages away itself, and a screen of it would
+	// only mislead the watch afterwards.
+	if driven || s.h.driven(s.id) {
+		s.rw = rewindWatch{}
+	} else {
+		s.watchRewind(strings.Join(lines, "\n"))
+	}
 	// A mode changed on the session itself, such as by /plan, shows in
 	// its status line.
 	if mode, ok := attach.ParseMode(strings.Join(lines, "\n")); ok {
@@ -623,13 +777,54 @@ func (s *session) pollScreen() {
 	s.mu.Unlock()
 }
 
+// switchTranscriptLocked switches the open chat to a new transcript when
+// /clear replaced the Claude Code session id, pushing a reset page to
+// every watching phone. s.pushMu must be held.
+func (s *session) switchTranscriptLocked() bool {
+	s.mu.Lock()
+	targetSID := s.target.SessionID
+	curSID := s.sessionID
+	s.mu.Unlock()
+	if targetSID == "" || targetSID == curSID {
+		return false
+	}
+	nf := openFollower(s.h.opts.Source.ClaudeDir, targetSID)
+	var items []transcript.Item
+	if nf != nil {
+		items, _ = nf.Page(0, protocol.ChatPageSize)
+	}
+	s.mu.Lock()
+	s.sessionID = targetSID
+	s.follower = nf
+	s.limitRead = false
+	s.limitReset = time.Time{}
+	s.limitFor = time.Time{}
+	s.activity, s.partial = "", ""
+	s.rev++
+	rev := s.rev
+	s.mu.Unlock()
+	s.pushAll(protocol.EventChatItems, protocol.ChatItemsEvent{
+		SessionID: s.id,
+		Items:     toProtocol(items),
+		Rev:       rev,
+		Reset:     true,
+	})
+	return true
+}
+
 func (s *session) pollTranscript() {
+	s.pushMu.Lock()
+	defer s.pushMu.Unlock()
+	if s.switchTranscriptLocked() {
+		return
+	}
 	s.mu.Lock()
 	f := s.follower
+	sid := s.sessionID
 	s.mu.Unlock()
 	var items []transcript.Item
 	if f == nil {
-		f = openFollower(s.h.opts.Source.ClaudeDir, s.sessionID)
+		f = openFollower(s.h.opts.Source.ClaudeDir, sid)
 		if f == nil {
 			return
 		}
@@ -644,21 +839,33 @@ func (s *session) pollTranscript() {
 		}
 	}
 	if len(items) > 0 {
-		s.pushAll(protocol.EventChatItems, protocol.ChatItemsEvent{SessionID: s.id, Items: toProtocol(items)})
+		s.mu.Lock()
+		s.rev++
+		rev := s.rev
+		s.mu.Unlock()
+		s.pushAll(protocol.EventChatItems, protocol.ChatItemsEvent{SessionID: s.id, Items: toProtocol(items), Rev: rev})
 	}
 }
 
 // pollTasks pushes the session's task list when it changed. The list goes
 // by the Claude Code session, which /clear replaces.
 func (s *session) pollTasks() {
+	s.pushMu.Lock()
+	defer s.pushMu.Unlock()
 	s.mu.Lock()
 	id := s.target.SessionID
 	s.mu.Unlock()
 	if tasks, changed := s.tasks.read(s.h.taskDir(id)); changed {
-		s.pushAll(protocol.EventChatTasks, protocol.ChatTasksEvent{SessionID: s.id, Tasks: tasks})
+		s.mu.Lock()
+		s.rev++
+		rev := s.rev
+		s.mu.Unlock()
+		s.pushAll(protocol.EventChatTasks, protocol.ChatTasksEvent{SessionID: s.id, Tasks: tasks, Rev: rev})
 	}
 }
 
+// pollState reads the session's state and the reset time of its limit; it
+// runs apart from run (see statePolls).
 func (s *session) pollState(ctx context.Context) {
 	s.readLimitReset(ctx)
 	t, err := s.h.lookup(ctx, s.id)
@@ -704,16 +911,20 @@ const offInputPolls = 2
 // and its transcript shows nothing pending, and counts the polls at which
 // a running session shows neither its input box nor a known dialog. A
 // panel left open is such a screen, and Claude Code reports the session
-// done, not blocked, meanwhile (test/e2e/claude TestTerminal).
+// done, not blocked, meanwhile (test/e2e/claude TestTerminal). A panel an
+// operation of the agent opens does not count.
 func (s *session) pollDialog() {
 	s.mu.Lock()
 	conn, target, f := s.conn, s.target, s.follower
 	s.mu.Unlock()
+	if conn != nil && conn.Ended() {
+		conn = nil
+	}
 	var d *attach.Dialog
 	off := false
 	if f == nil || f.Pending(target.Blocked()) == nil {
 		d = screenDialog(conn, target)
-		off = d == nil && conn != nil && target.Running && offInput(conn.View())
+		off = d == nil && conn != nil && target.Running && !s.h.driven(s.id) && offInput(conn.View())
 	}
 	s.mu.Lock()
 	s.dialog = d
@@ -751,22 +962,35 @@ func offInput(v attach.View) bool {
 }
 
 // ensureAttach starts the hidden attach of a running session in the
-// background, so typing later does not wait for it.
+// background, or replaces it when its process has exited.
 func (s *session) ensureAttach(ctx context.Context) {
 	s.mu.Lock()
-	if s.attached || s.attaching || !s.target.Running {
+	if s.attaching || !s.target.Running {
 		s.mu.Unlock()
 		return
 	}
+	releaseOld := false
+	if s.attached {
+		if s.conn == nil || !s.conn.Ended() {
+			s.mu.Unlock()
+			return
+		}
+		s.attached = false
+		s.conn = nil
+		releaseOld = true
+	}
 	s.attaching = true
 	s.mu.Unlock()
+	if releaseOld {
+		s.h.pool.Release(s.id)
+	}
 	go func() {
 		conn, err := s.h.pool.Acquire(ctx, s.id)
 		s.mu.Lock()
 		s.attaching = false
 		keep := err == nil && ctx.Err() == nil
-		s.attached = s.attached || keep
 		if keep {
+			s.attached = true
 			s.conn = conn
 		}
 		s.mu.Unlock()
@@ -788,19 +1012,33 @@ func (s *session) ensureAttach(ctx context.Context) {
 	}()
 }
 
-// pushChanges sends chat.state and chat.pending when they changed.
+// pushChanges sends chat.state and chat.pending when they changed. The
+// poll and an operation such as chat.setPermissionMode may call it at
+// once; each sends before the next works them out, so what one worked out
+// earlier never reaches the phones after what another did later.
 func (s *session) pushChanges() {
+	s.pushMu.Lock()
+	defer s.pushMu.Unlock()
 	s.mu.Lock()
 	status, pending := s.compute()
 	statusChanged := !sameStatus(status, s.status)
 	pendingChanged := pendingID(pending) != pendingID(s.pending)
 	s.status, s.pending = status, pending
-	s.mu.Unlock()
+	var stateRev, pendingRev int64
 	if statusChanged {
-		s.pushAll(protocol.EventChatState, protocol.ChatStateEvent{SessionID: s.id, ChatStatus: status})
+		s.rev++
+		stateRev = s.rev
 	}
 	if pendingChanged {
-		s.pushAll(protocol.EventChatPending, protocol.ChatPendingEvent{SessionID: s.id, Pending: pending})
+		s.rev++
+		pendingRev = s.rev
+	}
+	s.mu.Unlock()
+	if statusChanged {
+		s.pushAll(protocol.EventChatState, protocol.ChatStateEvent{SessionID: s.id, ChatStatus: status, Rev: stateRev})
+	}
+	if pendingChanged {
+		s.pushAll(protocol.EventChatPending, protocol.ChatPendingEvent{SessionID: s.id, Pending: pending, Rev: pendingRev})
 	}
 }
 

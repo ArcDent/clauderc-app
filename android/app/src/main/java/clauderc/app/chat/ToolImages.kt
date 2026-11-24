@@ -2,14 +2,17 @@ package clauderc.app.chat
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,10 +29,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,9 +48,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -51,17 +62,20 @@ import androidx.compose.ui.unit.sp
 import clauderc.app.protocol.ToolImage
 import clauderc.app.ui.components.Spinner
 import clauderc.app.ui.components.SymbolButton
+import clauderc.app.ui.components.SymbolButtonFrame
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.Symbols
+import clauderc.app.ui.theme.styled
 import java.util.Base64
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
-/** Opens a picture in the viewer; [from] is where its thumbnail sits on screen, to grow from. */
-typealias OpenImage = (image: ToolImage, from: Rect?) -> Unit
+/** Opens a picture in the viewer. */
+typealias OpenImage = (Viewing) -> Unit
 
-private class Placed { var coords: LayoutCoordinates? = null }
+internal class Placed { var coords: LayoutCoordinates? = null }
 
 /** A thumbnail's decoded bitmap, shared by the chat and the viewer. */
 @Composable
@@ -85,7 +99,7 @@ fun ToolThumb(image: ToolImage, maxHeight: Dp, widthShare: Float, onOpen: OpenIm
         .clip(shape)
         .background(if (Clauderc.look.cards) c.panel else c.surface)
         .border(if (Clauderc.look.cards) 1.5.dp else 1.dp, if (Clauderc.look.cards) c.ink else c.line, shape)
-        .clickable(role = Role.Button, onClickLabel = "查看 ${image.name ?: "图片"}") { onOpen(image, placed.coords?.takeIf { it.isAttached }?.boundsInRoot()) }
+        .clickable(role = Role.Button, onClickLabel = "查看 ${image.name ?: "图片"}") { onOpen(Viewing(image, placed.coords?.takeIf { it.isAttached }?.boundsInRoot())) }
         .testTag("toolThumb")
     if (image.thumb == null) {
         Column(modifier.then(tile).size(148.dp, 96.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -118,16 +132,48 @@ fun ShownImages(images: List<ToolImage>, onOpen: OpenImage) {
     }
 }
 
-/** The picture in the viewer and where its thumbnail was. */
-class Viewing(val image: ToolImage, val from: Rect?)
+/**
+ * The picture in the viewer and where its thumbnail was. [local] is the picture itself when the phone has it, as
+ * for a picture in the user's own message: nothing is fetched and it can be saved at once.
+ */
+class Viewing(val image: ToolImage, val from: Rect?, val local: ByteArray? = null)
 
 /**
- * The picture full screen on black. It grows from its thumbnail as the black fades in and shrinks
- * back when closed. Until the picture itself is in, the thumbnail stands in for it, with
- * 「正在取原图」 under it; without a thumbnail that line spins in the middle.
+ * [viewing] in the viewer over a chat page, with what [state] has of it: its bytes, from the phone or from
+ * chat.image, and how saving it goes. [actions] hears which picture the viewer shows, until it closes, and saves it.
  */
 @Composable
-fun ImageViewer(viewing: Viewing, whole: ByteArray?, failed: Boolean, onClosed: () -> Unit) {
+internal fun ChatImageViewer(viewing: Viewing, state: ChatUiState, actions: ChatActions, onClosed: () -> Unit) {
+    val id = viewing.image.id
+    DisposableEffect(id) {
+        actions.onViewer(id)
+        onDispose { actions.onViewer(null) }
+    }
+    ImageViewer(
+        viewing, viewing.local ?: state.wholeImages[id]?.bytes, id in state.failedImages,
+        saving = id in state.savingImages,
+        saved = id in state.savedImages,
+        onSave = { actions.onSaveImage(viewing.image, viewing.local) },
+        onClosed = onClosed,
+    )
+}
+
+/**
+ * The picture full screen on black, which takes every touch: a tap anywhere but its buttons closes it. It
+ * grows from its thumbnail as the black fades in and shrinks back when closed. Until the picture's bytes
+ * are [whole], the thumbnail stands in for it, with 「正在取原图」 under it; without a thumbnail that line
+ * spins in the middle. The save button on the right of the bar saves the bytes (see [SaveButton]).
+ */
+@Composable
+fun ImageViewer(
+    viewing: Viewing,
+    whole: ByteArray?,
+    failed: Boolean,
+    saving: Boolean = false,
+    saved: Boolean = false,
+    onSave: () -> Unit = {},
+    onClosed: () -> Unit,
+) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val img = viewing.image
@@ -135,13 +181,16 @@ fun ImageViewer(viewing: Viewing, whole: ByteArray?, failed: Boolean, onClosed: 
     val shown = remember(viewing) { Animatable(0f) }
     LaunchedEffect(viewing) { shown.animateTo(1f, Motion.enter()) }
     val close: () -> Unit = { scope.launch { shown.animateTo(0f, Motion.enter()); onClosed() } }
+    val tapped by rememberUpdatedState(close)
     BackHandler(onBack = close)
     val thumb = rememberThumb(img)
-    val full = if (whole != null) rememberChatImage("whole:" + img.id, ImageCache.whole) { whole } else null
+    // The phone's own bytes are a key of their own: a picture id is unique only within its session.
+    val full = if (whole != null) rememberChatImage(viewing.local ?: ("whole:" + img.id), ImageCache.whole) { whole } else null
     val fullIn by animateFloatAsState(if (full != null) 1f else 0f, Motion.enter(), label = "whole")
     val ratio = thumbPixels(img)?.let { (w, h) -> w.toFloat() / h } ?: (full ?: thumb)?.let { it.width.toFloat() / it.height }
     val radius = with(LocalDensity.current) { 12.dp.toPx() }
-    Box(Modifier.fillMaxSize().testTag("imageViewer")) {
+    // Nothing under the viewer gets a touch, such as the permission panel's buttons.
+    Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { tapped() } }.testTag("imageViewer")) {
         Box(Modifier.fillMaxSize().graphicsLayer { alpha = shown.value }.background(c.camera))
         Column(Modifier.fillMaxSize()) {
             Row(
@@ -150,10 +199,12 @@ fun ImageViewer(viewing: Viewing, whole: ByteArray?, failed: Boolean, onClosed: 
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 SymbolButton(Symbols.Close, "关闭", onClick = close, tint = c.onCamera)
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                // Without a file name the format is the title, so the line under it leaves the format out.
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(img.name ?: imageType(img.mediaType), fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.mono, color = c.onCamera, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(imageLabel(img), fontSize = Clauderc.fontSizes.caption, color = c.onCamera.copy(alpha = 0.6f))
                 }
+                SaveButton(ready = whole != null, saving = saving, saved = saved, onSave = onSave)
             }
             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).navigationBarsPadding(), contentAlignment = Alignment.Center) {
                 if (ratio != null && (thumb != null || full != null)) {
@@ -191,12 +242,57 @@ fun ImageViewer(viewing: Viewing, whole: ByteArray?, failed: Boolean, onClosed: 
                     }
                 }
                 val inMiddle = thumb == null
+                // Goes once the bytes are in, even ones that cannot be decoded.
                 ViewerNote(
-                    full == null || failed, failed, inMiddle,
+                    whole == null, failed, inMiddle,
                     { shown.value },
                     Modifier.align(if (inMiddle) Alignment.Center else Alignment.BottomCenter),
                 )
             }
+        }
+    }
+}
+
+/**
+ * The viewer's save button (.v-save), shaped as its close button. Until the picture's bytes are [ready] it is
+ * dimmed to 38% of onCamera and does nothing, then brightens (durS). A tap shrinks the download icon away for an
+ * 18dp spinner while [saving]; once [saved] the spinner fades, a tick draws itself and springs to size, and the
+ * button stays so, done with, until the viewer closes. A failed save fades the spinner and grows the download
+ * icon back. The tick is the code block copy button's (TickSwap).
+ */
+@Composable
+private fun SaveButton(ready: Boolean, saving: Boolean, saved: Boolean, onSave: () -> Unit) {
+    val c = Clauderc.colors
+    val m = Clauderc.motion
+    val tint by animateColorAsState(if (ready || saved) c.onCamera else c.onCamera.copy(alpha = 0.38f), tween(m.durS, easing = m.easeEmph), label = "save")
+    val swap = remember { TickSwap(iconShown = !saving && !saved, ticked = saved) }
+    val late = (m.durS * 0.5f).toInt()
+    val phase = if (saved) 2 else if (saving) 1 else 0
+    var last by remember { mutableIntStateOf(phase) }
+    LaunchedEffect(phase) {
+        val from = last
+        last = phase
+        when {
+            phase == 2 -> coroutineScope {
+                launch { swap.iconOut(m) }
+                swap.tickIn(m, late)
+            }
+            phase == 1 -> swap.iconOut(m)
+            from != 0 -> swap.back(m, iconFrom = 0.6f)
+        }
+    }
+    SymbolButtonFrame(
+        onClick = onSave,
+        modifier = Modifier.semantics {
+            contentDescription = "保存到相册"
+            if (saved) stateDescription = "已保存"
+        },
+        enabled = ready && !saving && !saved,
+        tint = c.onCamera,
+    ) {
+        swap.Icons(Symbols.Download.styled, tint, iconSize = 24.dp, tickSize = 24.dp)
+        AnimatedVisibility(saving, enter = fadeIn(tween(m.durS, late, m.easeEmph)), exit = fadeOut(tween(m.durS, easing = m.easeEmphIn))) {
+            Spinner(size = 18.dp, color = tint)
         }
     }
 }

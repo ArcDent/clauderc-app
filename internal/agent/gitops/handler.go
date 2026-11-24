@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"clauderc/internal/agent"
 	"clauderc/internal/agent/discovery"
@@ -15,11 +17,17 @@ import (
 	"clauderc/internal/protocol"
 )
 
+// DefaultListTimeout bounds the session list read of dir.busy, its
+// `claude agents` runs included, as for the session list itself.
+const DefaultListTimeout = 30 * time.Second
+
 // Options configures a Handler.
 type Options struct {
 	Git Git
 	// Source lists the sessions dir.busy looks at.
 	Source discovery.Source
+	// ListTimeout defaults to DefaultListTimeout.
+	ListTimeout time.Duration
 	// Logger receives the errors behind internal failures, which the
 	// phone only sees as a fixed message; nil discards them.
 	Logger *slog.Logger
@@ -35,6 +43,9 @@ type Handler struct {
 func New(opts Options) *Handler {
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
+	}
+	if opts.ListTimeout <= 0 {
+		opts.ListTimeout = DefaultListTimeout
 	}
 	return &Handler{opts: opts}
 }
@@ -145,10 +156,16 @@ func withDir(req protocol.Envelope, body any, dir *string, do func() (any, error
 // on a checkout of its own, so the checkout it came from is not busy. A
 // blocked session is settled against its transcript first, as for the
 // session list (design D5). Symbolic links are resolved on both sides so
-// /tmp and /private/tmp compare equal.
+// /tmp and /private/tmp compare equal. A list read that runs past
+// ListTimeout fails with CodeTimeout.
 func (h *Handler) Busy(ctx context.Context, dir string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, h.opts.ListTimeout)
+	defer cancel()
 	targets, err := h.opts.Source.Targets(ctx)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			err = &protocol.Error{Code: protocol.CodeTimeout, Message: fmt.Sprintf("读取会话列表超过 %g 秒未完成", h.opts.ListTimeout.Seconds())}
+		}
 		return false, err
 	}
 	root := realPath(dir)

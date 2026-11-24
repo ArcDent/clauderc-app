@@ -52,6 +52,8 @@ private fun decodeFitting(b: ByteArray): ImageBitmap? {
 /** A chat picture, null until it is decoded. [key] identifies the picture, e.g. its base64 text. */
 @Composable
 fun rememberChatImage(key: Any, cache: ImageCache = ImageCache.shared, bytes: () -> ByteArray?): ImageBitmap? =
-    produceState(cache.peek(key), key) {
-        if (value == null) value = cache.load(key, bytes)
+    produceState(cache.peek(key), key, cache) {
+        val hit = cache.peek(key)
+        value = hit
+        if (hit == null) value = cache.load(key, bytes)
     }.value

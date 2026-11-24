@@ -66,6 +66,7 @@ data class SessionContext(val usedTokens: Int, val windowTokens: Int)
 data class SessionList(
     val sessions: List<Session> = emptyList(),
     val profiles: List<Profile> = emptyList(),
+    val rev: Long? = null,
 )
 
 /** One model setting of a new session, each backed by one environment variable of Claude Code. */
@@ -98,6 +99,8 @@ data class SessionCreateRequest(
     val trust: Boolean? = null,
     /** Start the session in a new git worktree of [cwd] by this name; letters, digits, 「.」「_」「-」 only. */
     val worktree: String? = null,
+    /** Deduplicates retries within 10 minutes on the agent. */
+    val clientReqId: String? = null,
 )
 
 @Serializable

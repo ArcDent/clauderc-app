@@ -30,8 +30,8 @@ import clauderc.app.ui.theme.Clauderc
 /**
  * .switch in each style. 清玻: a 48 × 28 pill, grey off and accent on, its white knob springing across
  * and stretching while pressed. 格栅: a square 44 × 24 outline whose square knob steps across, filled
- * solid when on. 贴纸: a 52 × 30 ink-outlined sticker on a hard shadow, accent when on, its ringed
- * knob tilting as it lands; it sinks onto its shadow while pressed.
+ * solid when on. 贴纸: a 52 × 30 ink-outlined sticker, accent when on, its ringed knob tilting as it
+ * lands; it shrinks to 94% the moment it is pressed and is back the moment it lets go.
  */
 @Composable
 fun Switch(on: Boolean, press: MutableInteractionSource) {
@@ -64,12 +64,14 @@ fun Switch(on: Boolean, press: MutableInteractionSource) {
             val fill by animateColorAsState(if (on) c.accent else c.card, tween(m.durS, easing = m.easeEmph), label = "track")
             val x by animateDpAsState(if (on) 22.dp else 0.dp, tween(m.durM, easing = m.easeSpring), label = "knob")
             val tilt by animateFloatAsState(if (on) -8f else 0f, tween(m.durM, easing = m.easeSpring), label = "tilt")
-            val sink by animateDpAsState(if (pressed) 3.dp else 0.dp, tween(m.durS, easing = m.easeEmph), label = "sink")
             Box(
                 Modifier
-                    .offset(y = sink)
+                    .graphicsLayer {
+                        scaleX = if (pressed) 0.94f else 1f
+                        scaleY = scaleX
+                    }
                     .size(52.dp, 30.dp)
-                    .sticker(fill, c.ink, 15.dp, drop = 3.dp - sink),
+                    .sticker(fill, c.ink, 15.dp),
             ) {
                 Box(
                     Modifier

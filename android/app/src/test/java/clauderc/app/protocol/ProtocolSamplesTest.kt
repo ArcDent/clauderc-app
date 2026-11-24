@@ -1,6 +1,7 @@
 package clauderc.app.protocol
 
 import java.io.File
+import java.lang.reflect.Modifier
 import java.time.Instant
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonArray
@@ -100,10 +101,16 @@ class ProtocolSamplesTest {
         "term.open.res" to TermScreen.serializer(),
         "term.key.req" to TermKeyRequest.serializer(),
         "term.key.res" to Empty.serializer(),
-        "term.close.req" to SessionIdRequest.serializer(),
+        "term.close.req" to TermCloseRequest.serializer(),
         "term.close.res" to Empty.serializer(),
         "term.screen.evt" to TermScreen.serializer(),
     )
+
+    /** Every code ErrorCode defines; an error in a sample must use one of them. */
+    private val errorCodes: Set<String> = ErrorCode::class.java.declaredFields
+        .filter { Modifier.isStatic(it.modifiers) && it.type == String::class.java }
+        .map { it.get(null) as String }
+        .toSet()
 
     private val testdata: File by lazy {
         val url = javaClass.classLoader!!.getResource("machines.list.req.json")
@@ -127,6 +134,7 @@ class ProtocolSamplesTest {
         val key = "${env.method}.${env.kind}"
         check(file.name.startsWith("$key.")) { "file name does not start with $key." }
         val serializer = bodies[key] ?: error("no Kotlin body type for $key")
+        env.error?.let { check(it.code in errorCodes) { "error code ${it.code} is not in ErrorCode" } }
         val reencodedBody = if (env.error == null && env.body != null) reencode(serializer, env.body) else env.body
         val out = env.copy(body = reencodedBody).encode()
         assertSameFields(ProtocolJson.parseToJsonElement(raw), ProtocolJson.parseToJsonElement(out))
@@ -152,6 +160,10 @@ class ProtocolSamplesTest {
                 else -> continue // admin endpoints are used by the agent only
             }
             val raw = ProtocolJson.parseToJsonElement(file.readText())
+            if (status != null && status >= 400) {
+                val code = ProtocolJson.decodeFromJsonElement(ErrorBody.serializer(), raw).code
+                assertTrue("$name: error code $code is not in ErrorCode", code in errorCodes)
+            }
             assertSameFields(raw, reencode(serializer, raw), name)
             checked++
         }

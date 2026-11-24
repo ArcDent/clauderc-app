@@ -145,14 +145,19 @@ var (
 // text cleaned by cleanTyped and presses Enter; in a multi-select question,
 // where it goes along with the options, it presses Up instead. More than one
 // question, or a multi-select one, ends on a review page that Enter submits.
-func AnswerKeys(questions []protocol.Question, answers []protocol.Answer) ([]Step, error) {
+// The keys come in groups, one per question in turn, then the review page's
+// Enter alone, so the screen can be checked between them.
+func AnswerKeys(questions []protocol.Question, answers []protocol.Answer) ([][]Step, error) {
 	if len(questions) == 0 || len(answers) != len(questions) {
 		return nil, fmt.Errorf("%w: %d answers for %d questions", ErrAnswerCount, len(answers), len(questions))
 	}
-	var steps []Step
-	key := func(k []byte) { steps = append(steps, Step{Keys: k, Wait: keyWait}) }
+	var groups [][]Step
+	key := func(k []byte) {
+		groups[len(groups)-1] = append(groups[len(groups)-1], Step{Keys: k, Wait: keyWait})
+	}
 	review := len(questions) > 1
 	for qi, q := range questions {
+		groups = append(groups, nil)
 		a := answers[qi]
 		custom := cleanTyped(a.Custom)
 		for _, i := range a.Selected {
@@ -199,9 +204,10 @@ func AnswerKeys(questions []protocol.Question, answers []protocol.Answer) ([]Ste
 		}
 	}
 	if review {
+		groups = append(groups, nil)
 		key(keyEnter)
 	}
-	return steps, nil
+	return groups, nil
 }
 
 // lineBreaks turns line breaks into spaces.

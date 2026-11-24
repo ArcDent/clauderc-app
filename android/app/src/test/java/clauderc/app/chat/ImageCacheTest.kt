@@ -1,12 +1,18 @@
 package clauderc.app.chat
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -15,6 +21,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
 class ImageCacheTest {
+    @get:Rule val compose = createComposeRule()
     @Test fun decodesOnceAndReuses() = runTest(UnconfinedTestDispatcher()) {
         var decodes = 0
         var thread: String? = null
@@ -32,5 +39,21 @@ class ImageCacheTest {
         val cache = ImageCache(decode = { null })
         assertNull(cache.load("b") { byteArrayOf(0) })
         assertNull(cache.peek("b"))
+    }
+
+    @Test fun rememberChatImageSwitchesBitmapWhenKeyChanges() {
+        val red = android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.RED) }.asImageBitmap()
+        val green = android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.GREEN) }.asImageBitmap()
+        val cache = ImageCache(background = UnconfinedTestDispatcher(), decode = { b -> if (b[0] == 1.toByte()) red else green })
+        var key by mutableStateOf("a")
+        var bytes by mutableStateOf(byteArrayOf(1))
+        var shown: ImageBitmap? = null
+        compose.setContent { shown = rememberChatImage(key, cache) { bytes } }
+        compose.waitForIdle()
+        assertSame(red, shown)
+
+        compose.runOnUiThread { key = "b"; bytes = byteArrayOf(2) }
+        compose.waitForIdle()
+        assertSame("changing key must decode and show B, not keep A", green, shown)
     }
 }

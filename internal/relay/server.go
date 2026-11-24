@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -40,6 +42,9 @@ type Options struct {
 	// trigger rate limiting; defaults 10 per minute.
 	PairFailureLimit  int
 	PairFailureWindow time.Duration
+	// TrustedProxies are the networks besides loopback whose
+	// X-Forwarded-For names the rate limiting source.
+	TrustedProxies []netip.Prefix
 }
 
 // Server authenticates phones and agents and forwards envelopes between
@@ -59,13 +64,18 @@ type Server struct {
 	closed bool
 	agents map[string]*agentConn
 	apps   map[string]*appConn
+	// admitting holds a *sync.Mutex per machine id for admitAgent.
+	admitting sync.Map
 	// statusMu orders machine online and offline transitions, so each
 	// one's store write and broadcast finish before the next begins.
 	statusMu sync.Mutex
 
 	// Pairing codes live only in memory (design D4).
-	pairMu       sync.Mutex
-	pairCodes    map[string]time.Time // code -> expiry
+	pairMu    sync.Mutex
+	pairCodes map[string]time.Time // code -> expiry
+	// pairUsed keeps redeemed codes for PairCodeTTL, so a retry reads
+	// "already paired", not "invalid".
+	pairUsed     map[string]time.Time // code -> redeemed at
 	pairFailures map[string][]time.Time
 	// pairSweptAt is when every source in pairFailures was last pruned.
 	pairSweptAt time.Time
@@ -102,6 +112,7 @@ func NewServer(o Options) *Server {
 		apps:   map[string]*appConn{},
 
 		pairCodes:    map[string]time.Time{},
+		pairUsed:     map[string]time.Time{},
 		pairFailures: map[string][]time.Time{},
 	}
 	s.base, s.cancelAll = context.WithCancel(context.Background())
@@ -139,20 +150,23 @@ func (s *Server) Machines() []protocol.Machine {
 	out := make([]protocol.Machine, 0, len(stored))
 	for _, m := range stored {
 		online := false
+		connID := ""
 		if a, ok := s.agents[m.ID]; ok {
 			online = true
+			connID = a.connID
 			m = a.machine
 			m.LastSeenAt = a.peer.seen()
 		}
-		out = append(out, machineInfo(m, online))
+		out = append(out, machineInfo(m, online, connID))
 	}
 	return out
 }
 
-func machineInfo(m store.Machine, online bool) protocol.Machine {
+func machineInfo(m store.Machine, online bool, connID string) protocol.Machine {
 	return protocol.Machine{
 		ID: m.ID, Name: m.Name, Online: online, LastSeenAt: m.LastSeenAt,
 		AgentVersion: m.AgentVersion, ClaudeVersion: m.ClaudeVersion,
+		ConnID: connID,
 	}
 }
 
@@ -249,16 +263,67 @@ type peer struct {
 
 const sendQueue = 64
 
-// hijackRecorder keeps the TCP connection websocket.Accept hijacks.
+// wsWriteChunk is the max payload per WebSocket fragment when streaming a large
+// message, so control frames (Ping/Pong) can interleave cleanly between frames.
+const wsWriteChunk = 64 << 10
+
+// writeTimeout scales with message length (10 s base + 1 s per 64 KB, max 5 m)
+// so large uploads/downloads do not hit a fixed 10 s timeout on slow links.
+func writeTimeout(n int) time.Duration {
+	d := 10*time.Second + time.Duration(n/wsWriteChunk)*time.Second
+	return min(d, 5*time.Minute)
+}
+
+// writeMessage writes data as a text WebSocket message, fragmenting large
+// payloads through Writer so control frames can be sent between chunks.
+func writeMessage(ctx context.Context, conn *websocket.Conn, data []byte) error {
+	if len(data) <= wsWriteChunk {
+		return conn.Write(ctx, websocket.MessageText, data)
+	}
+	w, err := conn.Writer(ctx, websocket.MessageText)
+	if err != nil {
+		return err
+	}
+	for off := 0; off < len(data); off += wsWriteChunk {
+		if _, err := w.Write(data[off:min(off+wsWriteChunk, len(data))]); err != nil {
+			return err
+		}
+	}
+	return w.Close()
+}
+
+// activityConn wraps a hijacked TCP connection so every chunk read while
+// receiving a large message refreshes peer liveness.
+type activityConn struct {
+	net.Conn
+	onRead atomic.Pointer[func()]
+}
+
+func (c *activityConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if n > 0 {
+		if fn := c.onRead.Load(); fn != nil {
+			(*fn)()
+		}
+	}
+	return n, err
+}
+
+// hijackRecorder keeps the TCP connection websocket.Accept hijacks, wrapping it
+// in an activityConn so reads during a large message count as live traffic.
 type hijackRecorder struct {
 	http.ResponseWriter
-	raw net.Conn
+	raw *activityConn
 }
 
 func (h *hijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	c, brw, err := http.NewResponseController(h.ResponseWriter).Hijack()
-	h.raw = c
-	return c, brw, err
+	if err != nil {
+		return c, brw, err
+	}
+	ac := &activityConn{Conn: c}
+	h.raw = ac
+	return ac, brw, nil
 }
 
 // accept upgrades the request and starts the peer's writer and heartbeat;
@@ -273,6 +338,10 @@ func (s *Server) accept(w http.ResponseWriter, r *http.Request) *peer {
 	ctx, cancel := context.WithCancel(s.base)
 	p := &peer{s: s, conn: c, raw: hw.raw, ctx: ctx, cancel: cancel, out: make(chan []byte, sendQueue)}
 	p.touch()
+	if hw.raw != nil {
+		fn := p.touch
+		hw.raw.onRead.Store(&fn)
+	}
 	p.loops.Add(2)
 	go p.writeLoop()
 	go p.heartbeat()
@@ -315,15 +384,6 @@ func (p *peer) serve(handle func([]byte)) {
 	p.loops.Wait()
 }
 
-// send queues a message; a peer that cannot keep up is disconnected.
-func (p *peer) send(msg []byte) {
-	select {
-	case p.out <- msg:
-	default:
-		p.close(websocket.StatusTryAgainLater, "send queue full")
-	}
-}
-
 // writeLoop and heartbeat bound each operation with their own timeout, not
 // the peer context: cancelling a context mid-operation makes the websocket
 // library drop the connection before serve can send the close frame.
@@ -334,8 +394,8 @@ func (p *peer) writeLoop() {
 		case <-p.ctx.Done():
 			return
 		case msg := <-p.out:
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			err := p.conn.Write(ctx, websocket.MessageText, msg)
+			ctx, cancel := context.WithTimeout(context.Background(), writeTimeout(len(msg)))
+			err := writeMessage(ctx, p.conn, msg)
 			cancel()
 			if err != nil {
 				p.close(websocket.StatusInternalError, "write failed")
@@ -346,7 +406,8 @@ func (p *peer) writeLoop() {
 }
 
 // heartbeat pings every interval and drops the peer once nothing has been
-// heard for the timeout (design D2).
+// heard for the timeout (design D2). Bytes actively arriving as part of a
+// large message keep alive fresh so a slow upload is not killed as silent.
 func (p *peer) heartbeat() {
 	defer p.loops.Done()
 	t := time.NewTicker(p.s.opts.HeartbeatInterval)
@@ -362,6 +423,9 @@ func (p *peer) heartbeat() {
 		err := p.conn.Ping(ctx)
 		cancel()
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && time.Since(time.Unix(0, p.alive.Load())) < p.s.opts.HeartbeatTimeout {
+				continue
+			}
 			p.close(websocket.StatusGoingAway, "heartbeat timeout")
 			return
 		}
@@ -369,14 +433,28 @@ func (p *peer) heartbeat() {
 	}
 }
 
-// sendEnvelope encodes env and queues it.
+// sendEnvelope encodes env and queues it; a peer that cannot keep up is
+// disconnected.
 func (p *peer) sendEnvelope(env protocol.Envelope) {
+	if !p.trySend(env) {
+		p.close(websocket.StatusTryAgainLater, "send queue full")
+	}
+}
+
+// trySend encodes env and queues it, reporting false when the queue is
+// full. An envelope that cannot be encoded is logged and dropped.
+func (p *peer) trySend(env protocol.Envelope) bool {
 	raw, err := protocol.Encode(env)
 	if err != nil {
 		p.s.log.Error("encode envelope", "method", env.Method, "err", err)
-		return
+		return true
 	}
-	p.send(raw)
+	select {
+	case p.out <- raw:
+		return true
+	default:
+		return false
+	}
 }
 
 // readLoop calls handle for each text message until the connection ends.

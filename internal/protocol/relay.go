@@ -11,7 +11,8 @@ import "time"
 //
 //	400 invalidParams    malformed request body
 //	401 unauthenticated  missing or wrong enroll key / device token
-//	404 pairCodeInvalid  pairing code unknown or already used
+//	404 pairCodeInvalid  pairing code unknown, or redeemed over 5 minutes ago
+//	409 pairCodeUsed     pairing code already redeemed within the last 5 minutes
 //	410 pairCodeExpired  pairing code older than 5 minutes
 //	404 deviceNotFound   revoking a device id that is not paired
 //	429 rateLimited      more than 10 failed pairings from one source per minute
@@ -94,6 +95,9 @@ type Machine struct {
 	// last connection; empty when unknown.
 	AgentVersion  string `json:"agentVersion"`
 	ClaudeVersion string `json:"claudeVersion"`
+	// ConnID identifies the agent's live WebSocket connection; a fresh id
+	// is issued on every connect, and empty when offline or from older relays.
+	ConnID string `json:"connId,omitempty"`
 }
 
 // MachinesListResponse answers machines.list.

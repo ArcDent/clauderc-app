@@ -219,6 +219,43 @@ func TestSendPanelCommandNotDelivered(t *testing.T) {
 	}
 }
 
+// A permission prompt that comes up while a message is typed would take
+// its Enter and allow the tool: the screen is looked at once more before
+// Enter is pressed.
+func TestSendLooksAtTheScreenBeforeEnter(t *testing.T) {
+	const text = "先看一下 relay 的重连"
+	prompt := `\033[2J\033[H\033[?25l Bash command\r\n\r\n   rm -rf build\r\n\r\n Do you want to proceed?\r\n ❯ 1. Yes\r\n   2. No`
+	s := running()
+	// The prompt comes up as the paste ends, on its second ~.
+	s.opts = shellAttach(`printf '────────\r\n❯\302\240'; n=0; while :; do c=$(dd bs=1 count=1 2>/dev/null); [ -z "$c" ] && exit; printf '%s' "$c" >> "$FAKE_ATTACH_LOG"; if [ "$c" = "~" ]; then n=$((n+1)); [ $n -eq 2 ] && printf '` + prompt + `'; fi; done`)
+	f := newFixture(t, s)
+	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: text})
+	if res.Error == nil || res.Error.Code != protocol.CodeInvalidParams || res.Error.Message != "会话弹出了待确认，消息没有发出" {
+		t.Fatalf("error = %+v, want the prompt reported", res.Error)
+	}
+	log := f.keyLog()
+	if !strings.Contains(log, text) || strings.Contains(log, "\r") {
+		t.Errorf("keys %q: want the message typed and no Enter", log)
+	}
+	// The input box is not cleared then: the prompt would take the keys.
+	if _, after, _ := strings.Cut(log, text); strings.Contains(after, "\x15") {
+		t.Errorf("keys %q: want no Ctrl+U after the message", log)
+	}
+
+	// Echoed into the input box with no dialog, the message is sent.
+	s = running()
+	echo := echoAttach(`:`)
+	s.opts = func(o *chat.Options) { echo(o); o.DeliveryTimeout = 300 * time.Millisecond }
+	f = newFixture(t, s)
+	res = f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: text})
+	if res.Error != nil && res.Error.Code != protocol.CodeNotDelivered {
+		t.Fatalf("error = %+v", res.Error)
+	}
+	if log := f.keyLog(); !strings.HasSuffix(log, text+"\x1b[201~\r") {
+		t.Errorf("keys %q: want the message pasted, then Enter", log)
+	}
+}
+
 // A panel or dialog on screen takes typed keys, and its Enter acts on what
 // it has selected: nothing is typed then, a message or a panel command.
 func TestSendRefusedOffTheInput(t *testing.T) {

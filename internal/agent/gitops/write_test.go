@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"clauderc/internal/protocol"
 )
@@ -185,6 +187,147 @@ func TestSwitch(t *testing.T) {
 
 	for _, bad := range []string{"", "-b", "--orphan=x", "a..b", "with space"} {
 		wantCode(t, Git{}.Switch(ctx, s.a, bad), protocol.CodeInvalidParams)
+	}
+}
+
+// waitFile fails the test unless path appears within timeout.
+func waitFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not appear within %v", filepath.Base(path), timeout)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Two stages sent at once to one repository run one after the other, so
+// the second git add does not find index.lock taken.
+func TestStagesInOneRepositoryTakeTurns(t *testing.T) {
+	dir := newRepo(t)
+	commitFile(t, dir, "base.txt", "base\n", "base")
+	writeFile(t, filepath.Join(dir, "a.txt"), "a\n")
+	writeFile(t, filepath.Join(dir, "b.txt"), "b\n")
+	rec := t.TempDir()
+	t.Setenv("REC", rec)
+	// The stand-in notes when each git add starts and ends, and holds it open a while.
+	h := New(Options{Git: Git{Path: fakeGit(t, `if [ "$3" = add ]; then
+	echo "start $5" >>"$REC/log"
+	sleep 0.3
+	git "$@"; rc=$?
+	echo "end $5" >>"$REC/log"
+	exit $rc
+fi
+exec git "$@"
+`)}})
+	var reqs []protocol.Envelope
+	for _, name := range []string{"a.txt", "b.txt"} {
+		reqs = append(reqs, withBody(t, sampleRequest(t, "git.stage.req.json"), map[string]any{"dir": dir, "path": name}))
+	}
+	var wg sync.WaitGroup
+	for _, req := range reqs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if res := h.Handle(context.Background(), req); res.Error != nil {
+				t.Errorf("stage %s: %+v", req.Body, res.Error)
+			}
+		}()
+	}
+	wg.Wait()
+
+	raw, err := os.ReadFile(filepath.Join(rec, "log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	first, _ := strings.CutPrefix(lines[0], "start ")
+	if len(lines) != 4 || lines[1] != "end "+first || !strings.HasPrefix(lines[2], "start ") || lines[3] != "end "+strings.TrimPrefix(lines[2], "start ") {
+		t.Errorf("git add ran overlapping:\n%s", raw)
+	}
+	if staged := git(t, dir, "diff", "--cached", "--name-only"); staged != "a.txt\nb.txt" {
+		t.Errorf("staged %q, want both files", staged)
+	}
+}
+
+// A file staged while the pre-commit hook runs waits for the commit to
+// finish and stays out of it.
+func TestStageWaitsForCommitHook(t *testing.T) {
+	dir := newRepo(t)
+	commitFile(t, dir, "base.txt", "base\n", "base")
+	started := filepath.Join(t.TempDir(), "hook-started")
+	hook := "#!/bin/sh\ntouch '" + started + "'\nsleep 1\n"
+	if err := os.WriteFile(filepath.Join(dir, ".git", "hooks", "pre-commit"), []byte(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "a.txt"), "a\n")
+	git(t, dir, "add", "a.txt")
+	h := New(Options{})
+	commitReq := withBody(t, sampleRequest(t, "git.commit.req.json"), map[string]any{"dir": dir, "message": "只提交 a"})
+	stageReq := withBody(t, sampleRequest(t, "git.stage.req.json"), map[string]any{"dir": dir, "path": "b.txt"})
+
+	committed := make(chan protocol.Envelope, 1)
+	go func() { committed <- h.Handle(context.Background(), commitReq) }()
+	waitFile(t, started, 10*time.Second)
+	writeFile(t, filepath.Join(dir, "b.txt"), "b\n")
+	if res := h.Handle(context.Background(), stageReq); res.Error != nil {
+		t.Fatalf("stage: %+v", res.Error)
+	}
+	res := <-committed
+	if res.Error != nil {
+		t.Fatalf("commit: %+v", res.Error)
+	}
+	var body protocol.GitCommitResponse
+	strictDecode(t, res.Body, &body)
+	if files := git(t, dir, "show", "--name-only", "--format=", body.Hash); files != "a.txt" {
+		t.Errorf("the commit holds %q, want only a.txt", files)
+	}
+	if staged := git(t, dir, "diff", "--cached", "--name-only"); staged != "b.txt" {
+		t.Errorf("staged after the commit: %q, want b.txt", staged)
+	}
+}
+
+// A switch running when the connection drops is finished rather than
+// killed halfway, and the request returns at once instead of holding up
+// the reconnect.
+func TestSwitchOutlivesTheConnection(t *testing.T) {
+	dir := newRepo(t)
+	commitFile(t, dir, "base.txt", "base\n", "base")
+	git(t, dir, "branch", "feat-y")
+	rec := t.TempDir()
+	t.Setenv("REC", rec)
+	h := New(Options{Git: Git{Path: fakeGit(t, `if [ "$3" = switch ]; then
+	touch "$REC/started"
+	sleep 1
+	git "$@"; rc=$?
+	touch "$REC/done"
+	exit $rc
+fi
+exec git "$@"
+`)}})
+	req := withBody(t, sampleRequest(t, "git.switch.req.json"), map[string]any{"dir": dir, "branch": "feat-y"})
+	ctx, cancel := context.WithCancel(context.Background())
+	answered := make(chan struct{})
+	go func() {
+		defer close(answered)
+		h.Handle(ctx, req)
+	}()
+	waitFile(t, filepath.Join(rec, "started"), 10*time.Second)
+	cancel()
+	<-answered
+	if _, err := os.Stat(filepath.Join(rec, "done")); err == nil {
+		t.Error("the request waited for the switch after the connection dropped")
+	}
+	waitFile(t, filepath.Join(rec, "done"), 10*time.Second)
+	if cur := git(t, dir, "branch", "--show-current"); cur != "feat-y" {
+		t.Errorf("current branch = %q, want feat-y", cur)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git", "index.lock")); err == nil {
+		t.Error("index.lock left behind")
 	}
 }
 

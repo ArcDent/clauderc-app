@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Size
@@ -76,6 +77,11 @@ import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
+import clauderc.app.ui.theme.snapPressed
+import clauderc.app.ui.theme.StickerPress
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 
 /** One key of the key bar: what term.key sends, and its label or symbol. */
 private class BarKey(val key: String, val label: String, val icon: ImageVector? = null)
@@ -125,8 +131,8 @@ fun TerminalScreen(state: TermUiState, onBack: () -> Unit, onKey: (String) -> Un
                             .weight(1f)
                             .fillMaxWidth()
                             .then(
-                                // 贴纸 puts the screen on an ink-outlined card (.term); the room under it keeps its hard shadow clear of the keys.
-                                if (card) Modifier.padding(start = sp.sp4, end = sp.sp4, top = sp.sp1, bottom = sp.sp3 + sp.sp1).sticker(c.panel, c.ink, StickerCorner)
+                                // 贴纸 puts the screen on an ink-outlined card (.term), 12dp above the keys.
+                                if (card) Modifier.padding(start = sp.sp4, end = sp.sp4, top = sp.sp1, bottom = sp.sp3).sticker(c.panel, c.ink, StickerCorner)
                                 else Modifier,
                             ),
                     ) {
@@ -262,6 +268,10 @@ private fun TermText(screen: TermScreen, modifier: Modifier) {
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val padY = if (Clauderc.look.cards) sp.sp3 else sp.sp2
     val padPx = with(LocalDensity.current) { padY.toPx() }
+    val slackPx = with(LocalDensity.current) { 24.dp.toPx() }.roundToInt()
+    // The scroll offset where the last auto-follow landed, or -1 before the first scroll.
+    // Scrolling up away from it stops new output from yanking the view back down until the user returns.
+    var pinned by remember { mutableIntStateOf(-1) }
     // Like the mockup, keep the last line with text in view: the input of a long chat, the top of a fresh dialog.
     // Where it ends comes from the laid out text, as each line is rounded up to whole pixels.
     val last = screen.lines.indexOfLast { it.isNotBlank() }
@@ -270,7 +280,15 @@ private fun TermText(screen: TermScreen, modifier: Modifier) {
         LaunchedEffect(last, viewport) {
             if (last < 0) return@LaunchedEffect
             val laid = snapshotFlow { layout }.first { it != null && it.lineCount > last }!!
-            vertical.scrollTo((padPx + laid.getLineBottom(last) + padPx - viewport).roundToInt().coerceAtLeast(0))
+            val target = (padPx + laid.getLineBottom(last) + padPx - viewport).roundToInt().coerceAtLeast(0)
+            val tolerance = minOf(slackPx, (pinned / 2).coerceAtLeast(0))
+            val following = pinned < 0 || vertical.value >= pinned - tolerance
+            if (following) {
+                vertical.scrollTo(target)
+                pinned = vertical.value
+            } else {
+                pinned = target.coerceAtMost(vertical.maxValue)
+            }
         }
         Box(Modifier.fillMaxSize().verticalScroll(vertical).horizontalScroll(horizontal)) {
             Text(
@@ -317,16 +335,23 @@ private fun androidx.compose.foundation.layout.RowScope.KeyCap(k: BarKey, height
     val c = Clauderc.colors
     val ui = Clauderc.style
     val press = remember { MutableInteractionSource() }
-    // 贴纸: a white key with a thin ink outline on a 2dp hard shadow; 格栅: square corners.
+    val sticker = ui == UiStyle.Sticker
+    // 贴纸 hits a key like a typewriter's: the moment it is pressed it sinks 2dp and turns ink with letters
+    // in the paper colour (the text colour in dark); let go, it springs back up and fades back in durS.
+    val sink by snapPressed(press, Clauderc.motion.easeSpring)
+    val hit by snapPressed(press, LinearEasing)
+    val face = if (sticker) lerp(c.fg, if (c.isDark) c.fg else c.sheet, hit) else c.fg
+    // 贴纸: a white key with a thin ink outline; 格栅: square corners.
     val cap = when (ui) {
-        UiStyle.Sticker -> Modifier.sticker(c.panel, c.ink, 12.dp, border = 1.5.dp, drop = 2.dp, source = press)
+        UiStyle.Sticker -> Modifier.sticker(lerp(c.panel, c.ink, hit), c.ink, 12.dp, border = 1.5.dp)
         UiStyle.Grid -> Modifier.clip(RoundedCornerShape(2.dp)).background(c.surface)
         UiStyle.Clear -> Modifier.clip(RoundedCornerShape(Clauderc.radii.sm)).background(c.surface)
     }
     Box(
         Modifier
             .weight(1f)
-            .pressShrink(press)
+            .pressShrink(press, StickerPress.Still)
+            .then(if (sticker) Modifier.graphicsLayer { translationY = 2.dp.toPx() * sink } else Modifier)
             .height(height)
             .then(cap)
             .clickable(press, PressIndication(c.fg2), enabled = enabled, role = Role.Button) { onKey(k.key) }
@@ -334,7 +359,7 @@ private fun androidx.compose.foundation.layout.RowScope.KeyCap(k: BarKey, height
             .semantics { contentDescription = k.label },
         contentAlignment = Alignment.Center,
     ) {
-        if (k.icon != null) Icon(k.icon, contentDescription = null, tint = c.fg, modifier = Modifier.size(20.dp))
-        else Text(k.label, fontFamily = MonoFamily, fontSize = fontSize, fontWeight = if (ui == UiStyle.Sticker) FontWeight.SemiBold else null, color = c.fg)
+        if (k.icon != null) Icon(k.icon, contentDescription = null, tint = face, modifier = Modifier.size(20.dp))
+        else Text(k.label, fontFamily = MonoFamily, fontSize = fontSize, fontWeight = if (sticker) FontWeight.SemiBold else null, color = face)
     }
 }

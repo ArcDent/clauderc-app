@@ -2,6 +2,7 @@ package relay
 
 import (
 	"fmt"
+	"net/netip"
 	"net/url"
 	"strings"
 
@@ -25,6 +26,10 @@ type Config struct {
 	EnrollKeyFile string `toml:"enroll_key_file"`
 	// StateFile is the JSON state file path.
 	StateFile string `toml:"state_file"`
+	// TrustedProxies lists networks, as CIDR, whose requests may carry the
+	// client address in X-Forwarded-For, e.g. the Docker gateway in front
+	// of a containerised relay. Empty means only a loopback peer is trusted.
+	TrustedProxies []netip.Prefix `toml:"trusted_proxies"`
 
 	// EnrollKey is the trimmed content of EnrollKeyFile.
 	EnrollKey string `toml:"-"`

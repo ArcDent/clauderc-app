@@ -1,24 +1,40 @@
 package clauderc.app.chat
 
+import android.graphics.Bitmap
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PixelMap
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.unit.DpRect
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.data.Fleet
+import clauderc.app.data.UiStyle
 import clauderc.app.protocol.ChatItem
 import clauderc.app.protocol.ChatOpenResponse
 import clauderc.app.protocol.ChatRewindRequest
 import clauderc.app.protocol.ChatRewindResponse
 import clauderc.app.protocol.ErrorCode
 import clauderc.app.protocol.Hunk
+import clauderc.app.protocol.Image
 import clauderc.app.protocol.ItemKind
 import clauderc.app.protocol.MachinesListResponse
 import clauderc.app.protocol.Method
@@ -32,7 +48,12 @@ import clauderc.app.testing.decode
 import clauderc.app.testing.machine
 import clauderc.app.testing.sampleSessions
 import clauderc.app.testing.session
+import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.ClaudercColors
 import clauderc.app.ui.theme.ClaudercTheme
+import java.io.ByteArrayOutputStream
+import java.util.Base64
+import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -64,6 +85,7 @@ import org.robolectric.annotation.GraphicsMode
 @Config(qualifiers = "w390dp-h844dp")
 class ChatRewindTest {
     @get:Rule val compose = createComposeRule()
+    @get:Rule val tmp = org.junit.rules.TemporaryFolder()
 
     private val target = ChatItem(2, ItemKind.USER, text = "把退避上限改成 60 秒", uuid = "u-2")
     private val edit = ChatItem(
@@ -184,6 +206,202 @@ class ChatRewindTest {
 
     private fun hasTestTagQuote() = androidx.compose.ui.test.hasTestTag("rewindQuote")
 
+    // ---------- round 11: where the button sits and how each style draws it ----------
+
+    private fun png(): String {
+        val bmp = Bitmap.createBitmap(30, 20, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(46, 139, 122)) }
+        val out = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+        return Base64.getEncoder().encodeToString(out.toByteArray())
+    }
+
+    private fun showOnly(message: ChatItem) {
+        val list = listOf(message, ChatItem(message.seq + 1, ItemKind.ASSISTANT, text = "好的。"))
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state().copy(items = list), ChatActions()) } }
+        compose.waitForIdle()
+    }
+
+    /** Slides the user's message [seq] open and gives the rewind button's bounds. */
+    private fun openButton(seq: Long): DpRect {
+        compose.onNodeWithTag("userRow:$seq").performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        return compose.onNodeWithTag("rewindAction").getBoundsInRoot()
+    }
+
+    private fun assertSameEdges(what: String, button: DpRect, target: DpRect) {
+        assertTrue("$what: the button's top ${button.top} against ${target.top}", abs((button.top - target.top).value) <= 1f)
+        assertTrue("$what: the button's bottom ${button.bottom} against ${target.bottom}", abs((button.bottom - target.bottom).value) <= 1f)
+    }
+
+    @Test fun underAMessagesPictureTheButtonFacesTheTextBubble() {
+        showOnly(ChatItem(1, ItemKind.USER, text = "照这张改", images = listOf(Image("image/png", png())), uuid = "u-1"))
+        val button = openButton(1)
+        assertSameEdges("a picture and a line", button, compose.onNodeWithTag("userBubble").getBoundsInRoot())
+        assertTrue("below the picture", button.top >= compose.onNodeWithTag("userPicture").getBoundsInRoot().bottom)
+    }
+
+    @Test fun withOnlyAPictureTheButtonFacesThePicture() {
+        showOnly(ChatItem(1, ItemKind.USER, images = listOf(Image("image/png", png())), uuid = "u-1"))
+        compose.onNodeWithTag("userBubble").assertDoesNotExist()
+        assertSameEdges("only a picture", openButton(1), compose.onNodeWithTag("userPicture").getBoundsInRoot())
+    }
+
+    @Test fun withOnlyTextTheButtonIsFlushWithTheBubble() {
+        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state(), ChatActions()) } }
+        compose.waitForIdle()
+        val bubble = compose.onNode(hasTestTag("userBubble") and hasAnyAncestor(hasTestTag("userRow:2"))).getBoundsInRoot()
+        assertSameEdges("only text", openButton(2), bubble)
+    }
+
+    /** What the rewind button looks like in [style]: the page shot half open, fully open, and pressed. */
+    private class Looks(
+        val colors: ClaudercColors,
+        val density: Float,
+        val half: PixelMap,
+        val full: PixelMap,
+        val pressed: PixelMap,
+        /** The right edge of the row and the stretch of it the button takes, in pixels. */
+        val right: Float,
+        val top: Float,
+        val bottom: Float,
+    ) {
+        fun dp(v: Float) = v * density
+        val cy get() = (top + bottom) / 2
+        /** Where the button's middle is when fully open; half open it is at the row's right edge. */
+        val cx get() = right - dp(30f)
+    }
+
+    private fun looks(style: UiStyle): Looks {
+        var colors: ClaudercColors? = null
+        var slop = 0f
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = style) {
+                colors = Clauderc.colors
+                slop = LocalViewConfiguration.current.touchSlop
+                ChatScreen(state(), ChatActions())
+            }
+        }
+        compose.waitForIdle()
+        val density = compose.density.density
+        val row = compose.onNodeWithTag("userRow:5")
+        val right = row.getBoundsInRoot().right.value * density
+        // Half open: the finger holds the row 30dp to the left, half the button's room.
+        row.performTouchInput {
+            down(Offset(width * 0.9f, height / 2f))
+            moveBy(Offset(-(slop + 30 * density), 0f))
+        }
+        compose.waitForIdle()
+        val half = compose.onRoot().captureToImage().toPixelMap()
+        row.performTouchInput { up() }
+        compose.waitForIdle()
+        val bounds = openButton(5)
+        val full = compose.onRoot().captureToImage().toPixelMap()
+        val button = compose.onNodeWithTag("rewindAction")
+        button.performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(400)
+        val pressed = compose.onRoot().captureToImage().toPixelMap()
+        button.performTouchInput { cancel() }
+        return Looks(colors!!, density, half, full, pressed, right, bounds.top.value * density, bounds.bottom.value * density)
+    }
+
+    private fun PixelMap.at(x: Float, y: Float) = this[x.toInt(), y.toInt()]
+
+    private fun distance(a: Color, b: Color) = (abs(a.red - b.red) + abs(a.green - b.green) + abs(a.blue - b.blue)) / 3
+
+    private fun assertNear(what: String, want: Color, got: Color, tolerance: Float = 0.04f) =
+        assertTrue("$what: $got, want $want", distance(want, got) < tolerance)
+
+    /** The pixel in [x0, x1) × [y0, y1) that stands out most from [back]. */
+    private fun PixelMap.strongest(x0: Float, x1: Float, y0: Float, y1: Float, back: Color): Color {
+        var best = back
+        for (x in x0.toInt() until x1.toInt()) for (y in y0.toInt() until y1.toInt()) {
+            if (distance(this[x, y], back) > distance(best, back)) best = this[x, y]
+        }
+        return best
+    }
+
+    /**
+     * The longest stretch, top to bottom, from the first to the last pixel standing out from [back] by more
+     * than [by], over the columns of [x0, x1) × [y0, y1); [across] measures left to right over its rows instead.
+     */
+    private fun PixelMap.tallest(x0: Float, x1: Float, y0: Float, y1: Float, back: Color, by: Float, across: Boolean = false): Int {
+        val xs = x0.toInt() until x1.toInt()
+        val ys = y0.toInt() until y1.toInt()
+        var most = 0
+        for (line in if (across) ys else xs) {
+            val hits = (if (across) xs else ys).filter { distance(if (across) this[it, line] else this[line, it], back) > by }
+            if (hits.isNotEmpty()) most = maxOf(most, hits.last() - hits.first() + 1)
+        }
+        return most
+    }
+
+    /** The left half of the button half open, at the row's edge, and fully open, 30dp in from it. */
+    private fun Looks.leftHalves(): Pair<FloatArray, FloatArray> =
+        floatArrayOf(right - dp(25f), right - 1, top, bottom) to floatArrayOf(cx - dp(25f), cx - 1, top, bottom)
+
+    @Test fun stickersButtonIsACardCircleInInkThatGrowsAndFadesInWithTheSlide() {
+        val l = looks(UiStyle.Sticker)
+        val c = l.colors
+        // A 36dp circle: a 2dp ink line round the card's white, the page past its corners, no hard shadow under it.
+        assertNear("the ink line", c.ink, l.full.strongest(l.cx - l.dp(19f), l.cx - l.dp(15f), l.cy - 1, l.cy + 1, c.bg), 0.06f)
+        assertNear("the card inside", c.card, l.full.at(l.cx, l.cy - l.dp(13f)))
+        assertTrue("past the corner is no ink", distance(l.full.at(l.cx + l.dp(16.5f), l.cy + l.dp(16.5f)), c.ink) > 0.5f)
+        assertTrue("no hard shadow under it", distance(l.full.at(l.cx, l.cy + l.dp(19.5f)), c.ink) > 0.5f)
+        // Half open it is 0.6 + 0.4 × 0.5 of its size and half faded.
+        val (h, f) = l.leftHalves()
+        val grown = l.half.tallest(h[0], h[1], h[2], h[3], c.bg, 0.15f).toFloat() / l.full.tallest(f[0], f[1], f[2], f[3], c.bg, 0.15f)
+        assertTrue("half open it is 0.8 of its size: $grown", grown in 0.72f..0.88f)
+        val faded = distance(l.half.strongest(h[0], h[1], h[2], h[3], c.bg), c.bg) / distance(l.full.strongest(f[0], f[1], f[2], f[3], c.bg), c.bg)
+        assertTrue("half open it is half faded: $faded", faded in 0.3f..0.75f)
+        // Round 12: a press fills it with the accent under an on-accent icon.
+        assertNear("pressed, the fill is the accent", c.accent, l.pressed.at(l.cx, l.cy - l.dp(13f)))
+        assertNear("pressed, the icon is on-accent", c.onAccent, l.pressed.strongest(l.cx - l.dp(9f), l.cx + l.dp(9f), l.cy - l.dp(9f), l.cy + l.dp(9f), c.accent), 0.1f)
+    }
+
+    @Test fun gridsButtonIsAnEmptySquareInAThinLineThatOnlySlidesIn() {
+        val l = looks(UiStyle.Grid)
+        val c = l.colors
+        // A square as tall as the one-line bubble beside it, its 1.5dp grey line reaching into the corners.
+        val half = (l.bottom - l.top) / 2
+        val tall = l.full.tallest(l.cx - half, l.cx - half + l.dp(2f), l.top - l.dp(4f), l.bottom + l.dp(4f), c.bg, 0.06f)
+        val wide = l.full.tallest(l.cx - half - l.dp(4f), l.cx + half + l.dp(4f), l.top, l.top + l.dp(2f), c.bg, 0.06f, across = true)
+        assertTrue("as tall as the bubble: $tall against ${2 * half}", abs(tall - 2 * half) <= l.dp(1f))
+        assertTrue("as wide as tall: $wide against $tall", abs(wide - tall) <= l.dp(1f))
+        val corner = l.full.strongest(l.cx + half - l.dp(2.5f), l.cx + half, l.cy + half - l.dp(2.5f), l.cy + half, c.bg)
+        assertNear("the line in the corner", c.surface2, corner)
+        assertNear("nothing fills it", c.bg, l.full.at(l.cx + l.dp(15f), l.cy))
+        val icon = l.full.strongest(l.cx - l.dp(10f), l.cx + l.dp(10f), l.cy - l.dp(10f), l.cy + l.dp(10f), c.bg)
+        assertTrue("the icon is the second grey, not the text colour: $icon", distance(icon, c.fg2) < distance(icon, c.fg))
+        // Half open it is the same, only further right.
+        val (h, f) = l.leftHalves()
+        val faded = distance(l.half.strongest(h[0], h[1], h[2], h[3], c.bg), c.bg) / distance(l.full.strongest(f[0], f[1], f[2], f[3], c.bg), c.bg)
+        assertTrue("half open it does not fade: $faded", faded > 0.9f)
+        // Round 12: a press fills the square with the text colour under an icon in the page colour.
+        assertNear("pressed, the square fills with the text colour", c.fg, l.pressed.at(l.cx + l.dp(15f), l.cy))
+        assertNear("pressed, the line is the text colour too", c.fg, l.pressed.at(l.cx + half - l.dp(0.75f), l.cy))
+        assertNear("pressed, the icon is the page colour", c.bg, l.pressed.strongest(l.cx - l.dp(10f), l.cx + l.dp(10f), l.cy - l.dp(10f), l.cy + l.dp(10f), c.fg), 0.06f)
+    }
+
+    @Test fun clearsButtonIsTheBareGreyIconFadingInWithTheSlide() {
+        val l = looks(UiStyle.Clear)
+        val c = l.colors
+        // No fill and no ring: round the icon the page shows.
+        for ((dx, dy) in listOf(14f to 0f, -14f to 0f, 0f to 14f, 0f to -14f, 14f to 14f, -14f to -14f)) {
+            assertNear("the page at ($dx, $dy)", c.bg, l.full.at(l.cx + l.dp(dx), l.cy + l.dp(dy)))
+        }
+        assertNear("the icon in the second grey", c.fg2, l.full.strongest(l.cx - l.dp(11f), l.cx + l.dp(11f), l.cy - l.dp(11f), l.cy + l.dp(11f), c.bg), 0.06f)
+        val (h, f) = l.leftHalves()
+        val faded = distance(l.half.strongest(h[0], h[1], h[2], h[3], c.bg), c.bg) / distance(l.full.strongest(f[0], f[1], f[2], f[3], c.bg), c.bg)
+        assertTrue("half open it is half faded: $faded", faded in 0.3f..0.75f)
+        // Round 12: a press turns the icon the text colour on a round 10% tint of it, 8dp past the icon.
+        assertNear("pressed, the icon is the text colour", c.fg, l.pressed.strongest(l.cx - l.dp(11f), l.cx + l.dp(11f), l.cy - l.dp(11f), l.cy + l.dp(11f), c.bg), 0.06f)
+        val tint = c.fg.copy(alpha = 0.1f).compositeOver(c.bg)
+        for ((dx, dy) in listOf(15f to 0f, -15f to 0f, 0f to 15f, 0f to -15f)) {
+            assertNear("pressed, the tint at ($dx, $dy)", tint, l.pressed.at(l.cx + l.dp(dx), l.cy + l.dp(dy)), 0.02f)
+        }
+        assertNear("pressed, the page past the tint", c.bg, l.pressed.at(l.cx + l.dp(21f), l.cy), 0.02f)
+    }
+
     // ---------- the view model ----------
 
     private val dispatcher = UnconfinedTestDispatcher()
@@ -251,5 +469,55 @@ class ChatRewindTest {
         assertFalse(failed)
         assertEquals("把退避上限改成 60 秒", vm.state.value.restore?.text)
         assertEquals("已经回溯，但没能清空电脑上的输入框，原消息还留在那里", vm.messages.first())
+    }
+
+    @Test fun rewindingStillSavesTheMessageAsDraftAfterLeaving() = runTest(dispatcher) {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        relay.on(Method.CHAT_REWIND) {
+            gate.await()
+            clauderc.app.protocol.ProtocolJson.encodeToJsonElement(ChatRewindResponse.serializer(), ChatRewindResponse())
+        }
+        val storeScope = CoroutineScope(Dispatchers.IO + Job())
+        val drafts = clauderc.app.data.DraftStore(
+            androidx.datastore.preferences.core.PreferenceDataStoreFactory.create(scope = storeScope) { java.io.File(tmp.root, "drafts.preferences_pb") },
+        )
+        val noticed = kotlinx.coroutines.CompletableDeferred<String>()
+        val store = androidx.lifecycle.ViewModelStore()
+        try {
+            val vm = androidx.lifecycle.ViewModelProvider(store, object : androidx.lifecycle.ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
+                    ChatViewModel("m-1", "s-need", relay, Fleet(relay, scope), scope, compress = { it }, background = dispatcher, drafts = drafts, onNotice = { noticed.complete(it) }) as T
+            })[ChatViewModel::class.java]
+            vm.rewind(target, RewindRestore.BOTH) {}
+            // User leaves the chat page while rewind is still running.
+            store.clear()
+            gate.complete(Unit)
+            assertEquals("把退避上限改成 60 秒", clauderc.app.testing.eventually { drafts.draft("m-1", "s-need").first { it.isNotEmpty() } })
+            assertEquals("已回溯，原消息已放进草稿", clauderc.app.testing.eventually { noticed.await() })
+        } finally {
+            storeScope.cancel()
+        }
+    }
+
+    @Test fun aFailedRewindShowsItsReasonOnTheTerminalPage() {
+        val why = "电脑上的输入框里有还没发出去的字，清空以后再回溯"
+        relay.fail(Method.CHAT_REWIND, ErrorCode.REWIND_FAILED, why)
+        relay.respond(Method.TERM_OPEN, clauderc.app.protocol.TermScreen.serializer(), clauderc.app.protocol.TermScreen("s-need", listOf("❯ ")))
+        val fleet = Fleet(relay, scope)
+        val chatVm = ChatViewModel("m-1", "s-need", relay, fleet, scope, compress = { it }, background = dispatcher)
+        var reason: String? = null
+        chatVm.rewind(target, RewindRestore.BOTH) { reason = it }
+        assertEquals("没能回溯：$why", reason)
+
+        val termVm = TermViewModel("m-1", "s-need", relay, fleet, scope, background = dispatcher, initialNotice = reason)
+        compose.setContent {
+            val s by termVm.state.collectAsState()
+            val snack = androidx.compose.runtime.remember { clauderc.app.ui.components.SnackState() }
+            androidx.compose.runtime.LaunchedEffect(termVm) { termVm.messages.collect { snack.show(it) } }
+            ClaudercTheme(darkTheme = false) { TerminalScreen(s, onBack = {}, onKey = termVm::key, snack = snack) }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("没能回溯：$why").assertIsDisplayed()
     }
 }

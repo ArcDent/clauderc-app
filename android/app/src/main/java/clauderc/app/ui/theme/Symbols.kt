@@ -28,6 +28,8 @@ object Symbols {
     val ComputerFilled by lazy { symbol("computer_filled", SymbolPaths.computerFilled) }
     val ContentCopy by lazy { symbol("content_copy", SymbolPaths.contentCopy) }
     val History by lazy { symbol("history", SymbolPaths.history) }
+    /** history at weight 400, as the rewind button of 清玻 and 贴纸 draws it. */
+    val HistoryRegular by lazy { symbol("history_regular", SymbolPaths.historyRegular) }
     val Contrast by lazy { symbol("contrast", SymbolPaths.contrast) }
     val Delete by lazy { symbol("delete", SymbolPaths.delete) }
     val Description by lazy { symbol("description", SymbolPaths.description) }

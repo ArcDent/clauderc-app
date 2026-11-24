@@ -54,9 +54,10 @@ fun AgentScreen(state: ChatUiState, header: AgentHeader, actions: ChatActions, s
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     var viewing by remember { mutableStateOf<Viewing?>(null) }
-    val openImage: OpenImage = { img, from ->
-        viewing = Viewing(img, from)
-        if (img.id !in state.wholeImages && img.id !in state.fetchingImages) actions.onImage(img.id)
+    val openImage: OpenImage = { v ->
+        viewing = v
+        val id = v.image.id
+        if (v.local == null && id !in state.wholeImages && id !in state.fetchingImages) actions.onImage(id)
     }
     val working = state.state == SessionState.Working
     val ended = !state.loading && !working
@@ -103,9 +104,8 @@ fun AgentScreen(state: ChatUiState, header: AgentHeader, actions: ChatActions, s
                 }
             }
         }
-        SnackHost(snack, Modifier.align(Alignment.BottomCenter), bottom = 24.dp)
-        viewing?.let { v ->
-            ImageViewer(v, state.wholeImages[v.image.id], v.image.id in state.failedImages, onClosed = { viewing = null })
-        }
+        viewing?.let { v -> ChatImageViewer(v, state, actions, onClosed = { viewing = null }) }
+        // Drawn after the viewer, so a snackbar shows over it.
+        SnackHost(snack, Modifier.align(Alignment.BottomCenter), bottom = 24.dp, onCamera = viewing != null)
     }
 }

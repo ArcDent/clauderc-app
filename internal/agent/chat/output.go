@@ -96,7 +96,9 @@ func (h *Handler) allItems(ctx context.Context, sessionID string) ([]transcript.
 	var f *transcript.Follower
 	if s := h.chats[target.ID]; s != nil {
 		s.mu.Lock()
-		f = s.follower
+		if s.sessionID == target.SessionID {
+			f = s.follower
+		}
 		s.mu.Unlock()
 	}
 	h.mu.Unlock()

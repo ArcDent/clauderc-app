@@ -170,6 +170,21 @@ class GitLogicTest {
         assertEquals("", vm.state.value.message)
     }
 
+    @Test fun failedBusyCheckAsksBeforeWriting() = runTest(dispatcher) {
+        relay.fail(Method.DIR_BUSY, ErrorCode.TIMEOUT, "读取会话列表超过 30 秒未完成")
+        val vm = viewModel()
+        vm.request(GitOp.Pull)
+        val ask = vm.state.value.confirm as GitConfirm.Busy
+        assertTrue("the question says nobody knows", ask.unsure)
+        assertTrue("not pulled before the user says so", relay.sent(Method.GIT_PULL).isEmpty())
+        assertEquals("不确定 claude 是否在这个目录工作", busyTitle(ask.unsure))
+        assertEquals("a busy answer keeps its title", "claude 正在这个目录工作", busyTitle(false))
+        assertEquals("没能确认 clauderc-app 里有没有会话在改代码，现在拉取可能带上写到一半的改动。", busyText(ask.sessionName, ask.unsure, "clauderc-app", ask.op.verb))
+        vm.confirm()
+        assertEquals(listOf(DirRequest("/p/clauderc-app")), relay.sent(Method.GIT_PULL).map { it.decode(DirRequest.serializer()) })
+        assertNull(vm.state.value.confirm)
+    }
+
     @Test fun pushWithoutUpstreamAsksThenSetsIt() = runTest(dispatcher) {
         relay.on(Method.GIT_PUSH) { sent ->
             if (!sent.decode(GitPushRequest.serializer()).setUpstream) throw clauderc.app.net.RemoteException(ErrorCode.NEEDS_CONFIRMATION, "没有上游")
@@ -177,7 +192,7 @@ class GitLogicTest {
         }
         val vm = viewModel()
         vm.request(GitOp.Push())
-        assertEquals(GitConfirm.Upstream("feat-x"), vm.state.value.confirm)
+        assertEquals(GitConfirm.Upstream("/p/clauderc-app", "feat-x"), vm.state.value.confirm)
         vm.confirm()
         assertEquals(GitPushRequest("/p/clauderc-app", setUpstream = true), relay.sent(Method.GIT_PUSH).last().decode(GitPushRequest.serializer()))
     }
@@ -198,5 +213,137 @@ class GitLogicTest {
         vm.dismissFailure()
         vm.request(GitOp.Push())
         assertEquals("目标机缺少 git 凭证", vm.state.value.failure!!.title)
+    }
+
+    @Test fun aLateStatusForThePreviousDirectoryIsDropped() = runTest(dispatcher) {
+        val gateA = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val statusA = status.copy(branch = "branch-a")
+        val statusB = status.copy(branch = "branch-b")
+        relay.on(Method.GIT_STATUS) { sent ->
+            val dir = sent.decode(DirRequest.serializer()).dir
+            if (dir == "/p/a") gateA.await()
+            ProtocolJson.encodeToJsonElement(GitStatusResponse.serializer(), if (dir == "/p/a") statusA else statusB)
+        }
+        val vm = viewModel(dir = "/p/a")
+        vm.setDir("/p/b")
+        assertEquals("branch-b", vm.state.value.status?.branch)
+        gateA.complete(Unit)
+        assertEquals("B keeps its own status after A answers late", "branch-b", vm.state.value.status?.branch)
+        assertEquals("/p/b", vm.state.value.dir)
+    }
+
+    @Test fun interleavedRefreshAndLoadMoreProduceNoDuplicateCommits() = runTest(dispatcher) {
+        val page1Gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var page1Calls = 0
+        relay.on(Method.GIT_LOG) { sent ->
+            val req = sent.decode(GitLogRequest.serializer())
+            if (req.page == 0) {
+                ProtocolJson.encodeToJsonElement(GitLogResponse.serializer(), sampleLog.copy(hasMore = true))
+            } else {
+                page1Calls++
+                if (page1Calls == 1) page1Gate.await()
+                // Repeat the last commit of page 0 at the seam of page 1, as happens when a new commit lands meanwhile.
+                val overlap = listOf(sampleLog.commits.last()) + sampleLog.commits.map { it.copy(hash = "${it.hash}-p$page1Calls") }
+                ProtocolJson.encodeToJsonElement(GitLogResponse.serializer(), GitLogResponse(overlap, hasMore = false))
+            }
+        }
+        val vm = viewModel()
+        vm.loadMore()
+        assertTrue(vm.state.value.loadingMore)
+        // Refresh completes while page 1 is still out; page 1 is re-asked for the new timeline and the stale one is dropped.
+        vm.refresh()
+        page1Gate.complete(Unit)
+        val hashes = vm.state.value.commits.map { it.hash }
+        assertEquals("no duplicate hashes", hashes.distinct().size, hashes.size)
+        assertEquals(10, hashes.size)
+        assertFalse(vm.state.value.loadingMore)
+    }
+
+    @Test fun aSecondWriteDuringDirBusyIsIgnored() = runTest(dispatcher) {
+        val busyGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        relay.on(Method.DIR_BUSY) {
+            busyGate.await()
+            ProtocolJson.encodeToJsonElement(DirBusyResponse.serializer(), DirBusyResponse(false))
+        }
+        relay.respond(Method.GIT_COMMIT, GitCommitResponse.serializer(), GitCommitResponse("a1f3c92e"))
+        val vm = viewModel()
+        vm.setMessage("提交说明")
+        vm.request(GitOp.Commit("提交说明"))
+        assertTrue("running starts as soon as the tap lands", vm.state.value.running)
+        assertFalse(vm.state.value.canCommit)
+        vm.request(GitOp.Commit("提交说明"))
+        assertEquals(1, relay.sent(Method.DIR_BUSY).size)
+        busyGate.complete(Unit)
+        assertEquals(1, relay.sent(Method.GIT_COMMIT).size)
+        assertFalse(vm.state.value.running)
+    }
+
+    @Test fun aWriteStartedInOneDirectoryRunsThereAfterSwitching() = runTest(dispatcher) {
+        val busyGate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        relay.on(Method.DIR_BUSY) {
+            busyGate.await()
+            ProtocolJson.encodeToJsonElement(DirBusyResponse.serializer(), DirBusyResponse(false))
+        }
+        relay.respond(Method.GIT_COMMIT, GitCommitResponse.serializer(), GitCommitResponse("a1f3c92e"))
+        val vm = viewModel(dir = "/p/a")
+        vm.setMessage("只在 A 提交")
+        vm.request(GitOp.Commit("只在 A 提交"))
+        vm.setDir("/p/b")
+        busyGate.complete(Unit)
+        assertEquals(GitCommitRequest("/p/a", "只在 A 提交"), relay.sent(Method.GIT_COMMIT).single().decode(GitCommitRequest.serializer()))
+        assertEquals("/p/b", vm.state.value.dir)
+    }
+
+    @Test fun failedLoadMoreStopsSpinningAndRetriesWithoutDuplicates() = runTest(dispatcher) {
+        var failNext = true
+        relay.on(Method.GIT_LOG) { sent ->
+            val req = sent.decode(GitLogRequest.serializer())
+            if (req.page == 0) {
+                ProtocolJson.encodeToJsonElement(GitLogResponse.serializer(), sampleLog.copy(hasMore = true))
+            } else if (failNext) {
+                throw clauderc.app.net.RemoteException(ErrorCode.TIMEOUT, "timeout")
+            } else {
+                val overlap = listOf(sampleLog.commits.last()) + sampleLog.commits.map { it.copy(hash = it.hash + "-2") }
+                ProtocolJson.encodeToJsonElement(GitLogResponse.serializer(), GitLogResponse(overlap, hasMore = false))
+            }
+        }
+        val vm = viewModel()
+        vm.loadMore()
+        assertFalse(vm.state.value.loadingMore)
+        assertTrue(vm.state.value.moreFailed)
+        assertTrue(vm.state.value.hasMore)
+
+        failNext = false
+        vm.loadMore()
+        assertFalse(vm.state.value.loadingMore)
+        assertFalse(vm.state.value.moreFailed)
+        assertFalse(vm.state.value.hasMore)
+        val hashes = vm.state.value.commits.map { it.hash }
+        assertEquals(hashes.distinct().size, hashes.size)
+        assertEquals(10, hashes.size)
+    }
+
+    @Test fun gitCommitAndDiffPagesLoadOnceConnected() = runTest(dispatcher) {
+        val show = clauderc.app.protocol.GitShowResponse("a1f3c92", emptyList(), "林舟", clauderc.app.testing.T0, "msg", emptyList())
+        val diff = clauderc.app.protocol.GitDiffResponse("AGENTS.md", patch = "@@ -1 +1 @@\n-a\n+b\n")
+        relay.respond(Method.GIT_SHOW, clauderc.app.protocol.GitShowResponse.serializer(), show)
+        relay.respond(Method.GIT_DIFF, clauderc.app.protocol.GitDiffResponse.serializer(), diff)
+        relay.state.value = clauderc.app.net.ConnectionState.Waiting(1, 0)
+
+        val git = viewModel(dir = null)
+        val commit = CommitViewModel("m-1", "/p/clauderc-app", "a1f3c92", relay)
+        val diffVm = DiffViewModel("m-1", clauderc.app.protocol.GitDiffRequest("/p/clauderc-app", "AGENTS.md"), relay)
+        assertTrue("nothing sent while disconnected", relay.sent(Method.DIRS_RECENT).isEmpty())
+        assertTrue(relay.sent(Method.GIT_STATUS).isEmpty())
+        assertTrue(relay.sent(Method.GIT_SHOW).isEmpty())
+        assertTrue(relay.sent(Method.GIT_DIFF).isEmpty())
+        assertNull(commit.state.value.error)
+        assertNull(diffVm.state.value.error)
+
+        relay.state.value = clauderc.app.net.ConnectionState.Connected
+        assertEquals("/p/clauderc-app", git.state.value.dir)
+        assertEquals(5, git.state.value.commits.size)
+        assertEquals(show, commit.state.value.value)
+        assertEquals(diff, diffVm.state.value.value)
     }
 }

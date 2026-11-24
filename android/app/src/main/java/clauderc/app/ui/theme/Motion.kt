@@ -150,7 +150,7 @@ object Motion {
     /** 贴纸 pops the picked nav icon in 460ms on the spring curve (ci-pop). */
     fun <T> iconPop(): FiniteAnimationSpec<T> = tween(460, easing = t.easeSpring)
 
-    /** 贴纸 sinks onto its hard shadow and pops back up on the spring curve, both in durS. */
+    /** 贴纸's press pose comes on and springs back on the spring curve, both in durS. */
     fun <T> push(): FiniteAnimationSpec<T> = tween(t.durS, easing = t.easeSpring)
 
     const val LensWide = 1.04f
