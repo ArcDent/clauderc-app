@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // buildAgent builds this command into a temp dir for start to launch.
@@ -157,4 +158,84 @@ func TestStartReportsEarlyExit(t *testing.T) {
 	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
 		t.Errorf("pid file kept after the early exit: %v", err)
 	}
+}
+
+// Two starts at nearly the same time both pass the lock check and launch a
+// run; only the run that takes the lock stays. The pid file must name that
+// one, so stop can end it.
+func TestConcurrentStartsLeaveRunningPID(t *testing.T) {
+	exe := buildAgent(t)
+	cfg := writeConfig(t, "wss://127.0.0.1:1")
+	pidFile, _ := daemonFiles(cfg)
+	args := []string{"--config", cfg}
+
+	// The second start begins once the first has checked the lock, and
+	// both launch together.
+	reached := make(chan struct{}, 2)
+	release := make(chan struct{})
+	beforeLaunch = func() {
+		reached <- struct{}{}
+		<-release
+	}
+	t.Cleanup(func() { beforeLaunch = func() {} })
+	type result struct {
+		out string
+		err error
+	}
+	results := make(chan result, 2)
+	start := func() {
+		var out bytes.Buffer
+		err := startCmd(args, exe, &out)
+		results <- result{out.String(), err}
+	}
+	wait := func() {
+		select {
+		case <-reached:
+		case <-time.After(5 * time.Second):
+			t.Fatal("a start did not reach the launch")
+		}
+	}
+	go start()
+	wait()
+	go start()
+	wait()
+	close(release)
+	var got []result
+	for range 2 {
+		got = append(got, <-results)
+	}
+
+	pid := readPID(t, pidFile)
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	if !isOurRun(pid, cfg) {
+		t.Fatalf("pid file names %d, which is not running run --config %s", pid, cfg)
+	}
+	ok := 0
+	for _, r := range got {
+		switch {
+		case r.err == nil && strings.Contains(r.out, "已在后台运行，进程号 "+strconv.Itoa(pid)):
+			ok++
+		case r.err != nil && strings.Contains(r.err.Error(), "已有 clauderc 在运行"):
+			// The losing start may report the lock it could not take.
+		default:
+			t.Errorf("start: err %v, output:\n%s", r.err, r.out)
+		}
+	}
+	if ok == 0 {
+		t.Errorf("no start reported the running process %d", pid)
+	}
+
+	var out bytes.Buffer
+	if err := stopCmd(args, &out); err != nil || !strings.Contains(out.String(), "已结束后台进程 "+strconv.Itoa(pid)) {
+		t.Fatalf("stop: %v %q", err, out.String())
+	}
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Errorf("pid file left behind: %v", err)
+	}
+	// No other run is left holding the config.
+	lock, err := lockConfig(cfg)
+	if err != nil {
+		t.Fatalf("config still locked after stop: %v", err)
+	}
+	lock.Close()
 }
