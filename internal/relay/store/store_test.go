@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -188,5 +189,31 @@ func TestFailedSaveKeepsOriginal(t *testing.T) {
 	}
 	if len(entries) != 1 {
 		t.Fatalf("directory has leftovers: %v", entries)
+	}
+}
+
+// A crash between creating and renaming a temp file leaves it behind; the
+// next Open removes it and keeps everything else.
+func TestOpenRemovesLeftoverTemps(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "relay.json")
+	for _, name := range []string{".relay.json.tmp-123", ".relay.json.tmp-456", "relay.json", "other.json", ".other.json.tmp-1"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.Open(path); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if got := strings.Join(names, " "); got != ".other.json.tmp-1 other.json relay.json" {
+		t.Fatalf("directory after Open: %s", got)
 	}
 }

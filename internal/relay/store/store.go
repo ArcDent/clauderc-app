@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -45,7 +46,7 @@ type state struct {
 
 // Store is a JSON state file guarded by a mutex. Every change is written to
 // a temp file and renamed over the old one, so a failed write leaves the
-// previous file intact.
+// previous file intact, and the directory is synced after the rename.
 type Store struct {
 	path string
 	mu   sync.Mutex
@@ -53,8 +54,10 @@ type Store struct {
 }
 
 // Open loads the state file at path; a missing file yields an empty store.
+// Temp files left by a write that was cut short are removed.
 func Open(path string) (*Store, error) {
 	s := &Store{path: path, st: state{Machines: []Machine{}, Devices: []deviceRecord{}}}
+	removeTemps(path)
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return s, nil
@@ -153,8 +156,37 @@ func (s *Store) commit(next state) error {
 	return nil
 }
 
+// tempPrefix starts the name of writeAtomic's temp files for path.
+func tempPrefix(path string) string { return "." + filepath.Base(path) + ".tmp-" }
+
+// removeTemps deletes temp files a crash left next to path. It is best
+// effort: a leftover only takes disk space.
+func removeTemps(path string) {
+	dir := filepath.Dir(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), tempPrefix(path)) && e.Type().IsRegular() {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
+// syncDir flushes dir, so a rename into it survives a power loss. Tests
+// replace it.
+var syncDir = func(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
 func writeAtomic(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), tempPrefix(path)+"*")
 	if err != nil {
 		return err
 	}
@@ -175,5 +207,8 @@ func writeAtomic(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(name, path)
+	if err := os.Rename(name, path); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
 }

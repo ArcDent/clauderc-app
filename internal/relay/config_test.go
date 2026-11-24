@@ -1,6 +1,7 @@
 package relay_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,5 +138,29 @@ func TestLoadConfigPublicURLMustBeWSS(t *testing.T) {
 				t.Errorf("error %q does not name public_url", err)
 			}
 		})
+	}
+}
+
+func TestLoadConfigTrustedProxies(t *testing.T) {
+	cfg, err := relay.LoadConfig(writeConfig(t, fullConfig, 0o600, "k"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TrustedProxies != nil {
+		t.Errorf("TrustedProxies = %v, want none by default", cfg.TrustedProxies)
+	}
+	body := fullConfig + `trusted_proxies = ["172.16.0.0/12", "fd00::/8"]` + "\n"
+	if cfg, err = relay.LoadConfig(writeConfig(t, body, 0o600, "k")); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(cfg.TrustedProxies); got != "[172.16.0.0/12 fd00::/8]" {
+		t.Errorf("TrustedProxies = %s", got)
+	}
+	for _, bad := range []string{"172.17.0.1", "docker", "172.16.0.0/40"} {
+		body := fullConfig + `trusted_proxies = ["` + bad + `"]` + "\n"
+		_, err := relay.LoadConfig(writeConfig(t, body, 0o600, "k"))
+		if err == nil || !strings.Contains(err.Error(), "trusted_proxies") {
+			t.Errorf("%q: error %v, want one naming trusted_proxies", bad, err)
+		}
 	}
 }

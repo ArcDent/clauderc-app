@@ -65,6 +65,8 @@ func serve(args []string) error {
 		PublicURL: cfg.PublicURL,
 		Store:     st,
 		Logger:    log,
+
+		TrustedProxies: cfg.TrustedProxies,
 	})
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {

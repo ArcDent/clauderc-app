@@ -2,9 +2,13 @@ package relay_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -129,8 +133,57 @@ func TestPairCodeExchangedForToken(t *testing.T) {
 	}
 
 	status, _, e := r.pair(t, pc.Code, "203.0.113.5")
-	if status != 404 || e.Code != "pairCodeInvalid" {
-		t.Fatalf("second use = %d %+v, want 404 pairCodeInvalid", status, e)
+	if status != 409 || e.Code != "pairCodeUsed" {
+		t.Fatalf("second use = %d %+v, want 409 pairCodeUsed", status, e)
+	}
+}
+
+// A retry of a redeemed code tells the user to make a new QR code, until
+// the code would have expired anyway.
+func TestPairCodeUsedTwice(t *testing.T) {
+	r, clock := startPairRelay(t)
+	pc := r.newPairCode(t)
+	if status, _, _ := r.pair(t, pc.Code, "203.0.113.5"); status != 200 {
+		t.Fatalf("first use: status %d", status)
+	}
+	clock.Advance(4 * time.Minute)
+	status, _, e := r.pair(t, pc.Code, "203.0.113.5")
+	if status != 409 || e.Code != "pairCodeUsed" || e.Message != "这个二维码已经配对过，请在目标机上重新生成" {
+		t.Fatalf("second use = %d %+v", status, e)
+	}
+	clock.Advance(time.Minute + time.Second)
+	if status, _, e := r.pair(t, pc.Code, "203.0.113.5"); status != 404 || e.Code != "pairCodeInvalid" || e.Message != "配对码无效或已使用" {
+		t.Fatalf("use after the code's lifetime = %d %+v", status, e)
+	}
+	if n := len(r.store.Devices()); n != 1 {
+		t.Fatalf("%d devices stored, want 1", n)
+	}
+}
+
+// A pairing whose credential cannot be saved must not use up the code.
+func TestPairCodeKeptWhenSaveFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	r, _ := startPairRelay(t)
+	pc := r.newPairCode(t)
+	dir := filepath.Dir(r.path)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	if status, _, e := r.pair(t, pc.Code, "203.0.113.5"); status != 500 || e.Code != "internal" {
+		t.Fatalf("pair with a read-only state dir = %d %+v, want 500 internal", status, e)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	status, got, e := r.pair(t, pc.Code, "203.0.113.5")
+	if status != 200 || got.Token == "" {
+		t.Fatalf("retry after the failed save = %d %+v", status, e)
+	}
+	if devs := r.store.Devices(); len(devs) != 1 || devs[0].ID != got.DeviceID {
+		t.Fatalf("stored devices = %+v", devs)
 	}
 }
 
@@ -193,26 +246,56 @@ func TestPairRateLimitedPerSource(t *testing.T) {
 	}
 }
 
+// pairFrom redeems code on the handler directly, as if from peer with the
+// given X-Forwarded-For, and returns the status.
+func (r *testRelay) pairFrom(peer, xff, code string) int {
+	raw, _ := json.Marshal(map[string]string{"code": code, "deviceName": "Pixel 9"})
+	req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(string(raw)))
+	req.RemoteAddr = peer
+	req.Header.Set("X-Forwarded-For", xff)
+	rec := httptest.NewRecorder()
+	r.srv.ServeHTTP(rec, req)
+	return rec.Code
+}
+
 // X-Forwarded-For is only trusted from a loopback peer; otherwise the
 // direct address is the source, whatever the header says.
 func TestPairRateLimitIgnoresForwardedForFromRemotePeer(t *testing.T) {
 	r, _ := startPairRelay(t)
-	send := func(i int, code string) int {
-		raw, _ := json.Marshal(map[string]string{"code": code, "deviceName": "Pixel 9"})
-		req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(string(raw)))
-		req.RemoteAddr = "198.51.100.7:40000"
-		req.Header.Set("X-Forwarded-For", "203.0.113."+string(rune('a'+i)))
-		rec := httptest.NewRecorder()
-		r.srv.ServeHTTP(rec, req)
-		return rec.Code
-	}
 	for i := 0; i < 10; i++ {
-		if status := send(i, "bad-code"); status != 404 {
+		if status := r.pairFrom("198.51.100.7:40000", "203.0.113."+string(rune('a'+i)), "bad-code"); status != 404 {
 			t.Fatalf("failure %d: status %d", i+1, status)
 		}
 	}
-	if status := send(10, r.newPairCode(t).Code); status != 429 {
+	if status := r.pairFrom("198.51.100.7:40000", "203.0.113.k", r.newPairCode(t).Code); status != 429 {
 		t.Fatalf("status %d, want 429", status)
+	}
+}
+
+// Behind Docker every request arrives from the bridge gateway. With that
+// network in TrustedProxies each phone is limited by its own address, taken
+// from the right of X-Forwarded-For so a forged entry on the left is ignored.
+func TestPairRateLimitByForwardedForFromTrustedProxy(t *testing.T) {
+	const gateway = "172.17.0.1:40000"
+	r := startRelay(t, func(o *relay.Options) {
+		o.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("172.16.0.0/12")}
+	})
+	for i := 0; i < 10; i++ {
+		// The left entry is forged by the client and differs each time.
+		xff := fmt.Sprintf("198.51.100.%d, 203.0.113.5", i)
+		if status := r.pairFrom(gateway, xff, "bad-code"); status != 404 {
+			t.Fatalf("failure %d: status %d", i+1, status)
+		}
+	}
+	if status := r.pairFrom(gateway, "203.0.113.5", r.newPairCode(t).Code); status != 429 {
+		t.Fatalf("limited phone: status %d, want 429", status)
+	}
+	// A second trusted proxy in the chain is skipped too.
+	if status := r.pairFrom(gateway, "203.0.113.5, 172.18.0.5", r.newPairCode(t).Code); status != 429 {
+		t.Fatalf("limited phone via two proxies: status %d, want 429", status)
+	}
+	if status := r.pairFrom(gateway, "203.0.113.6", r.newPairCode(t).Code); status != 200 {
+		t.Fatalf("other phone through the same gateway: status %d, want 200", status)
 	}
 }
 
