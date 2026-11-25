@@ -61,7 +61,7 @@ class ChatScrollTest {
      * above and below the list: its edges are where the messages start and end. 清玻 floats both over
      * a full-screen list, which [clearFloatsTheBarsOverTheMessages] checks.
      */
-    private fun show(style: UiStyle = UiStyle.Grid) {
+    private fun show(style: UiStyle = UiStyle.Plate) {
         compose.mainClock.autoAdvance = false
         compose.setContent {
             ClaudercTheme(darkTheme = false, style = style) {

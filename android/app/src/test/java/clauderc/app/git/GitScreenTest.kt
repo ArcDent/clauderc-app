@@ -1,11 +1,15 @@
 package clauderc.app.git
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -22,7 +26,10 @@ import clauderc.app.protocol.GitStatusResponse
 import clauderc.app.protocol.Ref
 import clauderc.app.protocol.RefKind
 import clauderc.app.testing.T0
+import androidx.compose.ui.graphics.Color
+import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.ClaudercTheme
+import clauderc.app.ui.theme.InkDarkColors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -50,8 +57,8 @@ class GitScreenTest {
         )
     }
 
-    private fun show(state: GitUiState, actions: GitActions = GitActions()) {
-        compose.setContent { ClaudercTheme(darkTheme = false) { GitScreen(state, actions) } }
+    private fun show(state: GitUiState, actions: GitActions = GitActions(), style: UiStyle = UiStyle.Clear) {
+        compose.setContent { ClaudercTheme(darkTheme = false, style = style) { GitScreen(state, actions) } }
     }
 
     private val base = GitUiState(dir = "/Users/me/github/clauderc-app", dirs = listOf("/Users/me/github/clauderc-app", "/Users/me/notes"), status = status, commits = commits(30), hasMore = true)
@@ -195,5 +202,217 @@ class GitScreenTest {
             }
         }
         compose.onNodeWithText("二进制文件已更改，不显示内容").assertIsDisplayed()
+    }
+
+    @Test fun diffGroupsAdjacentDelAndAddWithoutBackgroundFillAndShowsAlignedHeader() {
+        val patch = "@@ -1,3 +1,4 @@\n package protocol\n-var oldA = 1\n-var oldB = 2\n+var newA = 1\n+var newB = 2\n+var newC = 3\n"
+        val blocks = groupDiffLines(parsePatch(patch))
+        val del = blocks.filterIsInstance<DiffBlock.Group>().first { it.kind == DiffKind.Del }
+        val add = blocks.filterIsInstance<DiffBlock.Group>().first { it.kind == DiffKind.Add }
+        assertTrue("adjacent Del joins Add", del.joinNext && !del.joinPrev)
+        assertTrue("adjacent Add joins Del", add.joinPrev && !add.joinNext)
+        assertEquals(Color.Transparent, diffLineColors(DiffKind.Del, InkDarkColors).first)
+        assertEquals(Color.Transparent, diffLineColors(DiffKind.Add, InkDarkColors).first)
+
+        compose.setContent {
+            ClaudercTheme(darkTheme = true, style = UiStyle.Ink) {
+                DiffScreen("envelope.go", "7c2e0d4", Loadable(GitDiffResponse("envelope.go", patch = patch)), onBack = {})
+            }
+        }
+        compose.onNodeWithTag("diffHeader").assertIsDisplayed()
+        compose.onNodeWithText("旧").assertIsDisplayed()
+        compose.onNodeWithText("新").assertIsDisplayed()
+        compose.onNodeWithText("代码差异").assertIsDisplayed()
+        compose.onNodeWithTag("diffDelGroup").assertIsDisplayed()
+        compose.onNodeWithTag("diffAddGroup").assertIsDisplayed()
+    }
+
+    @Test fun plateGitShowsPendingStampSeal() {
+        var jumped = 0
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Plate) {
+                GitScreen(base, GitActions(), pendingCount = 2, onOpenPending = { jumped++ })
+            }
+        }
+        compose.onNodeWithTag("pendingJumpBadge").assertIsDisplayed().performClick()
+        assertEquals(1, jumped)
+    }
+
+    @Test fun inkGitShowsFloatingTopBarBrushTabsAndMachineDirSwitcher() {
+        var drawerOpened = 0
+        val pickedDirs = mutableListOf<String>()
+        val openedCommits = mutableListOf<String>()
+        val tabs = mutableListOf<GitTab>()
+        val m1 = clauderc.app.testing.machine("m-1", "工作室 Mac mini")
+        val m2 = clauderc.app.testing.machine("m-2", "家里的 iMac")
+        val switchedMachines = mutableListOf<String>()
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Ink) {
+                GitScreen(
+                    base,
+                    GitActions(
+                        onTab = { tabs += it },
+                        onPickDir = { pickedDirs += it },
+                        onOpenCommitAt = { hash, _ -> openedCommits += hash },
+                    ),
+                    onOpenDrawer = { drawerOpened++ },
+                    machines = listOf(m1, m2),
+                    currentMachineId = "m-1",
+                    onSelectMachine = { switchedMachines += it.id },
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("inkDrawerButton").assertIsDisplayed().performClick()
+        assertEquals(1, drawerOpened)
+        compose.onNodeWithTag("inkBrushTabs").assertIsDisplayed()
+        compose.onNodeWithText("3").assertIsDisplayed()
+        compose.onNodeWithTag("brushTab:1").performClick()
+        assertEquals(listOf(GitTab.Status), tabs)
+
+        // Center pill opens recent directory morph panel (without machine switcher).
+        compose.onNodeWithTag("inkMachinePill").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("最近的目录").assertIsDisplayed()
+        compose.onNodeWithText("家里的 iMac").assertDoesNotExist()
+        compose.onNodeWithText("notes").performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("/Users/me/notes"), pickedDirs)
+
+        // Tapping a commit triggers Ink's morph commit callback.
+        compose.onNodeWithText("提交 0").performClick()
+        assertEquals(listOf("c000000"), openedCommits)
+    }
+
+    @Test fun inkCommitAndDiffMorphPanelsSupportParentBackAndWorkingTreeStaging() {
+        val show = GitShowResponse(
+            hash = "7c2e0d4aa", parents = listOf("5b81aa0ff"), author = "林舟", time = T0,
+            message = "定义协议信封",
+            files = listOf(CommitFile("internal/protocol/envelope.go", added = 12, deleted = 2)),
+        )
+        val parentsOpened = mutableListOf<String>()
+        val filesOpened = mutableListOf<String>()
+        var backed = 0
+        var stageToggled = 0
+        val patch = "@@ -1,2 +1,2 @@\n-old\n+new\n"
+        var showDiff by androidx.compose.runtime.mutableStateOf(false)
+        compose.setContent {
+            ClaudercTheme(darkTheme = true, style = UiStyle.Ink) {
+                if (!showDiff) {
+                    CommitMorphPanel(
+                        dir = "/Users/me/github/clauderc-app",
+                        hash = "7c2e0d4aa",
+                        canGoBack = true,
+                        state = Loadable(show),
+                        anchor = null,
+                        onBackParent = { backed++ },
+                        onClose = {},
+                        onOpenParent = { parentsOpened += it },
+                        onOpenFileAt = { f, _ -> filesOpened += f.path },
+                    )
+                } else {
+                    DiffMorphPanel(
+                        path = "internal/protocol/envelope.go",
+                        subtitle = "未暂存",
+                        state = Loadable(GitDiffResponse("envelope.go", patch = patch)),
+                        anchor = null,
+                        staged = false,
+                        onToggleStage = { stageToggled++ },
+                        onClose = {},
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("inkCommitMorph").assertIsDisplayed()
+        compose.onNodeWithTag("commitParent:5b81aa0").performClick()
+        assertEquals(listOf("5b81aa0ff"), parentsOpened)
+        compose.onNodeWithText("envelope.go").performClick()
+        assertEquals(listOf("internal/protocol/envelope.go"), filesOpened)
+        compose.onNode(androidx.compose.ui.test.hasContentDescription("上一条提交")).performClick()
+        assertEquals(1, backed)
+
+        showDiff = true
+        compose.waitForIdle()
+        compose.onNodeWithTag("inkDiffMorph").assertIsDisplayed()
+        compose.onNodeWithTag("diffHeader").assertIsDisplayed()
+        compose.onNodeWithText("暂存此文件").assertIsDisplayed().performClick()
+        assertEquals(1, stageToggled)
+    }
+
+    @Test fun plateGitShowsHeaderTabs2BranchPillAndOpensSlipPanel() {
+        val tabs = mutableListOf<GitTab>()
+        val pickedDirs = mutableListOf<String>()
+        var refreshed = 0
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Plate) {
+                GitScreen(
+                    base.copy(dirs = listOf("/Users/me/github/clauderc-app", "/Users/me/github/api")),
+                    GitActions(
+                        onRefresh = { refreshed++ },
+                        onTab = { tabs += it },
+                        onPickDir = { pickedDirs += it },
+                    ),
+                    pendingCount = 2,
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("plateGitHeader").assertIsDisplayed()
+        compose.onNodeWithTag("plateTabs2").assertIsDisplayed()
+        compose.onNodeWithTag("plateBranchPill").assertIsDisplayed()
+        compose.onNodeWithContentDescription("刷新").performClick()
+        assertEquals(1, refreshed)
+        compose.onNodeWithText("改动").performClick()
+        assertEquals(listOf(GitTab.Status), tabs)
+        compose.onNodeWithTag("plateGitWhere").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("plateSlip").assertIsDisplayed()
+        compose.onNodeWithText("api").performClick()
+        assertEquals(listOf("/Users/me/github/api"), pickedDirs)
+    }
+
+    @Test fun clearGitShowsSegLensAndOpensDropPanel() {
+        val pickedDirs = mutableListOf<String>()
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Clear) {
+                GitScreen(
+                    base.copy(dirs = listOf("/Users/me/github/clauderc-app", "/Users/me/github/api")),
+                    GitActions(onPickDir = { pickedDirs += it }),
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("clearGitHeader").assertIsDisplayed()
+        compose.onNodeWithTag("clearSegLens").assertIsDisplayed()
+        compose.onNodeWithTag("clearGitWhere").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("clearDrop").assertIsDisplayed()
+        compose.onNodeWithText("api").performClick()
+        assertEquals(listOf("/Users/me/github/api"), pickedDirs)
+    }
+
+    @Test fun tileGitShowsGroupedHeaderPendingCookieAndOpensBottomSheet() {
+        val pickedDirs = mutableListOf<String>()
+        var jumped = 0
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Tile) {
+                GitScreen(
+                    base.copy(dirs = listOf("/Users/me/github/clauderc-app", "/Users/me/github/api")),
+                    GitActions(onPickDir = { pickedDirs += it }),
+                    pendingCount = 3,
+                    onOpenPending = { jumped++ },
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("tileGitHeader").assertIsDisplayed()
+        compose.onNodeWithTag("pendingJumpBadge").assertIsDisplayed().performClick()
+        assertEquals(1, jumped)
+        compose.onNodeWithTag("tileGitWhere").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("tileSheet").assertIsDisplayed()
+        compose.onNodeWithText("api").performClick()
+        assertEquals(listOf("/Users/me/github/api"), pickedDirs)
     }
 }

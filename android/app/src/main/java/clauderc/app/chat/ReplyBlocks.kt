@@ -199,42 +199,35 @@ private fun Heading(b: MdBlock.Heading, shown: Int, color: Color, modifier: Modi
         fontSize = when (b.level) { 1 -> 18.sp; 2 -> 16.sp; else -> 15.sp },
         lineHeight = 1.4.em,
         fontWeight = when (Clauderc.style) {
-            UiStyle.Clear -> FontWeight.SemiBold
-            UiStyle.Grid -> FontWeight.Bold
-            UiStyle.Sticker -> FontWeight.ExtraBold
+            UiStyle.Clear, UiStyle.Ink -> FontWeight.SemiBold
+            UiStyle.Tile -> FontWeight.Bold
+            UiStyle.Plate -> FontWeight.ExtraBold
         },
-        fontFamily = if (Clauderc.style == UiStyle.Grid) MonoFamily else null,
+        fontFamily = if (Clauderc.style == UiStyle.Plate) MonoFamily else null,
     )
-    if (Clauderc.style != UiStyle.Grid) return RunsText(b.runs, shown, color, modifier, style)
+    if (Clauderc.style != UiStyle.Plate) return RunsText(b.runs, shown, color, modifier, style)
     Row(modifier) {
-        // Marks, like the list markers and the code head: not part of what is selected and copied.
         DisableSelection { Text("#".repeat(b.level) + " ", Modifier.alignByBaseline(), color = Clauderc.colors.fg3, style = style) }
         RunsText(b.runs, shown, color, Modifier.alignByBaseline(), style)
     }
 }
 
-/** A quote in the second grey behind a rule down its left: 2dp of surface2, 格栅 2dp of fg3, 贴纸 3dp of the accent. */
 @Composable
 private fun Quote(b: MdBlock.Quote, shown: Int, modifier: Modifier) {
     val c = Clauderc.colors
     val (rule, width) = when (Clauderc.style) {
         UiStyle.Clear -> c.surface2 to 2.dp
-        UiStyle.Grid -> c.fg3 to 2.dp
-        UiStyle.Sticker -> c.accent to 3.dp
+        UiStyle.Plate -> c.fg to 2.dp
+        UiStyle.Tile, UiStyle.Ink -> c.accent to 3.dp
     }
     Column(modifier.drawBehind { drawRect(rule, size = Size(width.toPx(), size.height)) }.padding(start = 12.dp)) {
         Blocks(b.blocks, shown, c.fg2)
     }
 }
 
-/**
- * A list: each item's marker in grey in a 1.4em column, its blocks beside it, items 2dp apart.
- * Numbers and dots end where the text starts; 格栅 marks a bullet with a mono 「-」 at the column's start.
- */
 @Composable
 private fun ItemList(b: MdBlock.ItemList, shown: Int, color: Color, modifier: Modifier) {
-    val grid = Clauderc.style == UiStyle.Grid
-    // Room for the widest number: 1.4em fits 「9.」, each further digit takes another 0.6em.
+    val plate = Clauderc.style == UiStyle.Plate
     val digits = if (b.ordered) (b.start + b.items.size - 1).toString().length else 1
     val column = (1.4f + 0.6f * (digits - 1)).em
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -242,7 +235,7 @@ private fun ItemList(b: MdBlock.ItemList, shown: Int, color: Color, modifier: Mo
         for ((i, item) in b.items.withIndex()) {
             if (left <= 0) break
             Row(Modifier.fillMaxWidth()) {
-                val dash = grid && !b.ordered
+                val dash = plate && !b.ordered
                 DisableSelection {
                     Text(
                         if (b.ordered) "${b.start + i}." else if (dash) "-" else "•",
@@ -278,11 +271,12 @@ private fun Modifier.bleed(by: Dp) = layout { measurable, constraints ->
 @Composable
 private fun CodeBox(b: MdBlock.Code, shown: Int, modifier: Modifier) {
     val c = Clauderc.colors
-    val shape = if (Clauderc.style == UiStyle.Grid) RectangleShape else RoundedCornerShape(14.dp)
+    val shape = if (Clauderc.style == UiStyle.Plate) RectangleShape else RoundedCornerShape(14.dp)
     val box = when (Clauderc.style) {
         UiStyle.Clear -> Modifier.bleed(6.dp).clip(shape).background(c.bg)
-        UiStyle.Grid -> Modifier.clip(shape).background(c.surface).border(1.dp, c.fg, shape)
-        UiStyle.Sticker -> Modifier.bleed(6.dp).clip(shape).background(c.bg).border(2.dp, c.ink, shape)
+        UiStyle.Plate -> Modifier.clip(shape).background(c.surface).border(1.5.dp, c.fg, shape)
+        UiStyle.Tile -> Modifier.bleed(6.dp).clip(shape).background(c.surface)
+        UiStyle.Ink -> Modifier.bleed(6.dp).clip(shape).background(c.bg).border(1.dp, c.edge, shape)
     }
     Column(modifier.fillMaxWidth().then(box).testTag("codeBlock")) {
         DisableSelection {
@@ -302,18 +296,13 @@ private fun CodeBox(b: MdBlock.Code, shown: Int, modifier: Modifier) {
     }
 }
 
-/**
- * The copy button in a code block's head (.cb-copy), 30dp: it copies the code as written and says
- * so itself, with no snackbar. The copy icon shrinks and fades while a tick draws itself left to right
- * and springs to size; 1.5s later the tick shrinks away and the copy icon grows back. Another tap starts over.
- */
 @Composable
 private fun CopyCodeButton(code: String) {
     val c = Clauderc.colors
     val m = Clauderc.motion
     val clipboard = LocalClipboard.current
     val press = remember { MutableInteractionSource() }
-    val shape = if (Clauderc.style == UiStyle.Grid) RectangleShape else CircleShape
+    val shape = if (Clauderc.style == UiStyle.Plate) RectangleShape else CircleShape
     val swap = remember { TickSwap() }
     var done by remember { mutableStateOf(false) }
     var taps by remember { mutableIntStateOf(0) }
@@ -399,7 +388,7 @@ internal class TickSwap(iconShown: Boolean = true, ticked: Boolean = false) {
     /** [icon] and over it the tick (.cb-i2, .v-ok): one stroke on a 24-unit grid, drawn as far as it has got. */
     @Composable
     fun Icons(icon: ImageVector, tint: Color, iconSize: Dp, tickSize: Dp) {
-        val stroke = if (Clauderc.style == UiStyle.Sticker) 2.4f else 1.9f
+        val stroke = if (Clauderc.style == UiStyle.Plate) 2.2f else 1.9f
         Icon(
             icon,
             contentDescription = null,
@@ -446,16 +435,16 @@ private fun TableBox(b: MdBlock.Table, modifier: Modifier) {
     val look = Clauderc.style
     val rows = listOf(b.head) + b.rows
     val columns = rows.maxOf { it.size }
-    val bodyStyle = TextStyle(fontSize = if (look == UiStyle.Grid) 12.sp else 13.5.sp, lineHeight = 1.5.em, fontFamily = if (look == UiStyle.Grid) MonoFamily else null)
+    val bodyStyle = TextStyle(fontSize = if (look == UiStyle.Plate) 12.sp else 13.5.sp, lineHeight = 1.5.em, fontFamily = if (look == UiStyle.Plate) MonoFamily else null)
     val headStyle = bodyStyle.copy(
         fontSize = Clauderc.fontSizes.caption,
-        fontWeight = if (look == UiStyle.Sticker) FontWeight.Bold else FontWeight.Medium,
+        fontWeight = if (look == UiStyle.Plate) FontWeight.ExtraBold else FontWeight.Medium,
     )
     val headColor = if (look == UiStyle.Clear) c.fg2 else c.fg
-    val rowLine = if (look == UiStyle.Sticker) 1.5.dp else 1.dp
-    val frame = if (look == UiStyle.Sticker) RoundedCornerShape(12.dp).let { Modifier.clip(it).border(2.dp, c.ink, it) } else Modifier
+    val rowLine = 1.dp
+    val frame = if (look == UiStyle.Plate) Modifier.border(1.5.dp, c.fg) else Modifier
     val tops = remember { RowTops() }
-    Box(modifier.fillMaxWidth().let { if (look == UiStyle.Grid) it else it.bleed(6.dp) }.horizontalScroll(rememberScrollState()).testTag("table")) {
+    Box(modifier.fillMaxWidth().let { if (look == UiStyle.Plate) it else it.bleed(6.dp) }.horizontalScroll(rememberScrollState()).testTag("table")) {
         Layout(
             content = {
                 for ((r, row) in rows.withIndex()) {
@@ -475,8 +464,8 @@ private fun TableBox(b: MdBlock.Table, modifier: Modifier) {
                 val t = tops.at
                 if (t.size < 2) return@drawBehind
                 when (look) {
-                    UiStyle.Sticker -> drawRect(c.accent.copy(alpha = 0.22f), size = Size(size.width, t[1].toFloat()))
-                    UiStyle.Grid -> drawRect(c.fg, Offset(0f, t[1] - 2.dp.toPx()), Size(size.width, 2.dp.toPx()))
+                    UiStyle.Plate -> drawRect(c.fg, Offset(0f, t[1] - 2.dp.toPx()), Size(size.width, 2.dp.toPx()))
+                    UiStyle.Tile, UiStyle.Ink -> drawRect(c.surface, size = Size(size.width, t[1].toFloat()))
                     UiStyle.Clear -> {}
                 }
                 for (r in 1 until t.size - 1) drawRect(c.line, Offset(0f, t[r].toFloat()), Size(size.width, rowLine.toPx()))
@@ -523,7 +512,7 @@ internal fun BubbleSelection(enabled: Boolean, mine: Boolean, content: @Composab
     val c = Clauderc.colors
     val tint = when {
         !mine -> c.accent.copy(alpha = 0.28f)
-        Clauderc.style == UiStyle.Sticker -> c.onAccent.copy(alpha = 0.28f)
+        Clauderc.style == UiStyle.Tile -> c.onAccent.copy(alpha = 0.28f)
         else -> c.bg.copy(alpha = 0.36f)
     }
     val plain = LocalClipboard.current

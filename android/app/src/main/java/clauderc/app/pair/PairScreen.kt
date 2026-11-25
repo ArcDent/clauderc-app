@@ -44,6 +44,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -56,11 +57,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import clauderc.app.ui.components.LocalMorphClose
+import clauderc.app.ui.components.MorphOverlay
 import clauderc.app.ui.components.PillButton
 import clauderc.app.ui.components.PillStyle
 import clauderc.app.ui.components.Spinner
@@ -144,6 +148,113 @@ fun PairScreen(
     }
 }
 
+/**
+ * 浮墨's morphing floating QR scanner card (demo.html `A.openPair` for Ink):
+ * blooms directly out of the tapped scan orb / settings row and hosts the real ZXing camera viewfinder
+ * + inline failure/retry state inside a floating 30dp ink card.
+ */
+@Composable
+fun PairMorphPanel(
+    state: PairUiState,
+    onScanned: (String) -> Unit,
+    onRescan: () -> Unit,
+    onDismiss: () -> Unit,
+    anchor: Rect? = null,
+    fromTop: Boolean = false,
+    scanner: @Composable (Modifier, (String) -> Unit) -> Unit = { m, cb -> QrScanner(m, cb) },
+) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    val failed = state !is PairUiState.Scanning && state !is PairUiState.Pairing && state !is PairUiState.Paired && state !is PairUiState.Known
+    var cameraReady by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(320)
+        cameraReady = true
+    }
+    MorphOverlay(onDismiss = onDismiss, anchor = anchor, fromTop = fromTop, tag = "inkPairMorph") {
+        val close = LocalMorphClose.current
+        Column(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("扫描配对二维码", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = c.fg)
+                SymbolButton(Symbols.Close, "关闭", onClick = { close?.invoke(null) ?: onDismiss() }, small = true)
+            }
+            Box(
+                Modifier
+                    .size(236.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(c.camera),
+                contentAlignment = Alignment.Center,
+            ) {
+                Viewfinder(Modifier, scanning = state is PairUiState.Scanning, boxSize = 220.dp) { m ->
+                    if (cameraReady && (state is PairUiState.Scanning || state is PairUiState.Pairing)) scanner(m, onScanned)
+                }
+            }
+            if (!failed) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(sp.sp2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    when (state) {
+                        PairUiState.Pairing, PairUiState.Paired, is PairUiState.Known -> {
+                            Spinner(size = 12.dp, color = c.fg2)
+                            Text("正在配对", color = c.fg2, fontSize = Clauderc.fontSizes.caption)
+                        }
+                        PairUiState.Scanning -> Text("二维码 5 分钟内有效，只能用一次", color = c.fg3, fontSize = Clauderc.fontSizes.caption)
+                        PairUiState.Expired, PairUiState.Used, PairUiState.Redeemed, is PairUiState.Insecure, PairUiState.RateLimited, is PairUiState.Failed -> Unit
+                    }
+                }
+            } else {
+                FailureInline(state, onRescan)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FailureInline(state: PairUiState, onRescan: () -> Unit) {
+    val c = Clauderc.colors
+    val (title, body) = failureCopy(state)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(c.surface2)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(title, color = c.fg, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            buildAnnotatedString {
+                body.forEachIndexed { i, part ->
+                    if (i % 2 == 1) withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm, color = c.fg)) { append(part) } else append(part)
+                }
+            },
+            color = c.fg2,
+            fontSize = Clauderc.fontSizes.label,
+            lineHeight = 1.55.em,
+        )
+        PillButton("重新扫描", onClick = onRescan, style = PillStyle.Ink, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+    }
+}
+
+private fun failureCopy(state: PairUiState): Pair<String, List<String>> = when (state) {
+    PairUiState.Expired -> "二维码已过期" to listOf("生成已超过 5 分钟，在目标机上重新生成一个。")
+    PairUiState.Used -> "二维码无效" to listOf("它可能已经被用过，每个二维码只能用一次。")
+    PairUiState.Redeemed -> "二维码已经用过" to listOf("请在目标机上重新生成一个。")
+    is PairUiState.Insecure -> "地址没有加密" to listOf("二维码里的地址是 ", state.address, "。\n只能连接 ", "https://", " 或 ", "wss://", " 地址。")
+    PairUiState.RateLimited -> "尝试太频繁" to listOf("1 分钟内失败次数过多，稍后再扫。")
+    is PairUiState.Failed -> "配对失败" to listOf(state.message)
+    else -> "" to emptyList()
+}
+
 @Composable
 private fun FailureSheet(state: PairUiState, onRescan: () -> Unit) {
     val c = Clauderc.colors
@@ -151,7 +262,7 @@ private fun FailureSheet(state: PairUiState, onRescan: () -> Unit) {
     val (title, body) = when (state) {
         PairUiState.Expired -> "二维码已过期" to listOf("生成已超过 5 分钟，在目标机上重新生成一个。")
         PairUiState.Used -> "二维码无效" to listOf("它可能已经被用过，每个二维码只能用一次。")
-        PairUiState.Redeemed -> "二维码已经用过" to listOf("这个二维码已经配对过，请在目标机上重新生成。")
+        PairUiState.Redeemed -> "二维码已经用过" to listOf("请在目标机上重新生成一个。")
         is PairUiState.Insecure -> "地址没有加密" to listOf("二维码里的地址是 ", state.address, "。\n只能连接 ", "https://", " 或 ", "wss://", " 地址。")
         PairUiState.RateLimited -> "尝试太频繁" to listOf("1 分钟内失败次数过多，稍后再扫。")
         is PairUiState.Failed -> "配对失败" to listOf(state.message)
@@ -189,11 +300,17 @@ private fun FailureSheet(state: PairUiState, onRescan: () -> Unit) {
 
 /** .vf: four 28dp corner brackets and a scan line moving down 220dp and back, 3.6s each way. */
 @Composable
-private fun Viewfinder(modifier: Modifier, scanning: Boolean, preview: @Composable (Modifier) -> Unit) {
+private fun Viewfinder(
+    modifier: Modifier,
+    scanning: Boolean,
+    boxSize: androidx.compose.ui.unit.Dp = 240.dp,
+    preview: @Composable (Modifier) -> Unit,
+) {
     val c = Clauderc.colors
     val t = rememberInfiniteTransition(label = "scan")
-    val y by t.animateFloat(0f, 220f, Motion.scanLine, label = "y")
-    Box(modifier.size(240.dp).testTag("viewfinder")) {
+    val travel = (boxSize.value - 20f).coerceAtLeast(120f)
+    val y by t.animateFloat(0f, travel, Motion.scanLine, label = "y")
+    Box(modifier.size(boxSize).testTag("viewfinder")) {
         preview(Modifier.fillMaxSize().padding(6.dp).clip(RoundedCornerShape(10.dp)))
         Canvas(Modifier.fillMaxSize()) {
             val arm = 28.dp.toPx()

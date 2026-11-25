@@ -6,9 +6,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.LocalIndication
 import clauderc.app.ui.theme.pressShrink
-import clauderc.app.ui.theme.StickerPress
-import clauderc.app.ui.components.StickerCorner
-import clauderc.app.ui.components.sticker
+import clauderc.app.ui.theme.PressKind
+import clauderc.app.ui.components.CardCorner
+import clauderc.app.ui.components.inkSurface
+import clauderc.app.ui.components.tileSurface
 import clauderc.app.data.UiStyle
 import clauderc.app.ui.components.RowIcon
 import androidx.compose.foundation.background
@@ -190,20 +191,24 @@ private fun MachineRowView(row: MachineRow, index: Int, modifier: Modifier = Mod
     val sp = Clauderc.spacing
     val m = row.machine
     val card = Clauderc.look.cards
-    val grid = Clauderc.style == UiStyle.Grid
+    val plate = Clauderc.style == UiStyle.Plate
     val press = remember { MutableInteractionSource() }
+    val surface = when (Clauderc.style) {
+        UiStyle.Tile -> Modifier.pressShrink(press, PressKind.Card).tileSurface(c.card, CardCorner)
+        UiStyle.Ink -> Modifier.pressShrink(press, PressKind.Card).inkSurface(c.card, c.edge, CardCorner)
+        else -> Modifier
+    }
     Row(
         modifier
             .fillMaxWidth()
-            // 贴纸: the row is its own sticker; pressed, it tilts a hair and its round sticker turns further.
-            .then(if (card) Modifier.pressShrink(press, StickerPress.Card).sticker(c.panel, c.ink, StickerCorner) else Modifier)
+            .then(surface)
             .clickable(press, LocalIndication.current, role = Role.Button, onClick = onClick)
-            .padding(start = Clauderc.look.rowStart, top = if (card) sp.sp4 else if (grid) 12.dp else 14.dp, bottom = if (card) sp.sp4 else if (grid) 12.dp else 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (grid) sp.sp3 else sp.sp4),
+            .padding(start = Clauderc.look.rowStart, top = if (card) sp.sp4 else if (plate) 12.dp else 14.dp, bottom = if (card) sp.sp4 else if (plate) 12.dp else 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (plate) sp.sp3 else sp.sp4),
     ) {
         RowIcon(Symbols.Computer, index, off = !m.online, tint = if (m.online) c.fg2 else c.fg3, modifier = if (card) Modifier.align(Alignment.CenterVertically) else Modifier, press = press)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(m.name, fontSize = Clauderc.fontSizes.body, fontWeight = if (card) FontWeight.ExtraBold else null, color = if (m.online) c.fg else c.fg3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(m.name, fontSize = Clauderc.fontSizes.body, fontWeight = if (card) FontWeight.SemiBold else null, color = if (m.online) c.fg else c.fg3, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 buildAnnotatedString {
                     when {
@@ -219,9 +224,9 @@ private fun MachineRowView(row: MachineRow, index: Int, modifier: Modifier = Mod
                         }
                     }
                 },
-                // 格栅 sets the second line in small monospace.
-                fontSize = if (grid) 11.5.sp else Clauderc.fontSizes.label,
-                fontFamily = if (grid) MonoFamily else null,
+                // 印版 sets the second line in small monospace.
+                fontSize = if (plate) 11.5.sp else Clauderc.fontSizes.label,
+                fontFamily = if (plate) MonoFamily else null,
                 color = c.fg2,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -251,11 +256,16 @@ private fun MachineSummary(rows: List<MachineRow>) {
     val online = rows.count { it.machine.online }
     val need = rows.sumOf { it.pending }
     val sessions = rows.sumOf { it.sessions ?: 0 }
+    val surface = when (Clauderc.style) {
+        UiStyle.Tile -> Modifier.tileSurface(c.card, CardCorner)
+        UiStyle.Ink -> Modifier.inkSurface(c.card, c.edge, CardCorner)
+        else -> Modifier
+    }
     Row(
         Modifier
             .padding(start = sp.sp4, end = sp.sp4, bottom = sp.sp3 + sp.sp1)
             .fillMaxWidth()
-            .sticker(c.panel, c.ink, StickerCorner)
+            .then(surface)
             .padding(sp.sp4),
         horizontalArrangement = Arrangement.spacedBy(sp.sp3),
         verticalAlignment = Alignment.CenterVertically,

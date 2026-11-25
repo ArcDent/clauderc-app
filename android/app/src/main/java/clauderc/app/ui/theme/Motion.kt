@@ -59,6 +59,19 @@ object Motion {
     fun <T> exit(): FiniteAnimationSpec<T> = tween(t.durS, easing = t.easeEmphIn)
     fun <T> fade(): FiniteAnimationSpec<T> = tween(t.durS)
 
+    /** 浮墨's signature curves (demo.html --goo / --ease / --ease-in). */
+    val inkGoo: Easing = CubicBezierEasing(0.34f, 1.24f, 0.64f, 1f)
+    val inkEase: Easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+    val inkEaseIn: Easing = CubicBezierEasing(0.55f, 0f, 0.85f, 0.35f)
+    const val INK_MORPH_OPEN_MS = 460
+    const val INK_MORPH_CLOSE_MS = 280
+
+    /** 印版's crisp letterpress easing & slip/pulse timings (demo.html --ease-press). */
+    val plateEasePress: Easing = CubicBezierEasing(0.18f, 0.92f, 0.26f, 1f)
+    const val PLATE_SLIP_OPEN_MS = 440
+    const val PLATE_SLIP_CLOSE_MS = 220
+    const val PLATE_DANGER_PULSE_MS = 1800
+
     /**
      * Small parts over the composer and the snackbar: fade, move [px] into place and take their room. One
      * coming up from the bottom is drawn whole from the first frame, over what is above it, while its room

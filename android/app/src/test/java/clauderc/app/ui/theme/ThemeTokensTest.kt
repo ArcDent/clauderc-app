@@ -9,8 +9,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Task 11.2: every --c-, --fs-, --sp-, --r-, --ease- and --dur- variable in the
- * approved mockup has a Kotlin token with the same value, in both themes.
+ * Every --c-, --k-, --fs-, --sp-, --r-, --ease- and --dur- variable in the approved mockup
+ * (design/ui-mockup/index.html, synced with demo.html) has a Kotlin token with the same value
+ * across all four styles (清玻, 印版, 素卡, 浮墨) in both light and dark themes.
  */
 class ThemeTokensTest {
 
@@ -44,17 +45,12 @@ class ThemeTokensTest {
         "--c-glass-edge" to c.glassEdge, "--c-glass-sheen" to c.glassSheen, "--c-glass-shadow" to c.glassShadow,
     )
 
-    /** The --k- variables of the three styles; each style sets only its own, the rest stay transparent. */
+    /** The --k- variables of the four styles; each style sets only its own, the rest stay transparent. */
     private fun extras(c: ClaudercColors) = mapOf(
-        "--k-ink" to c.ink, "--k-p2" to c.hue2, "--k-p3" to c.hue3, "--k-p4" to c.hue4, "--k-p5" to c.hue5,
-        "--k-glass" to c.panel, "--k-float" to c.float, "--k-dot" to c.dot, "--k-glow-2" to c.glow2,
+        "--k-ink" to c.ink, "--k-ok" to c.ok,
+        "--k-glass" to c.panel, "--k-float" to c.float,
         "--k-pane" to c.pane, "--k-rimc" to c.rim, "--k-edgec" to c.edge, "--k-lens" to c.lens,
     )
-
-    /** color-mix(in srgb, var(--c-accent) N%, transparent): the accent at N% alpha, as the share N / 100. */
-    private fun parseAccentShare(css: String): Float =
-        Regex("""color-mix\(in srgb, var\(--c-accent\) ([0-9.]+)%, transparent\)""").matchEntire(css)?.groupValues?.get(1)?.toFloat()?.div(100)
-            ?: error("unsupported accent share $css")
 
     private fun parseColor(css: String): Int {
         if (css == "transparent") return Color.Transparent.toArgb()
@@ -73,7 +69,6 @@ class ThemeTokensTest {
 
     @Test fun darkColorsMatchMockup() {
         val tokens = colors(DarkColors)
-        // The dark block only overrides some variables; the rest inherit the light value.
         val css = light.filterKeys { it.startsWith("--c-") } + dark.filterKeys { it.startsWith("--c-") }
         assertEquals(css.keys, tokens.keys)
         css.forEach { (name, value) -> assertEquals(name, parseColor(value), tokens.getValue(name).toArgb()) }
@@ -84,7 +79,7 @@ class ThemeTokensTest {
     }
 
     /**
-     * A style's blocks only override some --c- variables; the rest come from the minimal style of the
+     * A style's blocks only override some --c- variables; the rest come from the base palette of the
      * same brightness. Its --k- variables must all have a token, and the tokens it does not set stay transparent.
      */
     private fun assertStyle(style: String, lightTokens: ClaudercColors, darkTokens: ClaudercColors) {
@@ -98,27 +93,22 @@ class ThemeTokensTest {
             assertEquals(style, css.keys, c.keys)
             css.forEach { (name, value) -> assertEquals("$style $name", parseColor(value), c.getValue(name).toArgb()) }
             val k = own.filterKeys { it.startsWith("--k-") }
-            extras(tokens).forEach { (name, color) ->
+            val extraTokens = extras(tokens)
+            assertEquals("$style unknown --k- keys", emptySet<String>(), k.keys - extraTokens.keys)
+            extraTokens.forEach { (name, color) ->
                 val expected = k[name]?.let(::parseColor) ?: Color.Transparent.toArgb()
                 assertEquals("$style $name", expected, color.toArgb())
             }
-            assertEquals("$style --k-glow-1", k["--k-glow-1"]?.let(::parseAccentShare) ?: 0f, tokens.glow1, 1e-6f)
-        }
-    }
-
-    /** 贴纸's paper: one dot every --k-dot-gap, each --k-dot-r round, the same in light and dark. */
-    @Test fun stickerDotsMatchMockup() {
-        for (block in listOf(styleLight("sticker"), styleDark("sticker"))) {
-            assertEquals(block.getValue("--k-dot-gap").removeSuffix("px").toFloat(), StickerDotGap.value, 0f)
-            assertEquals(block.getValue("--k-dot-r").removeSuffix("px").toFloat(), StickerDotRadius.value, 0f)
         }
     }
 
     @Test fun clearColorsMatchMockup() = assertStyle("clear", ClearLightColors, ClearDarkColors)
 
-    @Test fun gridColorsMatchMockup() = assertStyle("grid", GridLightColors, GridDarkColors)
+    @Test fun plateColorsMatchMockup() = assertStyle("plate", PlateLightColors, PlateDarkColors)
 
-    @Test fun stickerColorsMatchMockup() = assertStyle("sticker", StickerLightColors, StickerDarkColors)
+    @Test fun tileColorsMatchMockup() = assertStyle("tile", TileLightColors, TileDarkColors)
+
+    @Test fun inkColorsMatchMockup() = assertStyle("ink", InkLightColors, InkDarkColors)
 
     @Test fun fontSizesSpacingAndRadiiMatchMockup() {
         val f = ClaudercFontSizes()

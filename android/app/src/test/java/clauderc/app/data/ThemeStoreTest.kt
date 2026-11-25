@@ -15,7 +15,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
-/** The look picked in 设置 starts at 清玻, system, blue and survives a fresh store on the same file. */
+/** The look picked in 设置 starts at 浮墨, system, default accent, carbon black ink and floating plate nav, and survives restart. */
 class ThemeStoreTest {
     @get:Rule val tmp = TemporaryFolder()
 
@@ -24,35 +24,23 @@ class ThemeStoreTest {
         val job = Job()
         val first = ThemeStore(PreferenceDataStoreFactory.create(scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + job), produceFile = { file }))
 
-        assertEquals(Appearance(UiStyle.Clear, ThemeMode.System, AccentChoice.Blue), first.appearance.first())
+        assertEquals(Appearance(UiStyle.Ink, ThemeMode.System, AccentChoice.Default, PlateInk.Black, PlateNavStyle.Float), first.appearance.first())
 
-        first.setStyle(UiStyle.Grid)
+        first.setStyle(UiStyle.Plate)
         first.setMode(ThemeMode.Dark)
         first.setAccent(AccentChoice.Green)
+        first.setPlateInk(PlateInk.Ultra)
+        first.setPlateNav(PlateNavStyle.Dock)
         job.cancelAndJoin()
 
         // A new data store on the same file, as after the app restarts.
         val second = ThemeStore(PreferenceDataStoreFactory.create(scope = backgroundScope, produceFile = { file }))
-        assertEquals(Appearance(UiStyle.Grid, ThemeMode.Dark, AccentChoice.Green), second.appearance.first())
+        assertEquals(Appearance(UiStyle.Plate, ThemeMode.Dark, AccentChoice.Green, PlateInk.Ultra, PlateNavStyle.Dock), second.appearance.first())
     }
 
-    /** 「总是播放加载动画」 starts off and stays on after a fresh store on the same file. */
-    @Test fun alwaysPlayLoadingStartsOffAndIsKept() = runTest {
-        val file = File(tmp.root, "animation.preferences_pb")
-        val job = Job()
-        val first = ThemeStore(PreferenceDataStoreFactory.create(scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + job), produceFile = { file }))
-        assertEquals(false, first.alwaysLoading.first())
-        first.setAlwaysLoading(true)
-        job.cancelAndJoin()
-
-        val second = ThemeStore(PreferenceDataStoreFactory.create(scope = backgroundScope, produceFile = { file }))
-        assertEquals(true, second.alwaysLoading.first())
-        assertEquals("the look is untouched", Appearance(), second.appearance.first())
-    }
-
-    /** Phones that picked a style before 清玻 / 格栅 / 贴纸 keep the closest one: 极简 is 清玻, 卡片 is 贴纸. */
+    /** Legacy style names migrate cleanly: Minimal → 清玻, Grid → 印版, Card / Sticker → 素卡. */
     @Test fun readsTheOldStyleNames() = runTest {
-        for ((stored, style) in listOf("Minimal" to UiStyle.Clear, "Card" to UiStyle.Sticker)) {
+        for ((stored, style) in listOf("Minimal" to UiStyle.Clear, "Grid" to UiStyle.Plate, "Card" to UiStyle.Tile, "Sticker" to UiStyle.Tile)) {
             val file = File(tmp.root, "old-$stored.preferences_pb")
             val job = Job()
             val raw = PreferenceDataStoreFactory.create(scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + job), produceFile = { file })

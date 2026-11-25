@@ -20,6 +20,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -188,8 +189,8 @@ class MotionTest {
 
     @Test fun workingRowOfflineLineAndPanelAnimateIn() {
         var state by mutableStateOf(base)
-        // 格栅 stacks the input under the list, so the list's bottom moves with the rows that open over the input.
-        compose.setContent { ClaudercTheme(darkTheme = false, style = UiStyle.Grid) { ChatScreen(state, ChatActions()) } }
+        // 印版 stacks the input under the list, so the list's bottom moves with the rows that open over the input.
+        compose.setContent { ClaudercTheme(darkTheme = false, style = UiStyle.Plate) { ChatScreen(state, ChatActions()) } }
         compose.waitForIdle()
         fun listBottom() = compose.onNodeWithTag("chatList").fetchSemanticsNode().boundsInRoot.bottom
         val idleBottom = listBottom()
@@ -198,11 +199,11 @@ class MotionTest {
         // Round 3: the working row is drawn whole from the first frame while its room opens under the messages.
         compose.runOnUiThread { state = base.copy(state = SessionState.Working, workingSinceMillis = 0) }
         partWay()
-        compose.onNodeWithText("中断").assertExists()
-        val workMid = compose.onNodeWithText("中断", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height
+        compose.onNodeWithContentDescription("中断").assertExists()
+        val workMid = compose.onNodeWithContentDescription("中断", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height
         val roomMid = listBottom()
         compose.mainClock.advanceTimeBy(enter)
-        val workEnd = compose.onNodeWithText("中断", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height
+        val workEnd = compose.onNodeWithContentDescription("中断", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height
         assertTrue("working row a quarter in $workMid, settled $workEnd", workMid > 0f && workMid == workEnd)
         assertTrue("messages end at $idleBottom, then $roomMid a quarter in, then ${listBottom()}", idleBottom > roomMid && roomMid > listBottom())
 
@@ -267,7 +268,7 @@ class MotionTest {
     @Test fun gitTabsSlideTheUnderlineAndSwapTheContent() {
         val commit = Commit(hash = "c000001", author = "林舟", time = T0, subject = "提交", edges = listOf(Edge(0, 0)))
         var state by mutableStateOf(GitUiState(dir = "/Users/me/github/app", status = GitStatusResponse(branch = "dev"), commits = listOf(commit)))
-        compose.setContent { ClaudercTheme(darkTheme = false) { GitScreen(state, GitActions(onTab = { state = state.copy(tab = it) })) } }
+        compose.setContent { ClaudercTheme(darkTheme = false, style = clauderc.app.data.UiStyle.Clear) { GitScreen(state, GitActions(onTab = { state = state.copy(tab = it) })) } }
         compose.waitForIdle()
         fun x(tag: String) = compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().positionInRoot.x
         val logX = compose.onNodeWithText("时间线").fetchSemanticsNode().positionInRoot.x

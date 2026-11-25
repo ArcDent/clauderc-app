@@ -5,8 +5,6 @@ import clauderc.app.net.ConnectionState
 import clauderc.app.net.RelayLink
 import clauderc.app.protocol.Machine
 import clauderc.app.protocol.SessionList
-import clauderc.app.ui.components.LoadingArt
-import clauderc.app.ui.components.LoadingCover
 import clauderc.app.ui.components.SnackHost
 import clauderc.app.ui.theme.page
 import android.Manifest
@@ -27,9 +25,14 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,14 +41,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.Lifecycle
@@ -70,24 +78,34 @@ import clauderc.app.chat.ChatViewModel
 import clauderc.app.chat.TermViewModel
 import clauderc.app.chat.TerminalScreen
 import clauderc.app.protocol.Subagent
+import clauderc.app.git.CommitMorphPanel
 import clauderc.app.git.CommitScreen
 import clauderc.app.git.CommitViewModel
+import clauderc.app.git.DiffMorphPanel
 import clauderc.app.git.DiffScreen
 import clauderc.app.git.DiffViewModel
 import clauderc.app.git.GitActions
+import clauderc.app.git.GitOp
 import clauderc.app.git.GitScreen
 import clauderc.app.git.GitViewModel
-import clauderc.app.machines.MachinesScreen
-import clauderc.app.machines.MachinesViewModel
+import clauderc.app.data.UiStyle
+import clauderc.app.machines.ClearPendingStrip
+import clauderc.app.machines.InkHubSheet
+import clauderc.app.machines.PendingEntry
+import clauderc.app.machines.collectPendingOnline
+import clauderc.app.pair.PairMorphPanel
 import clauderc.app.pair.PairScreen
 import clauderc.app.pair.PairUiState
 import clauderc.app.pair.PairViewModel
 import clauderc.app.protocol.GitDiffRequest
+import clauderc.app.sessions.CreateSessionMorphPanel
 import clauderc.app.sessions.CreateSessionScreen
 import clauderc.app.sessions.CreateSessionViewModel
+import clauderc.app.sessions.InkPushDrawerHost
 import clauderc.app.sessions.SessionsScreen
 import clauderc.app.sessions.SessionsUiState
 import clauderc.app.sessions.SessionsViewModel
+import clauderc.app.sessions.dirGroups
 import clauderc.app.ui.components.GlassNavBar
 import clauderc.app.ui.components.NavTab
 import clauderc.app.ui.components.SnackState
@@ -95,7 +113,6 @@ import clauderc.app.settings.SettingsScreen
 import clauderc.app.ui.needsYou
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.LocalAppearance
-import clauderc.app.ui.components.LocalLoadingPolicy
 import clauderc.app.ui.theme.LocalThemeReveal
 import clauderc.app.ui.theme.accentColor
 import clauderc.app.ui.theme.Motion
@@ -118,35 +135,213 @@ import kotlinx.serialization.Serializable
 @Serializable data class CommitRoute(val machineId: String, val dir: String, val hash: String)
 @Serializable data class DiffRoute(val machineId: String, val dir: String, val path: String, val hash: String? = null, val staged: Boolean = false)
 
-/** True while the startup loading cover stays up: paired, not waiting to reconnect, and the first machine list neither arrived nor failed. */
-internal fun isBooting(machines: List<Machine>?, bootFailed: Boolean, links: List<RelayLink>): Boolean =
-    machines == null && !bootFailed && links.isNotEmpty() && links.none { it.state is ConnectionState.Waiting }
+/** True when any currently online machine has a session waiting for the user (drives the 会话 tab's dot & pending controls). */
+internal fun hasPendingOnline(machines: List<Machine>?, sessions: Map<String, SessionList>): Boolean =
+    collectPendingOnline(machines, sessions).isNotEmpty()
 
-/** True when any currently online machine has a session waiting for the user (drives the 会话 tab's red dot). */
-internal fun hasPendingOnline(machines: List<Machine>?, sessions: Map<String, SessionList>): Boolean {
-    val online = machines?.filter { it.online }?.mapTo(HashSet()) { it.id } ?: return false
-    return sessions.any { (id, list) -> id in online && list.sessions.any(::needsYou) }
-}
+/** Root-level 浮墨 shell actions: push-aside drawer + in-place morph panels for pairing & creating sessions. */
+internal data class InkShellActions(
+    val openDrawer: () -> Unit,
+    val openPair: (anchor: Rect?, fromTop: Boolean) -> Unit,
+    val openCreate: (machineId: String, anchor: Rect?) -> Unit,
+)
+
+internal val LocalInkShell = staticCompositionLocalOf<InkShellActions?> { null }
 
 @Composable
 fun ClaudercNav(container: AppContainer) {
     val nav = rememberNavController()
     // The home tabs are the glass bar's blur source; the bar itself floats over every page.
     val haze = rememberHazeState()
-    // Starting up, a dot runs between a phone and a computer over the whole app until the first machine
-    // list arrives. Once the relay fails and waits to retry, or the first list fails, the page takes over.
-    val links by container.connection.links.collectAsStateWithLifecycle()
+    val ui = Clauderc.style
     val machines by container.fleet.machines.collectAsStateWithLifecycle()
-    val machinesFailed by container.fleet.machinesFailed.collectAsStateWithLifecycle()
-    var bootFailed by remember { mutableStateOf(false) }
-    if (machinesFailed) bootFailed = true
-    val booting = isBooting(machines, bootFailed, links)
-    LoadingCover(booting, LoadingArt.Link, Modifier.fillMaxSize(), splash = true, label = links.firstOrNull()?.let { "正在连接 ${it.host}" }.orEmpty()) {
-        Box(Modifier.fillMaxSize()) {
-            ClaudercPages(container, nav, haze)
-            HomeNavBar(container, nav, haze, Modifier.align(Alignment.BottomCenter))
+    val sessions by container.fleet.sessions.collectAsStateWithLifecycle()
+    val chosen by container.selection.machineId.collectAsStateWithLifecycle()
+    val dirFilter by container.selection.sessionDir.collectAsStateWithLifecycle()
+    val effectiveMachineId = container.selection.effectiveMachine(machines) ?: chosen
+    val activeMachine = machines?.firstOrNull { it.id == effectiveMachineId }
+    val machineSessions = sessions[effectiveMachineId]?.sessions.orEmpty()
+    val activeDirs = remember(machineSessions) { dirGroups(machineSessions) }
+
+    var inkDrawerOpen by remember { mutableStateOf(false) }
+    var pairMorph by remember { mutableStateOf<Pair<Rect?, Boolean>?>(null) }
+    var createMorph by remember { mutableStateOf<Pair<String, Rect?>?>(null) }
+    LaunchedEffect(ui) {
+        if (ui != UiStyle.Ink) {
+            inkDrawerOpen = false
+            pairMorph = null
+            createMorph = null
         }
     }
+
+    val shellActions = remember(ui) {
+        if (ui == UiStyle.Ink) {
+            InkShellActions(
+                openDrawer = { inkDrawerOpen = true },
+                openPair = { rect, fromTop -> pairMorph = rect to fromTop },
+                openCreate = { mid, rect -> createMorph = mid to rect },
+            )
+        } else {
+            null
+        }
+    }
+
+    CompositionLocalProvider(LocalInkShell provides shellActions) {
+        val appContent: @Composable () -> Unit = {
+            Box(Modifier.fillMaxSize()) {
+                ClaudercPages(container, nav, haze)
+                HomeNavBar(container, nav, haze, Modifier.align(Alignment.BottomCenter))
+            }
+        }
+        if (ui == UiStyle.Ink) {
+            InkPushDrawerHost(
+                open = inkDrawerOpen,
+                machine = activeMachine,
+                dirs = activeDirs,
+                totalSessions = machineSessions.size,
+                selectedDir = dirFilter,
+                onSelectDir = { dir ->
+                    container.selection.sessionDir.value = dir
+                    container.selection.tab.value = MainTab.Sessions
+                    nav.popBackStack(HomeRoute, inclusive = false)
+                },
+                onScanPairAt = { rect -> pairMorph = rect to false },
+                onClose = { inkDrawerOpen = false },
+            ) {
+                appContent()
+            }
+        } else {
+            appContent()
+        }
+
+        pairMorph?.let { (anchor, fromTop) ->
+            InkPairMorphHost(
+                container = container,
+                anchor = anchor,
+                fromTop = fromTop,
+                onDismiss = { pairMorph = null },
+                onPairedDone = {
+                    pairMorph = null
+                    inkDrawerOpen = false
+                },
+            )
+        }
+
+        createMorph?.let { (machineId, anchor) ->
+            InkCreateMorphHost(
+                container = container,
+                nav = nav,
+                machineId = machineId,
+                machineName = machines?.firstOrNull { it.id == machineId }?.name.orEmpty(),
+                anchor = anchor,
+                onDismiss = { createMorph = null },
+            )
+        }
+    }
+}
+
+@Composable
+private fun InkPairMorphHost(
+    container: AppContainer,
+    anchor: Rect?,
+    fromTop: Boolean,
+    onDismiss: () -> Unit,
+    onPairedDone: () -> Unit,
+) {
+    val store = remember { ViewModelStore() }
+    DisposableEffect(store) { onDispose { store.clear() } }
+    val vm = remember(store) {
+        ViewModelProvider(
+            store,
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T = PairViewModel(
+                    container.pairing,
+                    deviceName(),
+                    onPaired = { container.credentials.add(it) },
+                    paired = { container.credentials.all().map { it.relay }.toSet() },
+                    appScope = container.scope,
+                    onNotice = container::notice,
+                ) as T
+            },
+        )[PairViewModel::class.java]
+    }
+    val state by vm.state.collectAsStateWithLifecycle()
+    LaunchedEffect(state) {
+        when (val s = state) {
+            PairUiState.Paired -> onPairedDone()
+            is PairUiState.Known -> {
+                container.notice("${s.host} 上的目标机已经都在列表里")
+                onPairedDone()
+            }
+            else -> Unit
+        }
+    }
+    PairMorphPanel(
+        state = state,
+        onScanned = vm::onScanned,
+        onRescan = vm::rescan,
+        onDismiss = onDismiss,
+        anchor = anchor,
+        fromTop = fromTop,
+    )
+}
+
+@Composable
+private fun InkCreateMorphHost(
+    container: AppContainer,
+    nav: NavHostController,
+    machineId: String,
+    machineName: String,
+    anchor: Rect?,
+    onDismiss: () -> Unit,
+) {
+    val store = remember(machineId) { ViewModelStore() }
+    DisposableEffect(store) { onDispose { store.clear() } }
+    val vm = remember(store) {
+        ViewModelProvider(
+            store,
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T = CreateSessionViewModel(
+                    machineId,
+                    container.fleet,
+                    container.connection,
+                    container.profileNames,
+                    container.scope,
+                    container::notice,
+                ) as T
+            },
+        )[CreateSessionViewModel::class.java]
+    }
+    val state by vm.state.collectAsStateWithLifecycle()
+    LaunchedEffect(vm) {
+        vm.created.collect { id ->
+            onDismiss()
+            nav.navigate(ChatRoute(machineId, id)) { launchSingleTop = true }
+        }
+    }
+    CreateSessionMorphPanel(
+        machineName = machineName,
+        state = state,
+        anchor = anchor,
+        onClose = onDismiss,
+        onSubmit = vm::submit,
+        onDir = vm::setDir,
+        onPickDir = vm::pickDir,
+        onShowAllDirs = vm::showAllDirs,
+        onName = vm::setName,
+        onPrompt = vm::setPrompt,
+        onTrust = vm::trustAndCreate,
+        onDismissTrust = vm::dismissTrust,
+        onPreset = vm::pickPreset,
+        onUrl = vm::setUrl,
+        onKey = vm::setKey,
+        onToggleKey = vm::toggleKey,
+        onToggleModels = vm::toggleModels,
+        onModel = vm::setModel,
+        onDismissNote = vm::dismissNote,
+    )
 }
 
 @Composable
@@ -280,6 +475,9 @@ private fun LightSystemBars() {
 
 @Composable
 private fun HomeScreen(container: AppContainer, nav: NavHostController, haze: HazeState, onAdd: () -> Unit, onClearAll: () -> Unit) {
+    val links by container.connection.links.collectAsStateWithLifecycle()
+    val machinesFailed by container.fleet.machinesFailed.collectAsStateWithLifecycle()
+    val inkShell = LocalInkShell.current
     HomeTabsContent(
         selection = container.selection,
         fleet = container.fleet,
@@ -287,22 +485,36 @@ private fun HomeScreen(container: AppContainer, nav: NavHostController, haze: Ha
         haze = haze,
     ) { tab, machineId ->
         when (tab) {
-            MainTab.Machines -> {
-                val vm = viewModel { MachinesViewModel(container.fleet, container.connection.links) }
-                val state by vm.state.collectAsStateWithLifecycle()
-                MachinesScreen(state, onOpen = container.selection::openSessions, onAdd = onAdd, onClearAll = onClearAll, onRetry = vm::retry)
-            }
             MainTab.Sessions -> if (machineId == null) {
-                SessionsScreen(SessionsUiState(), {}, {}, {}, { _, _ -> }, {}, {})
+                SessionsScreen(
+                    state = SessionsUiState(),
+                    onRefresh = container.fleet::retryMachines,
+                    onOpenChat = {},
+                    onCreate = onAdd,
+                    onRename = { _, _ -> },
+                    onStop = {},
+                    onRemove = {},
+                    paired = links.isNotEmpty(),
+                    loadFailed = machinesFailed,
+                    onPair = onAdd,
+                    onRetry = container.fleet::retryMachines,
+                    onOpenDrawer = inkShell?.openDrawer,
+                    onPairAt = inkShell?.let { shell -> { rect -> shell.openPair(rect, true) } },
+                    relays = links,
+                )
             } else {
-                SessionsTab(container, machineId, nav)
+                SessionsTab(container, machineId, nav, onPair = onAdd)
             }
             MainTab.Git -> if (machineId == null) {
-                GitScreen(clauderc.app.git.GitUiState(), GitActions())
+                GitScreen(
+                    clauderc.app.git.GitUiState(),
+                    GitActions(),
+                    onOpenDrawer = inkShell?.openDrawer,
+                )
             } else {
                 GitTab(container, machineId, nav)
             }
-            MainTab.Settings -> SettingsTab(container)
+            MainTab.Settings -> SettingsTab(container, nav, onPair = onAdd, onClearAll = onClearAll)
         }
     }
 }
@@ -362,7 +574,21 @@ private fun HomeNavBar(container: AppContainer, nav: NavHostController, haze: Ha
     val entry by nav.currentBackStackEntryAsState()
     // Home is the start page, so the bar is already there before the first entry lands.
     val onHome = entry?.destination?.hasRoute<HomeRoute>() ?: true
-    HomeNavBarContent(container.selection, container.fleet, onHome, haze, modifier)
+    HomeNavBarContent(
+        selection = container.selection,
+        fleet = container.fleet,
+        visible = onHome,
+        haze = haze,
+        modifier = modifier,
+        onOpenPending = { pending ->
+            container.selection.selectMachine(pending.machineId)
+            val current = entry
+            if (current != null) nav.navigateFrom(current, ChatRoute(pending.machineId, pending.session.id))
+            else nav.navigate(ChatRoute(pending.machineId, pending.session.id))
+        },
+        onPair = { nav.navigate(PairRoute) { launchSingleTop = true } },
+        onOfflineMachine = { m -> container.notice("${m.name} 已离线，联网后才能查看会话") },
+    )
 }
 
 @Composable
@@ -372,32 +598,86 @@ internal fun HomeNavBarContent(
     visible: Boolean,
     haze: HazeState? = null,
     modifier: Modifier = Modifier,
+    onOpenPending: (PendingEntry) -> Unit = {},
+    onPair: () -> Unit = {},
+    onOfflineMachine: (Machine) -> Unit = {},
 ) {
     val tab by selection.tab.collectAsStateWithLifecycle()
     val machines by fleet.machines.collectAsStateWithLifecycle()
     val sessions by fleet.sessions.collectAsStateWithLifecycle()
-    val pendingSomewhere = hasPendingOnline(machines, sessions)
+    val currentMachineId by selection.machineId.collectAsStateWithLifecycle()
+    val effectiveMachine = selection.effectiveMachine(machines) ?: currentMachineId
+    val pending = collectPendingOnline(machines, sessions, effectiveMachine)
+    var inkHubOpen by remember { mutableStateOf(false) }
+    var inkHubAnchor by remember { mutableStateOf<Rect?>(null) }
+    val inkShell = LocalInkShell.current
+
     AnimatedVisibility(visible, modifier, enter = Motion.navBarIn, exit = Motion.navBarOut) {
-        GlassNavBar(
-            tabs = listOf(
-                NavTab("目标机", Symbols.Computer, Symbols.ComputerFilled),
-                NavTab("会话", Symbols.Forum, Symbols.ForumFilled, dot = pendingSomewhere),
-                NavTab("git", Symbols.AccountTree, Symbols.AccountTreeFilled),
-                NavTab("设置", Symbols.Settings, Symbols.SettingsFilled),
-            ),
-            selected = tab.ordinal,
-            onSelect = { selection.tab.value = MainTab.entries[it] },
-            hazeState = haze,
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (Clauderc.style == UiStyle.Clear) {
+                AnimatedVisibility(visible = pending.isNotEmpty(), enter = Motion.navBarIn, exit = Motion.navBarOut) {
+                    ClearPendingStrip(
+                        entries = pending,
+                        currentMachineId = effectiveMachine,
+                        haze = haze,
+                        onOpenNext = onOpenPending,
+                    )
+                }
+            }
+            GlassNavBar(
+                tabs = listOf(
+                    NavTab("会话", Symbols.Forum, Symbols.ForumFilled, dot = pending.isNotEmpty()),
+                    NavTab("git", Symbols.AccountTree, Symbols.AccountTreeFilled),
+                    NavTab("设置", Symbols.Settings, Symbols.SettingsFilled),
+                ),
+                selected = tab.ordinal,
+                onSelect = { selection.tab.value = MainTab.entries[it] },
+                hazeState = haze,
+                pendingCount = pending.size,
+                onPendingOrbAt = if (Clauderc.style == UiStyle.Ink) ({ rect -> inkHubAnchor = rect; inkHubOpen = true }) else null,
+            )
+        }
+    }
+
+    if (inkHubOpen) {
+        val isInk = Clauderc.style == UiStyle.Ink
+        InkHubSheet(
+            pending = pending,
+            machines = machines.orEmpty(),
+            sessions = sessions,
+            currentMachineId = effectiveMachine,
+            onDismiss = { inkHubOpen = false },
+            onOpenPending = onOpenPending,
+            onSelectMachine = { m ->
+                if (m.online) selection.selectMachine(m.id) else onOfflineMachine(m)
+            },
+            onPair = {
+                if (isInk && inkShell != null) inkShell.openPair(inkHubAnchor, false)
+                else onPair()
+            },
+            anchor = inkHubAnchor,
         )
     }
 }
 
 /** 设置: the pick is saved on this phone and the whole app retints from it. */
 @Composable
-private fun SettingsTab(container: AppContainer) {
+private fun SettingsTab(container: AppContainer, nav: NavHostController, onPair: () -> Unit, onClearAll: () -> Unit) {
+    val home = LocalLifecycleOwner.current
     val look = LocalAppearance.current
     val store = container.theme
-    val alwaysLoading by store.alwaysLoading.collectAsStateWithLifecycle(LocalLoadingPolicy.current.always)
+    val relays by container.connection.links.collectAsStateWithLifecycle()
+    val machines by container.fleet.machines.collectAsStateWithLifecycle()
+    val allSessions by container.fleet.sessions.collectAsStateWithLifecycle()
+    val currentMachineId by container.selection.machineId.collectAsStateWithLifecycle()
+    val effectiveMachine = container.selection.effectiveMachine(machines) ?: currentMachineId
+    val activeMachine = machines?.firstOrNull { it.id == effectiveMachine }
+    val pending = collectPendingOnline(machines, allSessions, currentMachineId)
+    val inkShell = LocalInkShell.current
     val reveal = LocalThemeReveal.current
     // The new look spreads out from the tapped option; picking what is already set does nothing.
     fun pick(changed: Boolean, at: Offset, save: suspend () -> Unit) {
@@ -412,17 +692,37 @@ private fun SettingsTab(container: AppContainer) {
         onStyle = { style, at -> pick(style != look.style, at) { store.setStyle(style) } },
         onMode = { mode, at -> pick(mode != look.mode, at) { store.setMode(mode) } },
         onAccent = { accent, at -> pick(accent != look.accent, at) { store.setAccent(accent) } },
-        alwaysLoading = alwaysLoading,
-        onAlwaysLoading = { on -> container.scope.launch { store.setAlwaysLoading(on) } },
+        onPlateInk = { ink, at -> pick(ink != look.plateInk, at) { store.setPlateInk(ink) } },
+        onPlateNav = { navStyle -> container.scope.launch { store.setPlateNav(navStyle) } },
+        relays = relays,
+        onPair = onPair,
+        onClearAll = onClearAll,
+        pendingCount = pending.size,
+        onOpenPending = {
+            pending.firstOrNull()?.let { next ->
+                container.selection.selectMachine(next.machineId)
+                nav.navigateFrom(home, ChatRoute(next.machineId, next.session.id))
+            }
+        },
+        onOpenDrawer = inkShell?.openDrawer,
+        onPairAt = inkShell?.let { shell -> { rect -> shell.openPair(rect, false) } },
+        machine = activeMachine,
+        machines = machines.orEmpty(),
     )
 }
 
 @Composable
-private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHostController) {
+private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHostController, onPair: () -> Unit) {
     // The home page's entry: a tap that opens a page counts only while home is resumed.
     val home = LocalLifecycleOwner.current
     val vm = viewModel(key = "sessions:$machineId") { SessionsViewModel(machineId, container.fleet, container.connection, container.profileNames, container.drafts) }
     val state by vm.state.collectAsStateWithLifecycle()
+    val machines by container.fleet.machines.collectAsStateWithLifecycle()
+    val allSessions by container.fleet.sessions.collectAsStateWithLifecycle()
+    val relays by container.connection.links.collectAsStateWithLifecycle()
+    val dirFilter by container.selection.sessionDir.collectAsStateWithLifecycle()
+    val pending = collectPendingOnline(machines, allSessions, machineId)
+    val inkShell = LocalInkShell.current
     val snack = remember { SnackState() }
     LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
     SessionsScreen(
@@ -443,6 +743,24 @@ private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHost
         onSwitchBranch = vm::switchBranch,
         onConfirmSwitch = vm::confirmSwitch,
         onDismissSwitch = vm::dismissSwitch,
+        onPair = onPair,
+        machines = machines.orEmpty(),
+        allSessions = allSessions,
+        pendingEntries = pending,
+        dirFilter = dirFilter,
+        onSelectDirFilter = { container.selection.sessionDir.value = it },
+        onSelectMachine = { m ->
+            if (m.online) container.selection.selectMachine(m.id)
+            else container.notice("${m.name} 已离线，联网后才能查看会话")
+        },
+        onOpenPending = { entry ->
+            container.selection.selectMachine(entry.machineId)
+            nav.navigateFrom(home, ChatRoute(entry.machineId, entry.session.id))
+        },
+        onOpenDrawer = inkShell?.openDrawer,
+        onCreateAt = inkShell?.let { shell -> { rect -> shell.openCreate(machineId, rect) } },
+        onPairAt = inkShell?.let { shell -> { rect -> shell.openPair(rect, true) } },
+        relays = relays,
     )
 }
 
@@ -470,10 +788,24 @@ private fun AgentRouteContent(container: AppContainer, r: AgentRoute, nav: NavHo
     )
 }
 
+private data class InkDiffTarget(
+    val dir: String,
+    val path: String,
+    val hash: String?,
+    val staged: Boolean,
+    val anchor: Rect?,
+    val fromTop: Boolean,
+)
+
 @Composable
 private fun GitTab(container: AppContainer, machineId: String, nav: NavHostController) {
     val home = LocalLifecycleOwner.current
+    val ui = Clauderc.style
+    val inkShell = LocalInkShell.current
     val dirs by container.selection.gitDirs.collectAsStateWithLifecycle()
+    val machines by container.fleet.machines.collectAsStateWithLifecycle()
+    val allSessions by container.fleet.sessions.collectAsStateWithLifecycle()
+    val pending = collectPendingOnline(machines, allSessions, machineId)
     val wanted = dirs[machineId]
     val vm = viewModel(key = "git:$machineId") {
         GitViewModel(machineId, wanted, container.connection, container.fleet, onDirChosen = { container.selection.setGitDir(machineId, it) })
@@ -483,9 +815,33 @@ private fun GitTab(container: AppContainer, machineId: String, nav: NavHostContr
     LaunchedEffect(wanted) { if (wanted != null && wanted != vm.state.value.dir) vm.setDir(wanted) }
     val snack = remember { SnackState() }
     LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
+
+    var commitTrail by remember(machineId, state.dir) { mutableStateOf<Pair<List<String>, Rect?>?>(null) }
+    var diffTarget by remember(machineId, state.dir) { mutableStateOf<InkDiffTarget?>(null) }
+    LaunchedEffect(ui) {
+        if (ui != UiStyle.Ink) {
+            commitTrail = null
+            diffTarget = null
+        }
+    }
+
     GitScreen(
         state = state,
         snack = snack,
+        pendingCount = pending.size,
+        onOpenPending = {
+            pending.firstOrNull()?.let { next ->
+                container.selection.selectMachine(next.machineId)
+                nav.navigateFrom(home, ChatRoute(next.machineId, next.session.id))
+            }
+        },
+        onOpenDrawer = inkShell?.openDrawer,
+        machines = machines.orEmpty(),
+        currentMachineId = machineId,
+        onSelectMachine = { m ->
+            if (m.online) container.selection.selectMachine(m.id)
+            else container.notice("${m.name} 已离线，联网后才能查看仓库")
+        },
         actions = GitActions(
             onRefresh = vm::refresh,
             onPickDir = vm::setDir,
@@ -493,6 +849,10 @@ private fun GitTab(container: AppContainer, machineId: String, nav: NavHostContr
             onLoadMore = vm::loadMore,
             onOpenCommit = { hash -> state.dir?.let { nav.navigateFrom(home, CommitRoute(machineId, it, hash)) } },
             onOpenDiff = { path, staged -> state.dir?.let { nav.navigateFrom(home, DiffRoute(machineId, it, path, staged = staged)) } },
+            onOpenCommitAt = if (ui == UiStyle.Ink) ({ hash, rect -> commitTrail = listOf(hash) to rect }) else null,
+            onOpenDiffAt = if (ui == UiStyle.Ink) ({ path, staged, rect ->
+                state.dir?.let { d -> diffTarget = InkDiffTarget(d, path, null, staged, rect, fromTop = false) }
+            }) else null,
             onLoadBranches = vm::loadBranches,
             onRequest = vm::request,
             onConfirm = vm::confirm,
@@ -501,6 +861,124 @@ private fun GitTab(container: AppContainer, machineId: String, nav: NavHostContr
             onMessage = vm::setMessage,
         ),
     )
+
+    val activeDir = state.dir
+    commitTrail?.let { (hashes, anchor) ->
+        val currentHash = hashes.lastOrNull()
+        if (activeDir != null && currentHash != null) {
+            InkCommitMorphHost(
+                container = container,
+                machineId = machineId,
+                dir = activeDir,
+                hash = currentHash,
+                canGoBack = hashes.size > 1,
+                anchor = anchor,
+                onBackParent = {
+                    val popped = hashes.dropLast(1)
+                    commitTrail = if (popped.isEmpty()) null else popped to anchor
+                },
+                onClose = { commitTrail = null },
+                onOpenParent = { parentHash -> commitTrail = (hashes + parentHash) to anchor },
+                onOpenFileAt = { file, fileRect ->
+                    diffTarget = InkDiffTarget(activeDir, file.path, currentHash, staged = false, anchor = fileRect, fromTop = true)
+                },
+            )
+        }
+    }
+
+    diffTarget?.let { target ->
+        val isWorkingTree = target.hash == null
+        val isStaged = if (isWorkingTree) {
+            state.status?.staged?.any { it.path == target.path } ?: target.staged
+        } else {
+            false
+        }
+        InkDiffMorphHost(
+            container = container,
+            machineId = machineId,
+            target = target.copy(staged = isStaged),
+            busy = state.running,
+            onToggleStage = if (isWorkingTree) ({
+                vm.request(if (isStaged) GitOp.Unstage(target.path) else GitOp.Stage(target.path))
+                diffTarget = target.copy(staged = !isStaged)
+            }) else null,
+            onClose = { diffTarget = null },
+        )
+    }
+}
+
+@Composable
+private fun InkCommitMorphHost(
+    container: AppContainer,
+    machineId: String,
+    dir: String,
+    hash: String,
+    canGoBack: Boolean,
+    anchor: Rect?,
+    onBackParent: () -> Unit,
+    onClose: () -> Unit,
+    onOpenParent: (String) -> Unit,
+    onOpenFileAt: (clauderc.app.protocol.CommitFile, Rect?) -> Unit,
+) {
+    val store = remember(machineId, dir, hash) { ViewModelStore() }
+    DisposableEffect(store) { onDispose { store.clear() } }
+    val vm = remember(store) {
+        ViewModelProvider(
+            store,
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                    CommitViewModel(machineId, dir, hash, container.connection) as T
+            },
+        )[CommitViewModel::class.java]
+    }
+    val state by vm.state.collectAsStateWithLifecycle()
+    CommitMorphPanel(
+        dir = dir,
+        hash = hash,
+        canGoBack = canGoBack,
+        state = state,
+        anchor = anchor,
+        onBackParent = onBackParent,
+        onClose = onClose,
+        onOpenParent = onOpenParent,
+        onOpenFileAt = onOpenFileAt,
+    )
+}
+
+@Composable
+private fun InkDiffMorphHost(
+    container: AppContainer,
+    machineId: String,
+    target: InkDiffTarget,
+    busy: Boolean,
+    onToggleStage: (() -> Unit)?,
+    onClose: () -> Unit,
+) {
+    val store = remember(machineId, target.dir, target.path, target.hash, target.staged) { ViewModelStore() }
+    DisposableEffect(store) { onDispose { store.clear() } }
+    val vm = remember(store) {
+        ViewModelProvider(
+            store,
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                    DiffViewModel(machineId, GitDiffRequest(target.dir, target.path, target.hash, target.staged), container.connection) as T
+            },
+        )[DiffViewModel::class.java]
+    }
+    val state by vm.state.collectAsStateWithLifecycle()
+    DiffMorphPanel(
+        path = target.path,
+        subtitle = target.hash?.take(7) ?: if (target.staged) "已暂存" else "未暂存",
+        state = state,
+        anchor = target.anchor,
+        fromTop = target.fromTop,
+        staged = if (target.hash == null) target.staged else null,
+        busy = busy,
+        onToggleStage = onToggleStage,
+        onClose = onClose,
+    )
 }
 
 @Composable
@@ -508,6 +986,11 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
     val context = LocalContext.current
     val vm = viewModel { ChatViewModel(r.machineId, r.sessionId, container.connection, container.fleet, container.scope, cache = container.chatCache, drafts = container.drafts, saver = container.gallery, onNotice = container::notice) }
     val state by vm.state.collectAsStateWithLifecycle()
+    val machines by container.fleet.machines.collectAsStateWithLifecycle()
+    val allSessions by container.fleet.sessions.collectAsStateWithLifecycle()
+    val nextPending = collectPendingOnline(machines, allSessions, r.machineId).firstOrNull {
+        it.machineId != r.machineId || it.session.id != r.sessionId
+    }
     val snack = remember { SnackState() }
     LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
     // A session started in a new worktree from here opens on top of this one, waiting if the page is paused.
@@ -533,6 +1016,7 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
     ChatScreen(
         state = state,
         snack = snack,
+        nextPending = nextPending,
         actions = ChatActions(
             onBack = { nav.popFrom(entry) },
             onOpenGit = { cwd ->
@@ -568,6 +1052,10 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
             onAutoResume = vm::setAutoResume,
             onResumeText = vm::typedResume,
             onRewind = { item, restore -> vm.rewind(item, restore) { reason -> nav.navigateFrom(entry, TermRoute(r.machineId, r.sessionId, notice = reason)) } },
+            onOpenNextPending = { next ->
+                container.selection.selectMachine(next.machineId)
+                nav.navigate(ChatRoute(next.machineId, next.session.id)) { popUpTo<ChatRoute> { inclusive = true } }
+            },
         ),
     )
 }

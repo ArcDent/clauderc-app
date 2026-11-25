@@ -72,7 +72,7 @@ class PairScreenTest {
         var state by mutableStateOf<PairUiState>(PairUiState.Redeemed)
         compose.setContent { ClaudercTheme(darkTheme = false) { PairScreen(state, {}, {}, scanner = { m, _ -> Box(m) }) } }
         compose.onNodeWithText("二维码已经用过").assertIsDisplayed()
-        compose.onNodeWithText("这个二维码已经配对过，请在目标机上重新生成。").assertIsDisplayed()
+        compose.onNodeWithText("请在目标机上重新生成一个。").assertIsDisplayed()
 
         state = PairUiState.Used
         compose.onNodeWithText("二维码无效").assertIsDisplayed()

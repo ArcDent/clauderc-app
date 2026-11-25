@@ -18,7 +18,6 @@ import clauderc.app.net.RelayHub
 import clauderc.app.pair.OkHttpPairingApi
 import clauderc.app.pair.PairingApi
 import clauderc.app.protocol.Machine
-import clauderc.app.ui.components.LoadingFirsts
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,23 +34,32 @@ private val Context.credentialData by preferencesDataStore("credential")
 private val Context.settingsData by preferencesDataStore("settings")
 private val Context.draftData by preferencesDataStore("drafts")
 
-enum class MainTab { Machines, Sessions, Git, Settings }
+enum class MainTab { Sessions, Git, Settings }
 
-/** What the top-level tabs share: the open tab, the chosen machine and each machine's git directory. */
+/** What the top-level tabs share: the open tab, the chosen machine, directory filter, and each machine's git directory. */
 class Selection {
-    val tab = MutableStateFlow(MainTab.Machines)
+    val tab = MutableStateFlow(MainTab.Sessions)
     val machineId = MutableStateFlow<String?>(null)
     val gitDirs = MutableStateFlow<Map<String, String>>(emptyMap())
+    /** Optional working directory filter set by 浮墨's left drawer; null shows all directories. */
+    val sessionDir = MutableStateFlow<String?>(null)
+
+    fun selectMachine(machineId: String) {
+        if (this.machineId.value != machineId) {
+            this.machineId.value = machineId
+            sessionDir.value = null
+        }
+    }
 
     fun openSessions(machineId: String) {
-        this.machineId.value = machineId
+        selectMachine(machineId)
         tab.value = MainTab.Sessions
     }
 
     fun setGitDir(machineId: String, dir: String) = gitDirs.update { it + (machineId to dir) }
 
     fun openGit(machineId: String, dir: String) {
-        this.machineId.value = machineId
+        selectMachine(machineId)
         setGitDir(machineId, dir)
         tab.value = MainTab.Git
     }
@@ -106,9 +114,6 @@ class AppContainer(context: Context) {
 
     /** Where the picture viewer saves pictures: the phone's gallery. */
     val gallery: ImageSaver = GallerySaver(context.contentResolver)
-
-    /** The places that showed their first load since this launch, for 「总是播放加载动画」. */
-    val loadingFirsts = LoadingFirsts()
 
     private val _notices = Channel<String>(Channel.BUFFERED)
 

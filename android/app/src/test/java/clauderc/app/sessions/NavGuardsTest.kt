@@ -7,14 +7,41 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import clauderc.app.HomeNavBarContent
+import clauderc.app.MainTab
+import clauderc.app.Selection
+import clauderc.app.data.Fleet
+import clauderc.app.data.PlateNavStyle
+import clauderc.app.data.UiStyle
+import clauderc.app.machines.PendingEntry
+import clauderc.app.protocol.MachinesListResponse
+import clauderc.app.protocol.Method
+import clauderc.app.protocol.SessionList
+import clauderc.app.testing.FakeRelay
+import clauderc.app.testing.machine
+import clauderc.app.testing.sampleSessions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavHostController
@@ -203,5 +230,50 @@ class NavGuardsTest {
         compose.waitForIdle()
         assertEquals(2, chats())
         assertEquals("s-wt", nav.currentBackStackEntry!!.toRoute<ChatRoute>().sessionId)
+    }
+
+    @Test fun clearPendingStripAndInkOrbExposeCrossMachinePendingWithThreeTabs() {
+        val relay = FakeRelay().apply {
+            respond(Method.MACHINES_LIST, MachinesListResponse.serializer(), MachinesListResponse(listOf(machine("m-1", "工作室 Mac mini"))))
+            respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), sampleSessions)
+        }
+        val scope = CoroutineScope(Dispatchers.Unconfined + Job())
+        try {
+            val fleet = Fleet(relay, scope)
+            val selection = Selection()
+            val opened = mutableListOf<PendingEntry>()
+            var style by androidx.compose.runtime.mutableStateOf(UiStyle.Clear)
+            var plateNav by androidx.compose.runtime.mutableStateOf(PlateNavStyle.Float)
+            compose.setContent {
+                ClaudercTheme(darkTheme = false, style = style, plateNav = plateNav) {
+                    HomeNavBarContent(selection, fleet, visible = true, onOpenPending = { opened += it })
+                }
+            }
+            compose.waitForIdle()
+            compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).assertCountEquals(3)
+            // Clear shows the global floating pending strip above the glass bar and jumps directly on tap.
+            compose.onNodeWithTag("clearPendingStrip").assertIsDisplayed().performClick()
+            assertEquals(1, opened.size)
+            assertEquals("m-1", opened.single().machineId)
+
+            // Ink swaps the strip for the right pending orb, which opens the hub sheet with pending + machines.
+            style = UiStyle.Ink
+            compose.waitForIdle()
+            compose.onNodeWithTag("clearPendingStrip").assertDoesNotExist()
+            compose.onNodeWithTag("inkPendingOrb").assertIsDisplayed().performClick()
+            compose.waitForIdle()
+            compose.onNodeWithText("待确认 · ", substring = true).assertExists()
+            compose.onNodeWithText("工作室 Mac mini").assertExists().performClick()
+            compose.waitForIdle()
+
+            // Plate renders both Float and Dock cleanly with 3 tabs.
+            style = UiStyle.Plate
+            plateNav = PlateNavStyle.Dock
+            compose.waitForIdle()
+            compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).assertCountEquals(3)
+            assertEquals(listOf(MainTab.Sessions, MainTab.Git, MainTab.Settings), MainTab.entries)
+        } finally {
+            scope.cancel()
+        }
     }
 }

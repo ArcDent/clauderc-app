@@ -183,10 +183,16 @@ func (h *Handler) answer(ctx context.Context, req protocol.Envelope) protocol.En
 		// The transcript keeps a permission prompt pending until the tool's
 		// result is written, also while the tool runs once allowed on the
 		// computer; only the screen tells the prompt is still up.
-		if !awayFromInput(t.View()) {
+		if strings.TrimSpace(t.Screen()) == "" {
+			t.WaitFor(func(s string) bool { return strings.TrimSpace(s) != "" }, questionWait)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
+		if !promptShown(t.Screen()) {
 			return errPendingChanged
 		}
-		return typeAnswer(t, p.Questions, groups)
+		return typeAnswer(ctx, t, p.Questions, groups)
 	})
 	if err != nil {
 		return failWith(req, err)
@@ -194,24 +200,67 @@ func (h *Handler) answer(ctx context.Context, req protocol.Envelope) protocol.En
 	return agent.Reply(req, struct{}{})
 }
 
+// promptShown reports whether the screen shows a prompt rather than Claude
+// Code's input box. A fresh `claude attach` to a session already blocked on a
+// prompt leaves the cursor visible (Cursor=true) even after Ctrl+L (Claude
+// Code 2.1.331), so chat.answer checks the screen layout instead of
+// awayFromInput's hidden-cursor requirement.
+func promptShown(screen string) bool {
+	return strings.TrimSpace(screen) != "" && !hasInputBox(screen)
+}
+
 // errAnswerCut is a question that went from the screen while it was being
 // answered: the prompt was left with Esc.
 var errAnswerCut = &opError{protocol.CodePendingChanged, "回答到一半，电脑上的题目变了，已按 Esc 退出这次提问"}
+
+// questionWait bounds the wait for the next question of an answer to be
+// drawn: a slow terminal still shows the one just answered for a while.
+const questionWait = 3 * time.Second
+
+// tabGoneWait is how long a missing tab bar must persist before WaitFor
+// treats the prompt as closed rather than a mid-redraw clear frame.
+const tabGoneWait = 400 * time.Millisecond
 
 // typeAnswer types the groups of keys of an answer to questions in turn.
 // Taking more than one group, each needs its question on screen, or the
 // review page for the last: one closed elsewhere would leave the keys to
 // the input box or to whatever came up. Failing that before the first,
-// nothing is typed; later, a screen that still shows the prompt is left
-// with Esc, and anything else gets no key, not even Esc.
-func typeAnswer(t *attach.Term, questions []protocol.Question, groups [][]attach.Step) error {
+// nothing is typed. Later, while the prompt stays up, the next question
+// is waited for up to questionWait; a prompt still up without it is left
+// with Esc, and anything else gets no key, not even Esc, nor does a
+// request given up meanwhile.
+func typeAnswer(ctx context.Context, t *attach.Term, questions []protocol.Question, groups [][]attach.Step) error {
 	for i, g := range groups {
-		if screen := t.Screen(); len(groups) > 1 && !questionShown(screen, questions, i) {
-			if i > 0 && awayFromInput(t.View()) && questionTabs(strings.Split(screen, "\n")) >= 0 {
-				_ = closePanel(t)
-				return errAnswerCut
+		if len(groups) > 1 && !questionShown(t.Screen(), questions, i) {
+			if i == 0 {
+				if screen := t.Screen(); hasInputBox(screen) || questionTabs(strings.Split(screen, "\n")) >= 0 {
+					return errPendingChanged
+				}
 			}
-			return errPendingChanged
+			var goneSince time.Time
+			t.WaitFor(func(s string) bool {
+				if questionShown(s, questions, i) || hasInputBox(s) {
+					return true
+				}
+				if questionTabs(strings.Split(s, "\n")) < 0 {
+					if goneSince.IsZero() {
+						goneSince = time.Now()
+					}
+					return time.Since(goneSince) >= tabGoneWait
+				}
+				goneSince = time.Time{}
+				return false
+			}, questionWait)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if screen := t.Screen(); !questionShown(screen, questions, i) {
+				if i > 0 && promptShown(screen) && questionTabs(strings.Split(screen, "\n")) >= 0 {
+					_ = closePanel(t)
+					return errAnswerCut
+				}
+				return errPendingChanged
+			}
 		}
 		if err := t.Send(g); err != nil {
 			return err
@@ -223,21 +272,55 @@ func typeAnswer(t *attach.Term, questions []protocol.Question, groups [][]attach
 // reviewTitle heads the page that submits the answers (RESULTS.md).
 const reviewTitle = "Review your answers"
 
-// questionTabs is the index of the lowest line that is the tab bar of a
-// question prompt answered in more than one step, "← ☐ 颜色 ☐ 动物 ✔ Submit
-// →" (RESULTS.md), or -1.
+// questionTabMaxWrap is the most continuation lines a wrapped question tab bar
+// can span below the "←" line when 3-4 long headers exceed 120 columns.
+const questionTabMaxWrap = 3
+
+// questionTabs is the index of the lowest line of the tab bar of a question
+// prompt answered in more than one step, "← ☐ 颜色 ☐ 动物 ✔ Submit →"
+// (RESULTS.md), or -1. When long headers wrap the tab bar across lines so
+// Submit lands below "←", the index of the Submit line is returned.
 func questionTabs(lines []string) int {
 	for i := len(lines) - 1; i >= 0; i-- {
-		if l := strings.TrimSpace(lines[i]); strings.HasPrefix(l, "←") && strings.Contains(l, "Submit") {
+		l := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(l, "←") {
+			continue
+		}
+		if strings.Contains(l, "Submit") {
 			return i
+		}
+		if !strings.ContainsAny(l, "☐☒✔→") {
+			continue
+		}
+		end := min(i+1+questionTabMaxWrap, len(lines))
+		for j := i + 1; j < end; j++ {
+			cont := strings.TrimSpace(lines[j])
+			if cont == "" || strings.HasPrefix(cont, "─") || strings.HasPrefix(cont, "❯") {
+				break
+			}
+			if strings.Contains(cont, "Submit") {
+				return j
+			}
 		}
 	}
 	return -1
 }
 
+// stripQuestionLines joins lines while removing the leading "│" rail Claude
+// Code prepends to every line of a wrapped or multi-line question (2.1.331).
+func stripQuestionLines(lines []string) string {
+	var b strings.Builder
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		t = strings.TrimPrefix(t, "│")
+		b.WriteString(t)
+	}
+	return b.String()
+}
+
 // questionShown reports whether the screen shows, under the prompt's tab
 // bar, question i of questions, or past the last one the review page.
-// Spaces are left out, the question wrapping on screen.
+// Spaces and leading "│" rails on wrapped lines are left out.
 func questionShown(screen string, questions []protocol.Question, i int) bool {
 	lines := strings.Split(screen, "\n")
 	tabs := questionTabs(lines)
@@ -248,7 +331,7 @@ func questionShown(screen string, questions []protocol.Question, i int) bool {
 	if i < len(questions) {
 		want = questions[i].Question
 	}
-	return strings.Contains(squash(strings.Join(lines[tabs+1:], "")), squash(want))
+	return strings.Contains(squash(stripQuestionLines(lines[tabs+1:])), squash(stripQuestionLines(strings.Split(want, "\n"))))
 }
 
 // answerErrors words the reasons attach.AnswerKeys refuses answers.

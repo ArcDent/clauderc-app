@@ -62,7 +62,7 @@ class GroupFoldTest {
             ClaudercTheme(darkTheme = false) {
                 val current = vm!!
                 val state by current.state.collectAsState()
-                SessionsScreen(state, {}, {}, {}, { _, _ -> }, {}, {}, onToggle = current::toggle)
+                SessionsScreen(state, {}, {}, {}, { _, _ -> }, {}, {}, onToggle = current::toggle, initialInkTab = InkListTab.All)
             }
         }
     }

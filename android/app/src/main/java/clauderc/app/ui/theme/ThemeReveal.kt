@@ -142,7 +142,13 @@ fun ClaudercRoot(look: Appearance, content: @Composable () -> Unit) {
         ThemeMode.Dark -> true
     }
     CompositionLocalProvider(LocalAppearance provides look) {
-        ClaudercTheme(darkTheme = dark, style = look.style, accent = accentColor(look.accent, dark)) {
+        ClaudercTheme(
+            darkTheme = dark,
+            style = look.style,
+            accent = accentColor(look.accent, dark),
+            plateInk = look.plateInk,
+            plateNav = look.plateNav,
+        ) {
             ThemeRevealHost(key = look, content = content)
         }
     }

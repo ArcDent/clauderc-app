@@ -10,6 +10,7 @@ import (
 	"github.com/coder/websocket"
 
 	"clauderc/internal/protocol"
+	"clauderc/internal/relay"
 )
 
 func listMachines(t *testing.T, p *wsClient) (protocol.Envelope, map[string]protocol.Machine) {
@@ -95,6 +96,57 @@ func TestMachineStatusBroadcast(t *testing.T) {
 			t.Fatalf("phone %d offline event = %+v", i, m)
 		}
 	}
+}
+
+// A machine that comes online while machines.list is answered has its
+// machine.status queued after the reply: a phone never gets a reply that
+// still lists it offline after the event that put it online.
+func TestMachinesListComesBeforeALaterStatus(t *testing.T) {
+	// The hook holds the phone's read loop longer than the usual test
+	// heartbeat timeout.
+	r := startRelay(t, func(o *relay.Options) { o.HeartbeatTimeout = 5 * time.Second })
+	r.agent(t, "m-1").conn.Close(websocket.StatusNormalClosure, "")
+	eventually(t, time.Second, "m-1 offline", func() bool {
+		m, _ := r.machine("m-1")
+		return !m.Online
+	})
+	r.pairDevice(t, "d-1", "tok-1")
+	p := r.phone(t, "tok-1")
+
+	dialed := make(chan *wsClient, 1)
+	r.srv.SetListedHook(func() {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			h := http.Header{"Authorization": {"Bearer " + enrollKey}}
+			c, _, err := websocket.Dial(ctx, r.wsURL("/ws/agent?id=m-1&name=m-1"), &websocket.DialOptions{HTTPHeader: h})
+			if err != nil {
+				dialed <- nil
+				return
+			}
+			dialed <- newClient(t, c)
+		}()
+		// Time for m-1's online event to reach the phone, which it must
+		// not before the reply; len leaves the event in the queue.
+		for deadline := time.Now().Add(300 * time.Millisecond); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			if len(p.msgs) > 0 {
+				return
+			}
+		}
+	})
+
+	_, got := listMachines(t, p)
+	if got["m-1"].Online {
+		t.Fatalf("m-1 = %+v in the reply, want offline", got["m-1"])
+	}
+	if m := statusEvent(t, p); m.ID != "m-1" || !m.Online {
+		t.Fatalf("event after the reply = %+v, want m-1 online", m)
+	}
+	a := <-dialed
+	if a == nil {
+		t.Fatal("agent m-1 could not connect")
+	}
+	t.Cleanup(func() { a.conn.CloseNow() })
 }
 
 func statusEvent(t *testing.T, p *wsClient) protocol.Machine {

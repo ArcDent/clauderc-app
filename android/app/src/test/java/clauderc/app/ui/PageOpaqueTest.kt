@@ -73,19 +73,19 @@ class PageOpaqueTest {
 
     @Test fun pair() = assertOpaque { PairScreen(PairUiState.Scanning, {}, {}, scanner = { _, _ -> }) }
 
-    // 贴纸 paints the same pages on its paper colour.
-    @Test fun createSessionInSticker() = assertOpaque(UiStyle.Sticker) {
+    // All four styles paint pushed pages opaquely on their own canvas.
+    @Test fun createSessionInTile() = assertOpaque(UiStyle.Tile) {
         CreateSessionScreen(
             CreateUiState(dir = "~/github/infra", recent = listOf("~/github/infra", "~/notes"), presets = presetOptions(sampleSessions, emptyMap())),
             onClose = {}, onSubmit = {}, onDir = {}, onPickDir = {}, onShowAllDirs = {}, onName = {}, onPrompt = {},
         )
     }
 
-    @Test fun chatInSticker() = assertOpaque(UiStyle.Sticker) { ChatScreen(ChatUiState(loading = false), ChatActions()) }
+    @Test fun chatInInk() = assertOpaque(UiStyle.Ink) { ChatScreen(ChatUiState(loading = false), ChatActions()) }
 
-    @Test fun commitInSticker() = assertOpaque(UiStyle.Sticker) { CommitScreen("7c2e0d4", Loadable(), onBack = {}, onOpenFile = {}) }
+    @Test fun commitInPlate() = assertOpaque(UiStyle.Plate) { CommitScreen("7c2e0d4", Loadable(), onBack = {}, onOpenFile = {}) }
 
-    @Test fun diffInSticker() = assertOpaque(UiStyle.Sticker) { DiffScreen("envelope.go", "未暂存", Loadable(), onBack = {}) }
+    @Test fun diffInTile() = assertOpaque(UiStyle.Tile) { DiffScreen("envelope.go", "未暂存", Loadable(), onBack = {}) }
 
-    @Test fun pairInSticker() = assertOpaque(UiStyle.Sticker) { PairScreen(PairUiState.Scanning, {}, {}, scanner = { _, _ -> }) }
+    @Test fun pairInInk() = assertOpaque(UiStyle.Ink) { PairScreen(PairUiState.Scanning, {}, {}, scanner = { _, _ -> }) }
 }

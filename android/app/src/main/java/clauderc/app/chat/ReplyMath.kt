@@ -90,7 +90,7 @@ internal fun visibleLength(runs: List<MdRun>, shown: Int): Int {
 @Composable
 internal fun MathBox(b: MdBlock.Math, shown: Int, color: Color, modifier: Modifier) {
     if (shown < b.written.length) return
-    val align = if (Clauderc.style == UiStyle.Grid) Alignment.Start else Alignment.CenterHorizontally
+    val align = if (Clauderc.style == UiStyle.Plate) Alignment.Start else Alignment.CenterHorizontally
     Column(modifier.fillMaxWidth(), horizontalAlignment = align) {
         Box(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 2.dp).testTag("math")) {
             val (measurer, config) = rememberMath(color, BubbleText.fontSize * BLOCK_SCALE)

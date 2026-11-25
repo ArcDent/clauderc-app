@@ -953,10 +953,23 @@ class ChatViewModel(
         fun putBack() = _state.update { if (it.pending == null && pendingNews == seen) it.copy(pending = asked) else it }
         viewModelScope.launch {
             try {
-                relay.call(Method.CHAT_ANSWER, machineId, req, ChatAnswerRequest.serializer(), Empty.serializer())
+                // Multi-question prompts with options, custom input and terminal redraw waits can exceed the default 30s.
+                relay.call(
+                    Method.CHAT_ANSWER,
+                    machineId,
+                    req,
+                    ChatAnswerRequest.serializer(),
+                    Empty.serializer(),
+                    timeoutMillis = ANSWER_TIMEOUT_MILLIS,
+                )
             } catch (e: RemoteException) {
                 putBack()
-                _messages.send(if (e.code == ErrorCode.PENDING_CHANGED) "这个请求已经变了，看一下新的内容" else e.message ?: "回答失败")
+                val text = when {
+                    e.code == ErrorCode.PENDING_CHANGED && e.message?.contains("回答到一半") == true -> e.message!!
+                    e.code == ErrorCode.PENDING_CHANGED -> "这个请求已经变了，看一下新的内容"
+                    else -> e.message ?: "回答失败"
+                }
+                _messages.send(text)
             } catch (e: Exception) {
                 putBack()
                 _messages.send("回答失败：${e.message}")
@@ -1288,6 +1301,9 @@ const val RESUME_TEXT = "继续"
 
 /** The agent sends a minute after the reset, so the message does not land on its edge and get refused. */
 private const val RESUME_DELAY_SECONDS = 60L
+
+/** Answering a multi-question prompt with custom text and terminal redraws can take longer than the default 30s. */
+const val ANSWER_TIMEOUT_MILLIS = 90_000L
 
 /** A message with pictures waits longer: up to 11 MB to upload, and the agent pastes each picture with a pause. */
 const val SEND_IMAGES_TIMEOUT_MILLIS = 120_000L

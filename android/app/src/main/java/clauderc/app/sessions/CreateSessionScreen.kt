@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -62,11 +63,17 @@ import clauderc.app.ui.components.BarTitle
 import clauderc.app.ui.components.ClaudercSheet
 import clauderc.app.ui.components.FieldLabel
 import clauderc.app.ui.components.SheetHead
-import clauderc.app.ui.components.StickerCorner
+import clauderc.app.ui.components.CardCorner
+import clauderc.app.ui.components.LocalMorphClose
+import clauderc.app.ui.components.MorphOverlay
+import clauderc.app.ui.components.PillButton
+import clauderc.app.ui.components.PillStyle
+import clauderc.app.ui.components.inkSurface
+import clauderc.app.ui.components.plateBox
+import clauderc.app.ui.components.tileSurface
 import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.UnderlineField
-import clauderc.app.ui.components.sticker
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Lift
@@ -95,6 +102,86 @@ private val TIERS = listOf(
  * 「自己填」's address and key growing in under it, each tier's model folded under one row, the name and
  * the first message. A mistake marks the field red and slides a card down from under the bar.
  */
+/**
+ * 浮墨's morphing floating new-session panel (demo.html `A.openNewSession` for Ink):
+ * blooms downward out of the top-right `+` orb with sticky header + scrollable form + footer actions.
+ */
+@Composable
+fun CreateSessionMorphPanel(
+    machineName: String,
+    state: CreateUiState,
+    anchor: Rect?,
+    onClose: () -> Unit,
+    onSubmit: () -> Unit,
+    onDir: (String) -> Unit,
+    onPickDir: (String) -> Unit,
+    onShowAllDirs: () -> Unit,
+    onName: (String) -> Unit,
+    onPrompt: (String) -> Unit,
+    onTrust: () -> Unit = {},
+    onDismissTrust: () -> Unit = {},
+    onPreset: (String) -> Unit = {},
+    onUrl: (String) -> Unit = {},
+    onKey: (String) -> Unit = {},
+    onToggleKey: () -> Unit = {},
+    onToggleModels: () -> Unit = {},
+    onModel: (ModelTier, String) -> Unit = { _, _ -> },
+    onDismissNote: () -> Unit = {},
+) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    MorphOverlay(onDismiss = onClose, anchor = anchor, fromTop = true, tall = true, tag = "inkCreateMorph") {
+        val close = LocalMorphClose.current
+        Column(Modifier.fillMaxWidth().imePadding()) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (machineName.isNotEmpty()) "新建会话 · $machineName" else "新建会话",
+                    modifier = Modifier.weight(1f),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = c.fg,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                SymbolButton(Symbols.Close, "关闭", onClick = { close?.invoke(null) ?: onClose() }, small = true)
+            }
+            Box(Modifier.weight(1f, fill = false).fillMaxWidth()) {
+                CreateSessionFields(
+                    state = state,
+                    compact = true,
+                    onDir = onDir,
+                    onPickDir = onPickDir,
+                    onShowAllDirs = onShowAllDirs,
+                    onName = onName,
+                    onPrompt = onPrompt,
+                    onPreset = onPreset,
+                    onUrl = onUrl,
+                    onKey = onKey,
+                    onToggleKey = onToggleKey,
+                    onToggleModels = onToggleModels,
+                    onModel = onModel,
+                )
+                NoteCard(state.note, onDismissNote, Modifier.align(Alignment.TopCenter))
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .drawBehind { drawLine(c.edge, Offset.Zero, Offset(size.width, 0f), 1.dp.toPx()) }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                PillButton("取消", onClick = { close?.invoke(null) ?: onClose() }, style = PillStyle.Tonal, modifier = Modifier.weight(1f))
+                PillButton(if (state.submitting) "正在启动" else "启动", onClick = onSubmit, style = PillStyle.Ink, enabled = state.canSubmit, modifier = Modifier.weight(1.3f))
+            }
+        }
+    }
+    state.untrusted?.let { TrustSheet(it, state.trusting, onTrust, onDismissTrust) }
+}
+
 @Composable
 fun CreateSessionScreen(
     state: CreateUiState,
@@ -115,8 +202,6 @@ fun CreateSessionScreen(
     onModel: (ModelTier, String) -> Unit = { _, _ -> },
     onDismissNote: () -> Unit = {},
 ) {
-    val c = Clauderc.colors
-    val sp = Clauderc.spacing
     Column(Modifier.fillMaxSize().page().imePadding()) {
         AppBar(
             navigation = { SymbolButton(Symbols.Close, "关闭", onClick = onClose) },
@@ -124,17 +209,67 @@ fun CreateSessionScreen(
             actions = { TextAction(if (state.submitting) "正在启动" else "启动", onClick = onSubmit, enabled = state.canSubmit) },
         )
         Box(Modifier.fillMaxSize()) {
-            val card = Clauderc.look.cards
-            // 贴纸 puts each field on its own ink-outlined card, closer together.
-            val field = if (card) {
-                Modifier.sticker(c.panel, c.ink, StickerCorner).padding(start = sp.sp4, end = sp.sp4, top = sp.sp3, bottom = sp.sp2)
-            } else {
-                Modifier
-            }
-            Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = if (card) sp.sp4 else sp.page, end = if (card) sp.sp4 else sp.page, bottom = sp.sp8),
-                verticalArrangement = Arrangement.spacedBy(if (card) sp.sp3 else sp.sp6),
-            ) {
+            CreateSessionFields(
+                state = state,
+                compact = false,
+                onDir = onDir,
+                onPickDir = onPickDir,
+                onShowAllDirs = onShowAllDirs,
+                onName = onName,
+                onPrompt = onPrompt,
+                onPreset = onPreset,
+                onUrl = onUrl,
+                onKey = onKey,
+                onToggleKey = onToggleKey,
+                onToggleModels = onToggleModels,
+                onModel = onModel,
+            )
+            NoteCard(state.note, onDismissNote, Modifier.align(Alignment.TopCenter))
+        }
+    }
+    state.untrusted?.let { TrustSheet(it, state.trusting, onTrust, onDismissTrust) }
+}
+
+@Composable
+private fun CreateSessionFields(
+    state: CreateUiState,
+    compact: Boolean,
+    onDir: (String) -> Unit,
+    onPickDir: (String) -> Unit,
+    onShowAllDirs: () -> Unit,
+    onName: (String) -> Unit,
+    onPrompt: (String) -> Unit,
+    onPreset: (String) -> Unit,
+    onUrl: (String) -> Unit,
+    onKey: (String) -> Unit,
+    onToggleKey: () -> Unit,
+    onToggleModels: () -> Unit,
+    onModel: (ModelTier, String) -> Unit,
+) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    val card = Clauderc.look.cards && !compact
+    val ui = Clauderc.style
+    val field = when {
+        compact -> Modifier
+        ui == UiStyle.Tile -> Modifier.tileSurface(c.card, CardCorner).padding(start = sp.sp4, end = sp.sp4, top = sp.sp3, bottom = sp.sp2)
+        ui == UiStyle.Ink -> Modifier.inkSurface(c.card, c.edge, CardCorner).padding(start = sp.sp4, end = sp.sp4, top = sp.sp3, bottom = sp.sp2)
+        ui == UiStyle.Plate -> Modifier.plateBox(c.bg, c.fg, 1.5.dp).padding(start = sp.sp4, end = sp.sp4, top = sp.sp3, bottom = sp.sp2)
+        else -> Modifier
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(if (compact) Modifier else Modifier.fillMaxSize())
+            .verticalScroll(rememberScrollState())
+            .padding(
+                start = if (compact) 20.dp else if (card) sp.sp4 else sp.page,
+                end = if (compact) 20.dp else if (card) sp.sp4 else sp.page,
+                top = if (compact) 4.dp else 0.dp,
+                bottom = if (compact) 16.dp else sp.sp8,
+            ),
+        verticalArrangement = Arrangement.spacedBy(if (compact) sp.sp4 else if (card) sp.sp3 else sp.sp6),
+    ) {
                 Column(field.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(sp.sp2)) {
                     FieldLabel("工作目录")
                     UnderlineField(state.dir, onDir, mono = true, error = CreateField.Dir in state.badFields, placeholder = "/path/to/project")
@@ -200,10 +335,6 @@ fun CreateSessionScreen(
                     UnderlineField(state.prompt, onPrompt, singleLine = false, minLines = 2, placeholder = "不填就只启动会话")
                 }
             }
-            NoteCard(state.note, onDismissNote, Modifier.align(Alignment.TopCenter))
-        }
-    }
-    state.untrusted?.let { TrustSheet(it, state.trusting, onTrust, onDismissTrust) }
 }
 
 /** .csub: a small label over its field, under 「自己填」. */
@@ -220,7 +351,7 @@ private fun SubField(label: String, content: @Composable () -> Unit) {
 private fun ModelsField(state: CreateUiState, field: Modifier, onToggle: () -> Unit, onModel: (ModelTier, String) -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
-    val grid = Clauderc.style == UiStyle.Grid
+    val plate = Clauderc.style == UiStyle.Plate
     Column(field.fillMaxWidth()) {
         Row(
             Modifier
@@ -241,7 +372,7 @@ private fun ModelsField(state: CreateUiState, field: Modifier, onToggle: () -> U
             Column(Modifier.padding(top = sp.sp2)) {
                 TIERS.forEach { (tier, label, env) ->
                     Row(horizontalArrangement = Arrangement.spacedBy(sp.sp4), verticalAlignment = Alignment.CenterVertically) {
-                        Text(label, Modifier.width(52.dp), fontSize = Clauderc.fontSizes.label, color = c.fg2, fontFamily = if (grid) MonoFamily else null)
+                        Text(label, Modifier.width(52.dp), fontSize = Clauderc.fontSizes.label, color = c.fg2, fontFamily = if (plate) MonoFamily else null)
                         UnderlineField(
                             state.models[tier].orEmpty(), { onModel(tier, it) }, Modifier.weight(1f).testTag("model:${tier.name}"),
                             mono = true, fontSize = 13.sp, error = tier in state.badModels, placeholder = env,
@@ -288,14 +419,15 @@ private fun NoteCard(note: FormNote?, onDismiss: () -> Unit, modifier: Modifier 
         enter = Motion.noteIn { it },
         exit = Motion.noteOut { it },
     ) {
-        val shape = if (style == UiStyle.Grid) RoundedCornerShape(0.dp) else RoundedCornerShape(16.dp)
-        val tint = c.danger.copy(alpha = if (style == UiStyle.Sticker) 0.18f else 0.12f).compositeOver(c.sheet)
+        val shape = if (style == UiStyle.Plate) RoundedCornerShape(0.dp) else RoundedCornerShape(16.dp)
+        val tint = c.danger.copy(alpha = 0.12f).compositeOver(c.sheet)
         val ground = when (style) {
-            UiStyle.Sticker -> Modifier.sticker(tint, c.ink, StickerCorner)
-            UiStyle.Grid -> Modifier
+            UiStyle.Plate -> Modifier
                 .drawBehind { drawRect(c.danger.copy(alpha = 0.35f), topLeft = Offset(4.dp.toPx(), 4.dp.toPx()), size = size) }
                 .background(tint)
-                .border(1.dp, c.danger)
+                .border(1.5.dp, c.danger)
+            UiStyle.Ink -> Modifier.inkSurface(tint, c.danger.copy(alpha = 0.4f), 16.dp)
+            UiStyle.Tile -> Modifier.tileSurface(tint, 16.dp).border(1.dp, c.danger.copy(alpha = 0.3f), shape)
             UiStyle.Clear -> Modifier
                 .shadow(6.dp, shape)
                 .clip(shape)
@@ -322,8 +454,8 @@ private fun NoteCard(note: FormNote?, onDismiss: () -> Unit, modifier: Modifier 
                 color = c.fg,
                 fontSize = Clauderc.fontSizes.label,
                 lineHeight = 1.45.em,
-                fontWeight = if (style == UiStyle.Sticker) FontWeight.Bold else null,
-                fontFamily = if (style == UiStyle.Grid) MonoFamily else null,
+                fontWeight = if (style == UiStyle.Plate) FontWeight.Bold else null,
+                fontFamily = if (style == UiStyle.Plate) MonoFamily else null,
             )
         }
     }
@@ -356,7 +488,7 @@ private fun TrustSheet(dir: String, trusting: Boolean, onTrust: () -> Unit, onDi
         // .sheet .btns
         Row(
             Modifier.fillMaxWidth().padding(start = sp.sp3, end = sp.sp3, top = sp.sp3),
-            horizontalArrangement = Arrangement.spacedBy(if (Clauderc.style == UiStyle.Sticker) sp.sp2 else sp.sp1, Alignment.End),
+            horizontalArrangement = Arrangement.spacedBy(if (Clauderc.style == UiStyle.Plate) sp.sp2 else sp.sp1, Alignment.End),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // 「取消」 looks the same while it works, as in the mockup; swiping the sheet down closes it without sticking.
@@ -374,7 +506,7 @@ private fun DirRow(dir: String, checked: Boolean, onPickDir: (String) -> Unit) =
 @Composable
 private fun ChoiceRow(title: String, sub: String, checked: Boolean, titleMono: Boolean, subMono: Boolean, onClick: () -> Unit) {
     val c = Clauderc.colors
-    val grid = Clauderc.style == UiStyle.Grid
+    val plate = Clauderc.style == UiStyle.Plate
     Row(
         Modifier
             .fillMaxWidth()
@@ -392,8 +524,8 @@ private fun ChoiceRow(title: String, sub: String, checked: Boolean, titleMono: B
             Text(title, fontSize = if (titleMono) 14.sp else 15.sp, fontFamily = if (titleMono) MonoFamily else null, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 sub,
-                fontFamily = if (subMono || grid) MonoFamily else null,
-                fontSize = if (subMono || grid) 11.sp else Clauderc.fontSizes.caption,
+                fontFamily = if (subMono || plate) MonoFamily else null,
+                fontSize = if (subMono || plate) 11.sp else Clauderc.fontSizes.caption,
                 color = c.fg3,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

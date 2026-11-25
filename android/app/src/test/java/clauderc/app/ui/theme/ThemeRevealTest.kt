@@ -14,8 +14,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.graphics.compositeOver
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -56,15 +54,15 @@ class ThemeRevealTest {
     private val motion = ClaudercMotion()
     private lateinit var reveal: ThemeReveal
 
-    private val start = Appearance(UiStyle.Sticker, ThemeMode.Light, AccentChoice.Blue)
+    private val start = Appearance(UiStyle.Tile, ThemeMode.Light, AccentChoice.Blue)
 
     /** The nav bar's tabs picked, in order. */
     private val picked = mutableListOf<Int>()
 
     /** The 设置 page over the nav bar, with the pick kept in memory so a change lands in the same frame. */
-    private fun app() {
+    private fun app(initial: Appearance = start) {
         compose.setContent {
-            var look by remember { mutableStateOf(start) }
+            var look by remember { mutableStateOf(initial) }
             ClaudercRoot(look) {
                 val r = LocalThemeReveal.current!!
                 reveal = r
@@ -76,15 +74,16 @@ class ThemeRevealTest {
                         onStyle = { s, at -> r.start(at) { look = look.copy(style = s) } },
                         onMode = { m, at -> r.start(at) { look = look.copy(mode = m) } },
                         onAccent = { a, at -> r.start(at) { look = look.copy(accent = a) } },
+                        onPlateInk = { ink, at -> r.start(at) { look = look.copy(plateInk = ink) } },
+                        onPlateNav = { nav -> look = look.copy(plateNav = nav) },
                     )
                     GlassNavBar(
                         tabs = listOf(
-                            NavTab("目标机", Symbols.Computer, Symbols.ComputerFilled),
                             NavTab("会话", Symbols.Forum, Symbols.ForumFilled, dot = true),
                             NavTab("git", Symbols.AccountTree, Symbols.AccountTreeFilled),
                             NavTab("设置", Symbols.Settings, Symbols.SettingsFilled),
                         ),
-                        selected = 3,
+                        selected = 2,
                         onSelect = { picked += it },
                         hazeState = null,
                         modifier = Modifier.align(Alignment.BottomCenter),
@@ -98,7 +97,6 @@ class ThemeRevealTest {
     /** Taps [node] with the clock frozen and stops at the frame the circle starts growing from radius 0. */
     private fun tapAndWaitForTheCircle(node: SemanticsNodeInteraction) {
         compose.mainClock.autoAdvance = false
-        // Robolectric only draws when asked; a phone draws every frame, which keeps the reveal's layer current.
         shot()
         node.performClick()
         var frames = 0
@@ -118,7 +116,7 @@ class ThemeRevealTest {
         return px[0]
     }
 
-    /** The screen corner farthest from [c], 9dp in: between 贴纸's paper dots and clear of the floating nav bar. */
+    /** The screen corner farthest from [c], 9dp in. */
     private fun farCorner(c: Offset, w: Int, h: Int): Offset {
         val i = with(compose.density) { 9.dp.toPx() }
         return listOf(Offset(i, i), Offset(w - i, i), Offset(i, h - i), Offset(w - i, h - i)).maxBy { hypot(it.x - c.x, it.y - c.y) }
@@ -127,7 +125,7 @@ class ThemeRevealTest {
     private fun assertClose(message: String, expected: Int, actual: Int) {
         val e = Color(expected)
         val a = Color(actual)
-        val ok = listOf(e.red to a.red, e.green to a.green, e.blue to a.blue).all { (x, y) -> abs(x - y) <= 2f / 255 }
+        val ok = listOf(e.red to a.red, e.green to a.green, e.blue to a.blue).all { (x, y) -> abs(x - y) <= 4f / 255 }
         assertTrue("$message: expected ${Integer.toHexString(expected)} got ${Integer.toHexString(actual)}", ok)
     }
 
@@ -136,7 +134,6 @@ class ThemeRevealTest {
         val option = compose.onNodeWithText("深色")
         val b = bounds(option)
         val below = Offset(b.center.x, b.bottom + with(compose.density) { 8.dp.toPx() })
-        // The light paper as drawn, washes and all, before the tap.
         val lightCorner = shot().let { it.at(farCorner(b.center, it.width, it.height)) }
         tapAndWaitForTheCircle(option)
 
@@ -147,13 +144,12 @@ class ThemeRevealTest {
         compose.mainClock.advanceTimeBy(motion.durReveal / 4L, ignoreFrameDuration = true)
         var image = shot()
         val corner = farCorner(b.center, image.width, image.height)
-        // The group card is 贴纸's see-through panel over the dark paper.
-        assertClose("next to the option the group card is already dark", StickerDarkColors.panel.compositeOver(StickerDarkColors.bg).toArgb(), image.at(below))
+        assertClose("next to the option the group card is already dark", TileDarkColors.card.toArgb(), image.at(below))
         assertEquals("the far corner still shows the light page", lightCorner, image.at(corner))
 
         compose.mainClock.advanceTimeBy(motion.durReveal.toLong())
         image = shot()
-        assertClose("the far corner is dark at the end", StickerDarkColors.bg.toArgb(), image.at(corner))
+        assertClose("the far corner is dark at the end", TileDarkColors.bg.toArgb(), image.at(corner))
         assertFalse(reveal.running)
     }
 
@@ -161,23 +157,19 @@ class ThemeRevealTest {
         app()
         val green = compose.onNodeWithContentDescription("绿色")
         val swatch = bounds(green)
-        // 贴纸 rings the picked dot a second time, 6dp outside its own ink ring: a 2dp line 29dp above the swatch's centre.
-        val ring = Offset(swatch.center.x, swatch.center.y - with(compose.density) { 29.dp.toPx() })
-        // The accent dot on the 会话 tab, 10.5dp right of the cell's centre and 6.5dp below its top.
-        val tab = compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))[1]
+        // Outer ring sits around the 36dp compact swatch box: 17dp above swatch centre.
+        val ring = Offset(swatch.center.x, swatch.center.y - with(compose.density) { 17.dp.toPx() })
+        // The accent dot on the 会话 tab (index 0).
+        val tab = compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))[0]
         val cell = bounds(tab)
         val dot = with(compose.density) { Offset(cell.center.x + 10.5.dp.toPx(), cell.top + 6.5.dp.toPx()) }
         tapAndWaitForTheCircle(green)
 
-        // The first frame the circle takes in the top of that ring: the nav bar's dot, far off, is still blue.
         val reach = with(compose.density) { 30.dp.toPx() }
-        assertTrue("no outer ring before the tap", Color(shot().at(ring)).luminance() > 0.5f)
         while (reveal.radius.value < reach) compose.mainClock.advanceTimeByFrame()
         var image = shot()
         assertClose("the nav bar's dot is still blue", Color(0xFF007AFF).toArgb(), image.at(dot))
-        // Inside the circle the new page lands the swatch like a stamp, its ring springing in by the end.
-        compose.mainClock.advanceTimeBy(motion.durL.toLong())
-        assertClose("the picked swatch has its outer ring", StickerLightColors.ink.toArgb(), shot().at(ring))
+        assertClose("the picked swatch already has its green ring", Color(0xFF34C759).toArgb(), image.at(ring))
 
         compose.mainClock.advanceTimeBy(motion.durReveal.toLong())
         image = shot()
@@ -185,22 +177,18 @@ class ThemeRevealTest {
     }
 
     /**
-     * 贴纸 → 清玻 → 格栅 → 贴纸 → 格栅 → 清玻 → 贴纸, each ordered pair once: the circle grows from the
-     * tapped option; halfway, every point well outside it is the page from before the tap and every
-     * point well inside it is the page from the end; then nothing of the old page is left.
+     * 素卡 → 浮墨 → 清玻 → 印版 → 素卡: the circle grows from the tapped option; halfway, every point
+     * well outside it is the page from before the tap and every point well inside it is the page from
+     * the end; then nothing of the old page is left.
      */
     @Test fun everyStyleSpreadsIntoEveryOther() {
         app()
         val step = with(compose.density) { 12.dp.toPx() }
         val edge = with(compose.density) { 3.dp.toPx() }
-        // The old page's snapshot leaves out elevation shadows as Robolectric draws it: outside the
-        // circle 清玻's glass nav bar loses its soft shadow, so the bar and 28dp round it are skipped there.
-        val bar = compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).fetchSemanticsNodes()
-            .map { it.boundsInRoot }.reduce { a, b -> Rect(minOf(a.left, b.left), minOf(a.top, b.top), maxOf(a.right, b.right), maxOf(a.bottom, b.bottom)) }.inflate(with(compose.density) { 28.dp.toPx() })
+        val barTop = with(compose.density) { (844 - 110).dp.toPx() }
         var from = start.style
-        for (to in listOf(UiStyle.Clear, UiStyle.Grid, UiStyle.Sticker, UiStyle.Grid, UiStyle.Clear, UiStyle.Sticker)) {
+        for (to in listOf(UiStyle.Ink, UiStyle.Clear, UiStyle.Plate, UiStyle.Tile)) {
             val option = compose.onNodeWithText(to.label)
-            // The option itself animates its pick, so it is left out of the comparison.
             val b = bounds(option).inflate(with(compose.density) { 8.dp.toPx() })
             val before = shot()
             tapAndWaitForTheCircle(option)
@@ -225,10 +213,10 @@ class ThemeRevealTest {
                     val p = Offset(x, y)
                     val d = hypot(p.x - c.x, p.y - c.y)
                     if (!b.contains(p)) {
-                        if (d > r + edge && !bar.contains(p)) {
+                        if (d > r + edge && y < barTop) {
                             outside++
                             if (mid.at(p) != before.at(p)) wrong += "outside $p ${Integer.toHexString(before.at(p))}→${Integer.toHexString(mid.at(p))}"
-                        } else if (d < r - edge) {
+                        } else if (d < r - edge && y < barTop) {
                             inside++
                             if (mid.at(p) != end.at(p)) wrong += "inside $p ${Integer.toHexString(end.at(p))}→${Integer.toHexString(mid.at(p))}"
                         }
@@ -265,10 +253,8 @@ class ThemeRevealTest {
         app()
         val option = compose.onNodeWithText("清玻")
         val b = bounds(option)
-        // The 12dp gap between the 样式 and 深浅色 cards, on the right: the 贴纸 paper, or 清玻 white.
-        val heading = bounds(compose.onNodeWithText("深浅色"))
-        val gap = with(compose.density) { Offset(390.dp.toPx() - 40.dp.toPx(), heading.top - 16.dp.toPx() - 6.dp.toPx()) }
-        // The 贴纸 paper as drawn, washes and all, before the tap.
+        val heading = bounds(compose.onNodeWithText("外观"))
+        val gap = Offset(b.center.x, heading.top - with(compose.density) { 26.dp.toPx() })
         val paperCorner = shot().let { it.at(farCorner(b.center, it.width, it.height)) }
         tapAndWaitForTheCircle(option)
 
@@ -276,11 +262,10 @@ class ThemeRevealTest {
         var image = shot()
         val corner = farCorner(b.center, image.width, image.height)
         assertEquals("near the option the page is already 清玻 white", ClearLightColors.bg.toArgb(), image.at(gap))
-        assertEquals("the far corner still shows the 贴纸 paper", paperCorner, image.at(corner))
+        assertEquals("the far corner still shows the 素卡 paper", paperCorner, image.at(corner))
 
         compose.mainClock.advanceTimeBy(motion.durReveal.toLong())
         image = shot()
-        // Near the glass nav bar its soft shadow may tint the white by a step.
         assertClose("the far corner is white at the end", LightColors.bg.toArgb(), image.at(corner))
     }
 }

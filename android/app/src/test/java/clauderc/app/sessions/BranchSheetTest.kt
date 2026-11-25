@@ -99,6 +99,7 @@ class BranchSheetTest {
                     onSwitchBranch = vm::switchBranch,
                     onConfirmSwitch = vm::confirmSwitch,
                     onDismissSwitch = vm::dismissSwitch,
+                    initialInkTab = InkListTab.All,
                 )
             }
         }

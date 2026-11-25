@@ -9,9 +9,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 
-// Values copied from the approved mockup design/ui-mockup/index.html.
+// Values copied from design/ui-mockup/index.html (synced with design/ui-mockup/demo.html).
 // Each property maps to one CSS variable: --c-surface-2 -> surface2 and so on.
-// ThemeTokensTest parses the mockup and fails when the two drift apart.
+// ThemeTokensTest parses index.html and fails when the two drift apart.
 
 @Immutable
 data class ClaudercColors(
@@ -47,42 +47,24 @@ data class ClaudercColors(
     val glassSheen: Color,
     val glassShadow: Color,
     val isDark: Boolean,
-    // The --k- variables of the three styles; a style that has no such variable leaves it transparent.
-    /** 贴纸: the ink of outlines (--k-ink). */
+    // Style-specific --k- variables; styles that do not set a token leave it transparent.
+    /** 印版: primary printing ink (--k-ink). */
     val ink: Color = Color.Transparent,
-    /** 贴纸: the sticker colours after the accent, one per row of icons (--k-p2 .. --k-p5). */
-    val hue2: Color = Color.Transparent,
-    val hue3: Color = Color.Transparent,
-    val hue4: Color = Color.Transparent,
-    val hue5: Color = Color.Transparent,
-    /** 贴纸: the fill of cards (--k-glass). */
+    /** Positive/connected status indicator (--k-ok). */
+    val ok: Color = Color.Transparent,
+    /** 素卡 / 浮墨: card surface fill (--k-glass). */
     val panel: Color = Color.Transparent,
-    /** 贴纸: the fill of the nav bar and the composer (--k-float). */
+    /** 素卡 / 浮墨: floating pill/orb surface fill (--k-float). */
     val float: Color = Color.Transparent,
-    /** 贴纸: the dots of the paper, one every [StickerDotGap] (--k-dot). */
-    val dot: Color = Color.Transparent,
-    /** 贴纸: how much of the accent glows from the paper's top right corner (--k-glow-1, a share of --c-accent). */
-    val glow1: Float = 0f,
-    /** 贴纸: the glow from the paper's bottom left corner, yellow in light and none in dark (--k-glow-2). */
-    val glow2: Color = Color.Transparent,
-    /** 清玻: the tint of the glass bars and sheets over the content (--k-pane). */
+    /** 清玻: the tint of glass bars and sheets over content (--k-pane). */
     val pane: Color = Color.Transparent,
-    /** 清玻: the bright rim along the glass edges (--k-rimc). */
+    /** 清玻: bright rim along glass edges (--k-rimc). */
     val rim: Color = Color.Transparent,
-    /** 清玻: the hairline around the glass (--k-edgec). */
+    /** 清玻 / 浮墨: hairline around floating surfaces (--k-edgec). */
     val edge: Color = Color.Transparent,
-    /** 清玻: the lens that marks the picked tab (--k-lens). */
+    /** 清玻: lens over the picked tab (--k-lens). */
     val lens: Color = Color.Transparent,
 ) {
-    /** 贴纸: the colour of the [index]th icon down a list: the accent, then the four sticker colours. */
-    fun hue(index: Int): Color = when (index.mod(5)) {
-        0 -> accent
-        1 -> hue2
-        2 -> hue3
-        3 -> hue4
-        else -> hue5
-    }
-
     /** Lane colors of the git timeline cycle through --c-lane-1..3. */
     fun lane(index: Int): Color = when (index.mod(3)) {
         0 -> lane1
@@ -164,11 +146,12 @@ val DarkColors = ClaudercColors(
     isDark = true,
 )
 
-// The three styles (:root[data-style="clear" | "grid" | "sticker"]). Variables a style's blocks leave
-// out keep the minimal value of the same brightness, so scrim, camera and the nav bar's glass are shared.
+// The four styles (:root[data-style="clear" | "plate" | "tile" | "ink"]).
 
-/** 清玻: the minimal colours, plus the glass of the bars and sheets that float over the content. */
+/** 清玻: clean paper with frosted glass floating bars and sheets. */
 val ClearLightColors = LightColors.copy(
+    scrim = rgba(0, 0, 0, 0.18f),
+    ok = hex(0x1E7A34),
     pane = rgba(255, 255, 255, 0.64f),
     rim = rgba(255, 255, 255, 0.95f),
     edge = rgba(0, 0, 0, 0.07f),
@@ -176,114 +159,171 @@ val ClearLightColors = LightColors.copy(
 )
 
 val ClearDarkColors = DarkColors.copy(
+    scrim = rgba(0, 0, 0, 0.45f),
+    ok = hex(0x87D697),
     pane = rgba(22, 22, 22, 0.6f),
     rim = rgba(255, 255, 255, 0.16f),
     edge = rgba(255, 255, 255, 0.08f),
     lens = rgba(255, 255, 255, 0.13f),
 )
 
-/** 格栅: harder black, white and grey for the Swiss grid. */
-val GridLightColors = LightColors.copy(
-    bg = hex(0xFFFFFF),
+/** 印版: high-contrast monochrome letterpress, defaulting to carbon black ink on cotton paper. */
+val PlateLightColors = LightColors.copy(
+    bg = hex(0xF9F8F3),
+    sheet = hex(0xF9F8F3),
+    card = hex(0xF9F8F3),
+    surface = hex(0xE3E3DE),
+    surface2 = hex(0xC5C4C0),
+    line = rgba(11, 11, 13, 0.32f),
+    fg = hex(0x0B0B0D),
+    fg2 = hex(0x313132),
+    fg3 = hex(0x61605F),
+    accent = hex(0x0B0B0D),
+    onAccent = hex(0xF9F8F3),
+    danger = hex(0xCC111F),
+    addFg = hex(0x0B6E3B),
+    delFg = hex(0xCC111F),
+    inverse = hex(0x0B0B0D),
+    onInverse = hex(0xF9F8F3),
+    scrim = rgba(11, 11, 13, 0.42f),
+    lane1 = hex(0x0B0B0D),
+    lane2 = hex(0x0B0B0D),
+    lane3 = hex(0x61605F),
+    ink = hex(0x0B0B0D),
+    ok = hex(0x0B6E3B),
+)
+
+val PlateDarkColors = DarkColors.copy(
+    bg = hex(0x0A0A0C),
+    sheet = hex(0x0A0A0C),
+    card = hex(0x0A0A0C),
+    surface = hex(0x262627),
+    surface2 = hex(0x3E3E40),
+    line = rgba(245, 244, 238, 0.36f),
+    fg = hex(0xF5F4EE),
+    fg2 = hex(0xD0CFCB),
+    fg3 = hex(0xA1A09D),
+    accent = hex(0xF5F4EE),
+    onAccent = hex(0x0A0A0C),
+    danger = hex(0xFF6B6B),
+    addFg = hex(0x5EE69D),
+    delFg = hex(0xFF6B6B),
+    inverse = hex(0xF5F4EE),
+    onInverse = hex(0x0A0A0C),
+    scrim = rgba(0, 0, 0, 0.68f),
+    lane1 = hex(0xF5F4EE),
+    lane2 = hex(0xF5F4EE),
+    lane3 = hex(0xA1A09D),
+    ink = hex(0xF5F4EE),
+    ok = hex(0x5EE69D),
+)
+
+/** 素卡: warm grey canvas with borderless white bento cards and vibrant accent fills. */
+val TileLightColors = LightColors.copy(
+    bg = hex(0xEEEDF0),
     sheet = hex(0xFFFFFF),
     card = hex(0xFFFFFF),
-    surface = hex(0xF1F1F1),
-    surface2 = hex(0xE0E0E0),
-    line = hex(0xE6E6E6),
-    fg = hex(0x0A0A0A),
-    fg2 = hex(0x555555),
-    fg3 = hex(0x9A9A9A),
-    lane1 = hex(0x0A0A0A),
-    lane3 = hex(0xA0A0A0),
+    surface = hex(0xF4F4F6),
+    surface2 = hex(0xE7E6EA),
+    line = hex(0xE7E6EA),
+    fg = hex(0x121214),
+    fg2 = hex(0x67666D),
+    fg3 = hex(0xA09FA6),
+    accent = hex(0x007AFF),
+    onAccent = hex(0xFFFFFF),
+    danger = hex(0xD93A3F),
+    addFg = hex(0x1F8A4C),
+    delFg = hex(0xD93A3F),
+    inverse = hex(0x121214),
+    onInverse = hex(0xFFFFFF),
+    scrim = rgba(20, 20, 24, 0.28f),
+    lane1 = hex(0x121214),
+    lane2 = hex(0x007AFF),
+    lane3 = hex(0xA09FA6),
+    ok = hex(0x1F9D57),
+    panel = hex(0xFFFFFF),
+    float = hex(0xFFFFFF),
 )
 
-val GridDarkColors = DarkColors.copy(
-    bg = hex(0x0A0A0A),
-    sheet = hex(0x141414),
-    card = hex(0x0A0A0A),
-    surface = hex(0x171717),
-    surface2 = hex(0x282828),
-    line = hex(0x1E1E1E),
-    fg = hex(0xF2F2F2),
-    fg2 = hex(0x9A9A9A),
-    fg3 = hex(0x5E5E5E),
-    lane1 = hex(0xF2F2F2),
-    lane3 = hex(0x5E5E5E),
+val TileDarkColors = DarkColors.copy(
+    bg = hex(0x0F0F11),
+    sheet = hex(0x1B1B1F),
+    card = hex(0x1B1B1F),
+    surface = hex(0x25252A),
+    surface2 = hex(0x2B2B30),
+    line = hex(0x2B2B30),
+    fg = hex(0xF3F3F5),
+    fg2 = hex(0xA3A2AA),
+    fg3 = hex(0x67666E),
+    accent = hex(0x007AFF),
+    onAccent = hex(0xFFFFFF),
+    danger = hex(0xFF7A7E),
+    addFg = hex(0x5BD08C),
+    delFg = hex(0xFF7A7E),
+    inverse = hex(0xF3F3F5),
+    onInverse = hex(0x0F0F11),
+    scrim = rgba(0, 0, 0, 0.55f),
+    lane1 = hex(0xF3F3F5),
+    lane2 = hex(0x007AFF),
+    lane3 = hex(0x67666E),
+    ok = hex(0x3FCB7E),
+    panel = hex(0x1B1B1F),
+    float = hex(0x1B1B1F),
 )
 
-/** 贴纸: the paper's dots sit one every [StickerDotGap], each [StickerDotRadius] round (--k-dot-gap, --k-dot-r). */
-val StickerDotGap = 24.dp
-val StickerDotRadius = 1.dp
-
-/**
- * 贴纸: dotted cream paper, ink outlines without shadows and round stickers for icons.
- * accent and lane2 are the default blue; the theme swaps in the colour picked in 设置.
- */
-val StickerLightColors = LightColors.copy(
-    bg = hex(0xFFF6E9),
-    sheet = hex(0xFFFDF8),
+/** 浮墨: near-black floating pills and orbs (with matching warm-stone light palette). */
+val InkLightColors = LightColors.copy(
+    bg = hex(0xF5F4F0),
+    sheet = hex(0xFFFFFF),
     card = hex(0xFFFFFF),
     surface = hex(0xFFFFFF),
-    surface2 = rgba(30, 27, 46, 0.14f),
-    line = rgba(30, 27, 46, 0.12f),
-    fg = hex(0x1E1B2E),
-    fg2 = hex(0x5E5870),
-    fg3 = hex(0xA49DB0),
-    accent = hex(0x007AFF),
+    surface2 = hex(0xECEAE4),
+    line = rgba(0, 0, 0, 0.07f),
+    fg = hex(0x161615),
+    fg2 = hex(0x6D6B66),
+    fg3 = hex(0xA6A39C),
+    accent = hex(0xC9653F),
     onAccent = hex(0xFFFFFF),
-    danger = hex(0xE5352B),
-    addBg = hex(0xE3F8E8),
-    addFg = hex(0x17732F),
-    delBg = hex(0xFFE7E5),
-    delFg = hex(0xC4271E),
-    inverse = hex(0x1E1B2E),
-    onInverse = hex(0xFFF6E9),
-    lane1 = hex(0x1E1B2E),
-    lane2 = hex(0x007AFF),
-    lane3 = hex(0xB9B2C4),
-    ink = hex(0x1E1B2E),
-    hue2 = hex(0xFFD84D),
-    hue3 = hex(0xFF9EC4),
-    hue4 = hex(0x8EE3C8),
-    hue5 = hex(0xC7B2FF),
-    panel = rgba(255, 255, 255, 0.9f),
-    float = rgba(255, 255, 255, 0.82f),
-    dot = rgba(30, 27, 46, 0.075f),
-    glow1 = 0.12f,
-    glow2 = rgba(255, 216, 77, 0.16f),
+    danger = hex(0xD2453B),
+    addFg = hex(0x2C8A4E),
+    delFg = hex(0xD2453B),
+    inverse = hex(0x161615),
+    onInverse = hex(0xF5F4F0),
+    scrim = rgba(40, 30, 20, 0.22f),
+    lane1 = hex(0x161615),
+    lane2 = hex(0xC9653F),
+    lane3 = hex(0xA6A39C),
+    ok = hex(0x2E9E5B),
+    panel = hex(0xFFFFFF),
+    float = hex(0xFFFFFF),
+    edge = rgba(0, 0, 0, 0.07f),
 )
 
-val StickerDarkColors = DarkColors.copy(
-    bg = hex(0x1C1A27),
-    sheet = hex(0x2E2A3E),
-    card = hex(0x353048),
-    surface = hex(0x353048),
-    surface2 = rgba(255, 255, 255, 0.14f),
-    line = rgba(255, 255, 255, 0.1f),
-    fg = hex(0xF6F1FF),
-    fg2 = hex(0xB4ACC6),
-    fg3 = hex(0x6E6782),
-    accent = hex(0x007AFF),
+val InkDarkColors = DarkColors.copy(
+    bg = hex(0x0B0B0C),
+    sheet = hex(0x1F1F22),
+    card = hex(0x161618),
+    surface = hex(0x1F1F22),
+    surface2 = hex(0x2B2B2F),
+    line = rgba(255, 255, 255, 0.07f),
+    fg = hex(0xF2F2F3),
+    fg2 = hex(0xA1A1A6),
+    fg3 = hex(0x636368),
+    accent = hex(0xD97757),
     onAccent = hex(0xFFFFFF),
-    danger = hex(0xFF6B61),
-    addBg = hex(0x12301C),
-    addFg = hex(0x86DE9A),
-    delBg = hex(0x3A1614),
+    danger = hex(0xFF8A80),
+    addFg = hex(0x6FCF97),
     delFg = hex(0xFF8A80),
-    inverse = hex(0xF6F1FF),
-    onInverse = hex(0x15131D),
-    lane1 = hex(0xF6F1FF),
-    lane2 = hex(0x007AFF),
-    lane3 = hex(0x6E6782),
-    ink = hex(0x000000),
-    hue2 = hex(0xFFD84D),
-    hue3 = hex(0xFF8DBA),
-    hue4 = hex(0x74D9B8),
-    hue5 = hex(0xB9A0FF),
-    panel = rgba(53, 48, 72, 0.96f),
-    float = rgba(53, 48, 72, 0.9f),
-    dot = rgba(255, 255, 255, 0.05f),
-    glow1 = 0.14f,
+    inverse = hex(0xF2F2F4),
+    onInverse = hex(0x121214),
+    scrim = rgba(0, 0, 0, 0.55f),
+    lane1 = hex(0xF2F2F3),
+    lane2 = hex(0xD97757),
+    lane3 = hex(0x636368),
+    ok = hex(0x57C27F),
+    panel = hex(0x161618),
+    float = hex(0x1F1F22),
+    edge = rgba(255, 255, 255, 0.07f),
 )
 
 /** --fs-* */

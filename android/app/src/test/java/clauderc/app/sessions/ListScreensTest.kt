@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.data.Fleet
+import clauderc.app.data.UiStyle
+import clauderc.app.machines.PendingEntry
 import clauderc.app.machines.MachineRow
 import clauderc.app.machines.MachinesScreen
 import clauderc.app.machines.MachinesUiState
@@ -108,7 +110,7 @@ class ListScreensTest {
     private var refreshes = 0
     private val stopped = mutableListOf<Session>()
 
-    private fun sessions() {
+    private fun sessions(initialInkTab: InkListTab = InkListTab.All) {
         compose.setContent {
             ClaudercTheme(darkTheme = false) {
                 SessionsScreen(
@@ -119,6 +121,7 @@ class ListScreensTest {
                     onRename = { _, _ -> },
                     onStop = { stopped += it },
                     onRemove = {},
+                    initialInkTab = initialInkTab,
                 )
             }
         }
@@ -173,6 +176,7 @@ class ListScreensTest {
                 SessionsScreen(
                     state = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(list, emptyMap())),
                     onRefresh = {}, onOpenChat = {}, onCreate = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
+                    initialInkTab = InkListTab.All,
                 )
             }
         }
@@ -276,6 +280,7 @@ class ListScreensTest {
                     state = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(list, emptyMap())),
                     onRefresh = {}, onOpenChat = {}, onCreate = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
                     onOpenAgent = { s, a -> opened += s.id to a.id },
+                    initialInkTab = InkListTab.All,
                 )
             }
         }
@@ -377,7 +382,7 @@ class ListScreensTest {
         }
     }
 
-    @Test fun firstMachineListFailureDropsTheBootCoverAndOffersRetry() {
+    @Test fun firstMachineListFailureOffersRetryImmediately() {
         val relay = FakeRelay()
         var fail = true
         relay.on(Method.MACHINES_LIST) {
@@ -394,25 +399,12 @@ class ListScreensTest {
             val fleet = Fleet(relay, scope)
             val vm = clauderc.app.machines.MachinesViewModel(fleet, links)
             compose.setContent {
-                val m by fleet.machines.collectAsState()
-                val failed by fleet.machinesFailed.collectAsState()
-                val l by links.collectAsState()
                 val s by vm.state.collectAsState()
-                var bootFailed by androidx.compose.runtime.remember { mutableStateOf(false) }
-                if (failed) bootFailed = true
                 ClaudercTheme(darkTheme = false) {
-                    clauderc.app.ui.components.LoadingCover(
-                        clauderc.app.isBooting(m, bootFailed, l),
-                        clauderc.app.ui.components.LoadingArt.Link,
-                        androidx.compose.ui.Modifier.fillMaxSize(),
-                        splash = true,
-                    ) {
-                        MachinesScreen(s, onOpen = {}, onAdd = {}, onRetry = vm::retry)
-                    }
+                    MachinesScreen(s, onOpen = {}, onAdd = {}, onRetry = vm::retry)
                 }
             }
             compose.waitForIdle()
-            compose.onNodeWithTag("loadingCover").assertDoesNotExist()
             compose.onNodeWithText("读不到目标机列表").assertIsDisplayed()
             fail = false
             compose.onNodeWithText("重试").performClick()
@@ -538,5 +530,132 @@ class ListScreensTest {
         } finally {
             scope.cancel()
         }
+    }
+
+    @Test fun inkBrushTabsSwitchBetweenActiveAndAllAndCenterPillOpensStatusPanel() {
+        val groups = groupSessions(sampleSessions, emptyMap())
+        val usage = clauderc.app.protocol.UsageResponse(
+            available = true,
+            fiveHour = clauderc.app.protocol.UsageWindow(37.0, null),
+            sevenDay = clauderc.app.protocol.UsageWindow(64.0, null),
+        )
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Ink) {
+                SessionsScreen(
+                    state = SessionsUiState(machine("m-1", "工作室 Mac mini"), groups, usage = usage),
+                    onRefresh = {}, onOpenChat = {}, onCreate = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
+                    relays = listOf(RelayLink("wss://relay.example.com", "relay.example.com", ConnectionState.Connected)),
+                )
+            }
+        }
+        compose.waitForIdle()
+        // Default 活跃 tab shows pending/blocked/working rows with dir prefix, hides stopped rows & usage block.
+        compose.onNodeWithTag("inkBrushTabs").assertIsDisplayed()
+        compose.onNodeWithText("clauderc 协议").assertIsDisplayed()
+        compose.onNodeWithText("修复重连").assertIsDisplayed()
+        compose.onNodeWithText("landing 页").assertDoesNotExist()
+        compose.onNodeWithText("37%").assertDoesNotExist()
+
+        // Tapping center machine pill opens InkStatusPanel with 5h/weekly usage bars & relay status.
+        compose.onNodeWithTag("inkMachinePill").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("inkStatusPanel").assertIsDisplayed()
+        compose.onNodeWithText("37%").assertIsDisplayed()
+        compose.onNodeWithText("64%").assertIsDisplayed()
+        compose.onNodeWithText("管理启动档位名").assertIsDisplayed()
+        compose.onNodeWithText("中转服务器").assertIsDisplayed()
+        compose.onNodeWithText("中转服务器").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("relay.example.com").assertIsDisplayed()
+        compose.onNodeWithTag("morphScrim").performClick()
+        compose.waitForIdle()
+
+        // Switching brush tab to 全部 reveals stopped & grouped sessions.
+        compose.onNodeWithTag("brushTab:1").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("sessionList").performScrollToNode(hasText("landing 页"))
+        compose.onNodeWithText("landing 页").assertIsDisplayed()
+    }
+
+    @Test fun inkDrawerFiltersDirectoriesAndOffersScanOrb() {
+        var pickedDir by mutableStateOf<String?>(null)
+        var paired = 0
+        val groups = groupSessions(sampleSessions, emptyMap())
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Ink) {
+                SessionsScreen(
+                    state = SessionsUiState(machine("m-1", "工作室 Mac mini"), groups),
+                    onRefresh = {}, onOpenChat = {}, onCreate = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
+                    dirFilter = pickedDir,
+                    onSelectDirFilter = { pickedDir = it },
+                    onPair = { paired++ },
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("inkDrawerButton").assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("inkDrawer").assertIsDisplayed()
+        compose.onNodeWithTag("inkDrawerScanOrb").assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        assertEquals(1, paired)
+
+        val firstDir = groups.flatMap { it.dirs }.first()
+        compose.onNodeWithTag("inkDrawerButton").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("全部目录").assertIsDisplayed()
+        compose.onNode(hasText(firstDir.title) and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.hasTestTag("inkDrawer"))).performClick()
+        compose.waitForIdle()
+        assertEquals(firstDir.cwd, pickedDir)
+    }
+
+    @Test fun tileBentoCookieAndMachineStripWork() {
+        val m1 = machine("m-1", "工作室 Mac mini")
+        val m2 = machine("m-2", "家里的 iMac")
+        val pendingSession = sampleSessions.sessions.first { it.state == SessionState.Pending }
+        val jumped = mutableListOf<PendingEntry>()
+        val switched = mutableListOf<String>()
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Tile) {
+                SessionsScreen(
+                    state = SessionsUiState(m1, groupSessions(sampleSessions, emptyMap())),
+                    onRefresh = {}, onOpenChat = {}, onCreate = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
+                    machines = listOf(m1, m2),
+                    pendingEntries = listOf(PendingEntry("m-2", m2.name, pendingSession)),
+                    onSelectMachine = { switched += it.id },
+                    onOpenPending = { jumped += it },
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("tileMachineStrip").assertIsDisplayed()
+        compose.onNodeWithTag("tileCookieButton", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("tilePendingCard").performClick()
+        assertEquals(listOf("m-2"), jumped.map { it.machineId })
+
+        compose.onNodeWithText("家里的 iMac").performClick()
+        assertEquals(listOf("m-2"), switched)
+    }
+
+    @Test fun plateMastheadHeadlineJumpsToCrossMachinePending() {
+        val m1 = machine("m-1", "工作室 Mac mini")
+        val m2 = machine("m-2", "家里的 iMac")
+        val pendingSession = sampleSessions.sessions.first { it.state == SessionState.Pending }
+        val jumped = mutableListOf<PendingEntry>()
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Plate) {
+                SessionsScreen(
+                    state = SessionsUiState(m1, groupSessions(sampleSessions, emptyMap())),
+                    onRefresh = {}, onOpenChat = {}, onCreate = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
+                    machines = listOf(m1, m2),
+                    pendingEntries = listOf(PendingEntry("m-2", m2.name, pendingSession)),
+                    onOpenPending = { jumped += it },
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("plateMasthead").assertIsDisplayed()
+        compose.onNodeWithTag("platePendingHeadline").performClick()
+        assertEquals(listOf("m-2"), jumped.map { it.machineId })
     }
 }

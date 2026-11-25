@@ -449,6 +449,15 @@ class ChatLogicTest {
         assertTrue(withTimeout(1_000) { vm.messages.first() }.contains("已经变了"))
     }
 
+    @Test fun cutAnswerPreservesAgentReason() = runTest(dispatcher) {
+        val reason = "回答到一半，电脑上的题目变了，已按 Esc 退出这次提问"
+        relay.fail(Method.CHAT_ANSWER, ErrorCode.PENDING_CHANGED, reason)
+        val vm = viewModel()
+        vm.answerQuestions("toolu_01B", listOf(Answer(selected = listOf(0))))
+        assertEquals(reason, withTimeout(1_000) { vm.messages.first() })
+        assertEquals(ANSWER_TIMEOUT_MILLIS, relay.sent(Method.CHAT_ANSWER).single().timeoutMillis)
+    }
+
     /** The panel shows X1 when chat.pending brings X2: a tap on X1's panel answers nothing, and X2's own panel still can. */
     @Test fun anAnswerFromAPanelGivingWayToANewOneSendsNothing() = runTest(dispatcher) {
         val vm = viewModel()

@@ -50,7 +50,8 @@ import clauderc.app.protocol.TaskStatus
 import clauderc.app.ui.components.LocalGlassSource
 import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.components.glassPane
-import clauderc.app.ui.components.sticker
+import clauderc.app.ui.components.inkSurface
+import clauderc.app.ui.components.tileSurface
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
@@ -66,20 +67,21 @@ private val TaskRowHeight = 32.dp
  * Once all are done the row says so, until Claude Code clears the list and the bar leaves.
  */
 @Composable
-internal fun TaskBar(tasks: List<ChatTask>, modifier: Modifier = Modifier) {
+internal fun TaskBar(tasks: List<ChatTask>, modifier: Modifier = Modifier, inIsland: Boolean = false) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val ui = Clauderc.style
-    val grid = ui == UiStyle.Grid
+    val plate = ui == UiStyle.Plate
     var open by rememberSaveable { mutableStateOf(false) }
-    val surface = when (ui) {
+    val surface = if (inIsland) Modifier else when (ui) {
         UiStyle.Clear -> Modifier.clip(RoundedCornerShape(20.dp)).glassPane(LocalGlassSource.current)
-        UiStyle.Grid -> Modifier.clip(RoundedCornerShape(6.dp)).background(c.bg).border(1.dp, c.fg, RoundedCornerShape(6.dp))
-        UiStyle.Sticker -> Modifier.sticker(c.card, c.ink, 18.dp)
+        UiStyle.Plate -> Modifier.background(c.bg).border(1.5.dp, c.fg)
+        UiStyle.Tile -> Modifier.tileSurface(c.card, 18.dp)
+        UiStyle.Ink -> Modifier.inkSurface(c.float, c.edge, 18.dp)
     }
-    val size = if (grid) 12.sp else Clauderc.fontSizes.label
-    val family = if (grid) MonoFamily else null
-    val weight = if (ui == UiStyle.Sticker) FontWeight.Bold else null
+    val size = if (plate) 12.sp else Clauderc.fontSizes.label
+    val family = if (plate) MonoFamily else null
+    val weight = if (plate) FontWeight.Bold else null
     val done = tasks.count { it.status == TaskStatus.COMPLETED }
     val all = done == tasks.size
     val head = tasks.firstOrNull { it.status == TaskStatus.IN_PROGRESS } ?: tasks.firstOrNull { it.status == TaskStatus.PENDING }
@@ -101,7 +103,7 @@ internal fun TaskBar(tasks: List<ChatTask>, modifier: Modifier = Modifier) {
                         horizontalArrangement = Arrangement.spacedBy(sp.sp3),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        TaskGlyph(t.status, if (ui == UiStyle.Sticker && t.status == TaskStatus.IN_PROGRESS) c.accent else tone)
+                        TaskGlyph(t.status, if ((ui == UiStyle.Tile || ui == UiStyle.Ink) && t.status == TaskStatus.IN_PROGRESS) c.accent else tone)
                         Text(t.subject, fontSize = size, fontFamily = family, fontWeight = weight, color = tone, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
@@ -121,7 +123,7 @@ internal fun TaskBar(tasks: List<ChatTask>, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(sp.sp3),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TaskGlyph(if (all) TaskStatus.COMPLETED else head?.status ?: TaskStatus.PENDING, if (ui == UiStyle.Sticker) c.accent else c.fg)
+            TaskGlyph(if (all) TaskStatus.COMPLETED else head?.status ?: TaskStatus.PENDING, if (ui == UiStyle.Tile || ui == UiStyle.Ink) c.accent else c.fg)
             Text(
                 if (all) "全部完成" else head?.subject.orEmpty(),
                 Modifier.weight(1f),

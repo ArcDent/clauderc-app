@@ -1,7 +1,5 @@
 package clauderc.app.chat
 
-import clauderc.app.ui.components.LoadingArt
-import clauderc.app.ui.components.LoadingCover
 import clauderc.app.ui.components.topHighlight
 import clauderc.app.ui.components.LocalGlassSource
 import androidx.compose.runtime.mutableIntStateOf
@@ -10,13 +8,17 @@ import dev.chrisbanes.haze.rememberHazeState
 import dev.chrisbanes.haze.hazeSource
 import clauderc.app.ui.components.glassPane
 import clauderc.app.ui.theme.page
-import clauderc.app.ui.components.sticker
 import clauderc.app.data.UiStyle
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.animation.core.Animatable
@@ -43,17 +45,20 @@ import androidx.compose.ui.unit.Dp
 import clauderc.app.ui.theme.LOOP_FRAME_MILLIS
 import clauderc.app.ui.theme.LocalLoopClock
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -64,12 +69,26 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
+import clauderc.app.ui.components.ClearDropPanel
+import clauderc.app.ui.components.PlateSlipPanel
+import clauderc.app.ui.components.TileBottomSheet
+import clauderc.app.ui.components.PlateSweep
+import clauderc.app.ui.components.plateHardShadow
+import clauderc.app.ui.components.plateSweepFill
+import clauderc.app.ui.components.topLine
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -117,6 +136,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -136,6 +156,7 @@ import clauderc.app.protocol.ToolCall
 import clauderc.app.protocol.ToolImage
 import clauderc.app.protocol.ToolResult
 import clauderc.app.sessions.display
+import clauderc.app.ui.baseName
 import clauderc.app.ui.contextPercent
 import clauderc.app.ui.components.AppBar
 import clauderc.app.ui.components.BarSubButton
@@ -145,10 +166,14 @@ import clauderc.app.ui.components.ClaudercDialog
 import clauderc.app.ui.components.FieldError
 import clauderc.app.ui.components.FieldLabel
 import clauderc.app.ui.components.Glyph
+import clauderc.app.ui.components.LocalMorphClose
+import clauderc.app.ui.components.MorphOverlay
 import clauderc.app.ui.components.PopMenu
 import clauderc.app.ui.components.PopMenuItem
 import clauderc.app.ui.components.Switch
 import clauderc.app.ui.components.UnderlineField
+import clauderc.app.ui.components.captureAnchor
+import clauderc.app.ui.components.rememberAnchorBox
 import androidx.compose.foundation.selection.toggleable
 import clauderc.app.ui.components.MenuItem
 import clauderc.app.ui.components.SheetHead
@@ -167,7 +192,12 @@ import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
-import clauderc.app.ui.theme.StickerPress
+import clauderc.app.ui.components.inkSurface
+import clauderc.app.machines.PendingEntry
+import clauderc.app.ui.components.plateBox
+import clauderc.app.ui.components.plateStamp
+import clauderc.app.ui.components.tileSurface
+import clauderc.app.ui.theme.PressKind
 import clauderc.app.ui.theme.stillLayer
 import com.hrm.latex.renderer.measure.rememberLatexMeasurer
 import com.hrm.latex.renderer.model.LatexConfig
@@ -218,22 +248,31 @@ class ChatActions(
     val onResumeText: (String) -> Unit = {},
     /** Rewinds to before the user's message, taking back one of RewindRestore. */
     val onRewind: (ChatItem, String) -> Unit = { _, _ -> },
+    /** Jumps directly to the next pending session shown after answering the current one. */
+    val onOpenNextPending: (PendingEntry) -> Unit = {},
 )
 
 /** The sheets and dialogs the chat page opens, one at a time. */
-private enum class ChatSheet { Attach, Model, Mode, Fork, Worktree }
+private enum class ChatSheet { Attach, Model, Mode, Control, Fork, Worktree }
 
 /** The light tick when a message goes out or a permission is answered. */
 private fun HapticFeedback.tap() = performHapticFeedback(HapticFeedbackType.VirtualKey)
 
 @Composable
-fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = remember { SnackState() }) {
+fun ChatScreen(
+    state: ChatUiState,
+    actions: ChatActions,
+    snack: SnackState = remember { SnackState() },
+    nextPending: PendingEntry? = null,
+) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     // The KaTeX fonts load in the background; starting with the page, a formula that turns up is
     // measured in them from the first frame instead of once more when they arrive.
     rememberLatexMeasurer(remember { LatexConfig() })
     var sheet by rememberSaveable { mutableStateOf<ChatSheet?>(null) }
+    var ctlAnchor by remember { mutableStateOf<Rect?>(null) }
+    var attachAnchor by remember { mutableStateOf<Rect?>(null) }
     // The seq of the user's message whose rewind sheet is open; saved across rotation.
     var rewindingSeq by rememberSaveable { mutableStateOf<Long?>(null) }
     val rewinding = rewindingSeq?.let { seq -> state.items.firstOrNull { it.seq == seq } }
@@ -247,41 +286,274 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
     val haptic = LocalHapticFeedback.current
     val title = state.session?.let(::display) ?: "会话"
 
-    // 清玻 floats the bar and the input area over the messages as glass, the messages sliding under them;
-    // the other styles stack them above and below the messages.
-    val floating = Clauderc.style == UiStyle.Clear
-    val glass = if (floating) rememberHazeState() else null
+    // 清玻 floats frosted glass over messages; 浮墨 floats its 3-piece top bar & 30dp bottom island over messages;
+    // 素卡 and 印版 stack the bar and dock above/below the messages.
+    val ui = Clauderc.style
+    val floating = ui == UiStyle.Clear || ui == UiStyle.Ink
+    val glass = if (ui == UiStyle.Clear) rememberHazeState() else null
     val bar: @Composable () -> Unit = {
-        AppBar(
-            navigation = { SymbolButton(Symbols.ArrowBack, "返回", onClick = actions.onBack) },
-            title = {
-                BarTitle(title) {
-                    // Short of room, the model's name gives way: the mode and the context show whole.
-                    BarSubButton(
-                        modelLabel(state.model).ifEmpty { "模型" }, onClick = openModels, enabled = state.online,
-                        modifier = Modifier.weight(1f, fill = false),
+        if (ui == UiStyle.Ink) {
+            val pillAnchor = rememberAnchorBox()
+            val branch = state.session?.branch?.takeIf { it.isNotBlank() }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to c.bg,
+                            0.65f to c.bg,
+                            1f to Color.Transparent,
+                        ),
                     )
-                    BarSubButton(permissionModeLabel(state.permissionMode), onClick = { sheet = ChatSheet.Mode }, enabled = state.online)
-                    contextPercent(state.session?.context)?.let {
-                        Text("上下文 $it%", fontSize = Clauderc.fontSizes.caption, color = c.fg2, maxLines = 1)
+                    .statusBarsPadding()
+                    .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val backPress = remember { MutableInteractionSource() }
+                Box(
+                    Modifier
+                        .pressShrink(backPress, PressKind.Icon)
+                        .size(48.dp)
+                        .shadow(if (c.isDark) 0.dp else 8.dp, CircleShape, ambientColor = c.scrim, spotColor = c.scrim)
+                        .inkSurface(c.float, c.edge, 24.dp)
+                        .clickable(backPress, PressIndication(c.fg), role = Role.Button, onClick = actions.onBack)
+                        .semantics { contentDescription = "返回" },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Symbols.ArrowBack, contentDescription = null, tint = c.fg, modifier = Modifier.size(20.dp)) }
+
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    val pillPress = remember { MutableInteractionSource() }
+                    Row(
+                        Modifier
+                            .captureAnchor(pillAnchor)
+                            .widthIn(max = 246.dp)
+                            .height(40.dp)
+                            .pressShrink(pillPress, PressKind.Plain)
+                            .shadow(if (c.isDark) 0.dp else 8.dp, RoundedCornerShape(20.dp), ambientColor = c.scrim, spotColor = c.scrim)
+                            .inkSurface(c.float, c.edge, 20.dp)
+                            .clickable(pillPress, PressIndication(c.fg), role = Role.Button, onClickLabel = "会话控制") {
+                                ctlAnchor = pillAnchor.rect
+                                actions.onLoadModels()
+                                sheet = ChatSheet.Control
+                            }
+                            .padding(start = 14.dp, end = 10.dp)
+                            .testTag("inkChatCtlPill"),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            buildAnnotatedString {
+                                append(title)
+                                if (branch != null) {
+                                    withStyle(SpanStyle(color = c.fg3, fontWeight = FontWeight.Normal)) { append(" · $branch") }
+                                }
+                            },
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = c.fg,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Icon(Symbols.ExpandMore, contentDescription = null, tint = c.fg2, modifier = Modifier.size(18.dp))
                     }
                 }
-            },
-            actions = {
-                SymbolButton(Symbols.Terminal, "打开终端", onClick = actions.onOpenTerm, enabled = state.online && state.state != SessionState.Stopped)
-                // The git icon opens a small menu: fork this session, start one in a new worktree, or see git.
-                var gitMenu by remember { mutableStateOf(false) }
-                Box {
-                    SymbolButton(Symbols.AccountTree, "git", onClick = { gitMenu = true }, enabled = state.online && state.session != null)
-                    val canAct = state.online && state.session != null
-                    PopMenu(gitMenu && canAct, onDismiss = { gitMenu = false }) {
-                        PopMenuItem("Fork", Symbols.CallSplit, onClick = { gitMenu = false; sheet = ChatSheet.Fork }, enabled = canAct, first = true)
-                        PopMenuItem("Worktree", Symbols.AltRoute, onClick = { gitMenu = false; actions.onClearWorktreeError(); sheet = ChatSheet.Worktree }, enabled = canAct)
-                        PopMenuItem("看 git", Symbols.AccountTree, onClick = { gitMenu = false; state.session?.cwd?.let(actions.onOpenGit) }, enabled = canAct)
+
+                val termEnabled = state.online && state.state != SessionState.Stopped
+                val termPress = remember { MutableInteractionSource() }
+                Box(
+                    Modifier
+                        .pressShrink(termPress, PressKind.Icon)
+                        .size(48.dp)
+                        .shadow(if (c.isDark) 0.dp else 8.dp, CircleShape, ambientColor = c.scrim, spotColor = c.scrim)
+                        .inkSurface(c.float, c.edge, 24.dp)
+                        .clickable(termPress, PressIndication(c.fg), enabled = termEnabled, role = Role.Button, onClick = actions.onOpenTerm)
+                        .semantics { contentDescription = "打开终端" },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Symbols.Terminal, contentDescription = null, tint = if (termEnabled) c.fg else c.fg3, modifier = Modifier.size(20.dp)) }
+            }
+        } else if (ui == UiStyle.Plate) {
+            val dirName = state.session?.cwd?.let(::baseName).orEmpty()
+            val branch = state.session?.branch?.takeIf { it.isNotBlank() }
+            val ctxPct = contextPercent(state.session?.context)
+            val meta = listOfNotNull(
+                dirName.takeIf { it.isNotEmpty() },
+                branch,
+                ctxPct?.let { "上下文 $it%" },
+            ).joinToString(" · ").ifEmpty {
+                listOfNotNull(
+                    modelLabel(state.model).takeIf { it.isNotEmpty() },
+                    permissionModeLabel(state.permissionMode).takeIf { it.isNotEmpty() },
+                ).joinToString(" · ")
+            }
+            val targetFill = (ctxPct?.div(100f) ?: 1f).coerceIn(0f, 1f)
+            val ctxRuleFill = remember { Animatable(0f) }
+            LaunchedEffect(targetFill) {
+                ctxRuleFill.animateTo(targetFill, tween(700, delayMillis = 140, easing = Motion.plateEasePress))
+            }
+            Column(Modifier.fillMaxWidth().background(c.bg).statusBarsPadding()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(54.dp)
+                        .padding(start = 2.dp, end = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SymbolButton(Symbols.ArrowBack, "返回", onClick = actions.onBack)
+                    val ctlPress = remember { MutableInteractionSource() }
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .pressShrink(ctlPress, PressKind.Plain)
+                            .clickable(ctlPress, LocalIndication.current, role = Role.Button, onClickLabel = "会话控制") {
+                                actions.onLoadModels()
+                                sheet = ChatSheet.Control
+                            }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                            .testTag("plateChatCtl"),
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                title,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = c.fg,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            Icon(Symbols.ExpandMore, contentDescription = null, tint = c.fg2, modifier = Modifier.size(18.dp))
+                        }
+                        if (meta.isNotEmpty()) {
+                            Text(
+                                meta,
+                                fontFamily = MonoFamily,
+                                fontSize = 11.5.sp,
+                                color = c.fg2,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    SymbolButton(Symbols.Terminal, "打开终端", onClick = actions.onOpenTerm, enabled = state.online && state.state != SessionState.Stopped)
+                    var gitMenu by remember { mutableStateOf(false) }
+                    Box {
+                        SymbolButton(Symbols.AccountTree, "git", onClick = { gitMenu = true }, enabled = state.online && state.session != null)
+                        val canAct = state.online && state.session != null
+                        PopMenu(gitMenu && canAct, onDismiss = { gitMenu = false }) {
+                            PopMenuItem("Fork", Symbols.CallSplit, onClick = { gitMenu = false; sheet = ChatSheet.Fork }, enabled = canAct, first = true)
+                            PopMenuItem("Worktree", Symbols.AltRoute, onClick = { gitMenu = false; actions.onClearWorktreeError(); sheet = ChatSheet.Worktree }, enabled = canAct)
+                            PopMenuItem("看 git", Symbols.AccountTree, onClick = { gitMenu = false; state.session?.cwd?.let(actions.onOpenGit) }, enabled = canAct)
+                        }
                     }
                 }
-            },
-        )
+                // 印版 ctxrule: solid-ink context progress bar along the bottom edge of the chat top bar (demo.html .ctxrule).
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background(c.line)
+                        .drawBehind {
+                            val w = size.width * ctxRuleFill.value.coerceIn(0f, 1f)
+                            if (w > 0f) drawRect(c.fg, Offset.Zero, Size(w, size.height))
+                        }
+                        .testTag("plateCtxRule"),
+                )
+            }
+        } else {
+            AppBar(
+                navigation = { SymbolButton(Symbols.ArrowBack, "返回", onClick = actions.onBack) },
+                title = {
+                    if (ui == UiStyle.Clear) {
+                        Column(Modifier.weight(1f).padding(start = sp.sp1), verticalArrangement = Arrangement.Center) {
+                            Row(
+                                Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable(role = Role.Button, onClickLabel = "会话控制") {
+                                        actions.onLoadModels()
+                                        sheet = ChatSheet.Control
+                                    }
+                                    .testTag("clearChatCtl"),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    title,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                Icon(Symbols.ExpandMore, contentDescription = null, tint = c.fg3, modifier = Modifier.size(16.dp))
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(sp.sp3), verticalAlignment = Alignment.CenterVertically) {
+                                BarSubButton(
+                                    modelLabel(state.model).ifEmpty { "模型" }, onClick = openModels, enabled = state.online,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                BarSubButton(permissionModeLabel(state.permissionMode), onClick = { sheet = ChatSheet.Mode }, enabled = state.online)
+                                contextPercent(state.session?.context)?.let {
+                                    Text("上下文 $it%", fontSize = Clauderc.fontSizes.caption, color = c.fg2, maxLines = 1)
+                                }
+                            }
+                        }
+                    } else {
+                        BarTitle(title) {
+                            // Short of room, the model's name gives way: the mode and the context show whole.
+                            BarSubButton(
+                                modelLabel(state.model).ifEmpty { "模型" }, onClick = openModels, enabled = state.online,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            BarSubButton(permissionModeLabel(state.permissionMode), onClick = { sheet = ChatSheet.Mode }, enabled = state.online)
+                            contextPercent(state.session?.context)?.let {
+                                Text("上下文 $it%", fontSize = Clauderc.fontSizes.caption, color = c.fg2, maxLines = 1)
+                            }
+                        }
+                    }
+                },
+                actions = {
+                    if (ui == UiStyle.Tile) {
+                        // 素卡 grouped right white pill (.pillgroup): Terminal + Git together.
+                        var gitMenu by remember { mutableStateOf(false) }
+                        val canAct = state.online && state.session != null
+                        Row(
+                            Modifier
+                                .tileSurface(c.card, 999.dp)
+                                .padding(horizontal = 4.dp)
+                                .testTag("tileChatPillGroup"),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            SymbolButton(Symbols.Terminal, "打开终端", onClick = actions.onOpenTerm, enabled = state.online && state.state != SessionState.Stopped, small = true)
+                            Box {
+                                SymbolButton(Symbols.AccountTree, "git", onClick = { gitMenu = true }, enabled = canAct, small = true)
+                                PopMenu(gitMenu && canAct, onDismiss = { gitMenu = false }) {
+                                    PopMenuItem("Fork", Symbols.CallSplit, onClick = { gitMenu = false; sheet = ChatSheet.Fork }, enabled = canAct, first = true)
+                                    PopMenuItem("Worktree", Symbols.AltRoute, onClick = { gitMenu = false; actions.onClearWorktreeError(); sheet = ChatSheet.Worktree }, enabled = canAct)
+                                    PopMenuItem("看 git", Symbols.AccountTree, onClick = { gitMenu = false; state.session?.cwd?.let(actions.onOpenGit) }, enabled = canAct)
+                                }
+                            }
+                        }
+                    } else {
+                        SymbolButton(Symbols.Terminal, "打开终端", onClick = actions.onOpenTerm, enabled = state.online && state.state != SessionState.Stopped)
+                        // The git icon opens a small menu: fork this session, start one in a new worktree, or see git.
+                        var gitMenu by remember { mutableStateOf(false) }
+                        Box {
+                            SymbolButton(Symbols.AccountTree, "git", onClick = { gitMenu = true }, enabled = state.online && state.session != null)
+                            val canAct = state.online && state.session != null
+                            PopMenu(gitMenu && canAct, onDismiss = { gitMenu = false }) {
+                                PopMenuItem("Fork", Symbols.CallSplit, onClick = { gitMenu = false; sheet = ChatSheet.Fork }, enabled = canAct, first = true)
+                                PopMenuItem("Worktree", Symbols.AltRoute, onClick = { gitMenu = false; actions.onClearWorktreeError(); sheet = ChatSheet.Worktree }, enabled = canAct)
+                                PopMenuItem("看 git", Symbols.AccountTree, onClick = { gitMenu = false; state.session?.cwd?.let(actions.onOpenGit) }, enabled = canAct)
+                            }
+                        }
+                    }
+                },
+            )
+        }
         Lift(visible = !state.online, fromTop = true) {
             Row(
                 Modifier.fillMaxWidth().background(if (Clauderc.look.cards) c.card else c.surface).padding(horizontal = sp.page, vertical = sp.sp3).testTag("offlineLine"),
@@ -313,35 +585,86 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
         }
         actions.onRestored(r.id)
     }
+    // Track answering a pending request in this chat so we can offer a one-tap jump to the next pending session.
+    var sawPending by rememberSaveable(state.session?.id) { mutableStateOf(false) }
+    var showNextPrompt by rememberSaveable(state.session?.id) { mutableStateOf(false) }
+    LaunchedEffect(state.pending) {
+        if (state.pending != null) {
+            sawPending = true
+            showNextPrompt = false
+        } else if (sawPending) {
+            showNextPrompt = true
+        }
+    }
+    var lastNext by remember { mutableStateOf<PendingEntry?>(null) }
+    if (nextPending != null) lastNext = nextPending
+
     val dock: @Composable () -> Unit = {
-        // The panel is drawn whole from the first frame and comes up from the bottom edge over the fading
-        // composer and the messages, while the room it takes grows to its height and the messages move up
-        // with it. Closing is the reverse, the panel staying on top as it goes back down.
-        AnimatedContent(
-            targetState = state.pending,
-            contentAlignment = Alignment.BottomStart,
-            contentKey = { it?.toolUseId },
-            transitionSpec = {
-                val room = SizeTransform(clip = false) { _, _ -> Motion.enter() }
-                if (targetState != null) (Motion.panelIn + fadeIn(Motion.enter())).togetherWith(fadeOut(Motion.exit())).using(room)
-                else (fadeIn(Motion.enter()) togetherWith Motion.panelOut + fadeOut(Motion.exit())).using(room).apply { targetContentZIndex = -1f }
-            },
-            label = "panel",
-        ) { pending ->
-            if (pending != null) {
-                Box(Modifier.navigationBarsPadding().testTag("pendingPanel")) {
-                    PendingPanel(
-                        pending,
-                        enabled = state.online,
-                        onAllow = { haptic.tap(); actions.onAllow(pending.toolUseId) },
-                        onDeny = { haptic.tap(); actions.onDeny(pending.toolUseId) },
-                        onAnswer = { actions.onAnswer(pending.toolUseId, it) },
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .then(
+                    if (ui == UiStyle.Ink) {
+                        Modifier.background(Brush.verticalGradient(0f to Color.Transparent, 0.35f to c.bg))
+                    } else {
+                        Modifier
+                    },
+                ),
+        ) {
+            Lift(visible = showNextPrompt && state.pending == null && nextPending != null) {
+                lastNext?.let { next ->
+                    NextPendingBanner(
+                        entry = next,
+                        onOpen = {
+                            showNextPrompt = false
+                            actions.onOpenNextPending(next)
+                        },
+                        onDismiss = { showNextPrompt = false },
                     )
                 }
-            } else {
-                Composer(state, actions, input, onAttach = { sheet = ChatSheet.Attach }, onModels = openModels)
             }
-    }
+            if (ui == UiStyle.Ink || ui == UiStyle.Tile) {
+                InkChatIsland(
+                    state = state,
+                    actions = actions,
+                    input = input,
+                    onAttach = { rect -> attachAnchor = rect; sheet = ChatSheet.Attach },
+                    onModels = openModels,
+                    onAllow = { id -> haptic.tap(); actions.onAllow(id) },
+                    onDeny = { id -> haptic.tap(); actions.onDeny(id) },
+                    onAnswer = { id, ans -> actions.onAnswer(id, ans) },
+                )
+            } else {
+                // The panel is drawn whole from the first frame and comes up from the bottom edge over the fading
+                // composer and the messages, while the room it takes grows to its height and the messages move up
+                // with it. Closing is the reverse, the panel staying on top as it goes back down.
+                AnimatedContent(
+                    targetState = state.pending,
+                    contentAlignment = Alignment.BottomStart,
+                    contentKey = { it?.toolUseId },
+                    transitionSpec = {
+                        val room = SizeTransform(clip = false) { _, _ -> Motion.enter() }
+                        if (targetState != null) (Motion.panelIn + fadeIn(Motion.enter())).togetherWith(fadeOut(Motion.exit())).using(room)
+                        else (fadeIn(Motion.enter()) togetherWith Motion.panelOut + fadeOut(Motion.exit())).using(room).apply { targetContentZIndex = -1f }
+                    },
+                    label = "panel",
+                ) { pending ->
+                    if (pending != null) {
+                        Box(Modifier.navigationBarsPadding().testTag("pendingPanel")) {
+                            PendingPanel(
+                                pending,
+                                enabled = state.online,
+                                onAllow = { haptic.tap(); actions.onAllow(pending.toolUseId) },
+                                onDeny = { haptic.tap(); actions.onDeny(pending.toolUseId) },
+                                onAnswer = { actions.onAnswer(pending.toolUseId, it) },
+                            )
+                        }
+                    } else {
+                        Composer(state, actions, input, onAttach = { sheet = ChatSheet.Attach }, onModels = openModels)
+                    }
+                }
+            }
+        }
     }
     Box(Modifier.fillMaxSize().page()) {
         if (floating) {
@@ -349,9 +672,12 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
             var dockHeight by remember { mutableIntStateOf(0) }
             val density = LocalDensity.current
             Box(Modifier.fillMaxSize().imePadding()) {
-                // Opening, empty bubbles stand in for the messages and the input until the record is read.
-                LoadingCover(state.loading, LoadingArt.Skeleton, Modifier.fillMaxSize(), top = with(density) { barHeight.toDp() }) {
-                    Box(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize()) {
+                    if (state.loading && state.items.isEmpty()) {
+                        Box(Modifier.fillMaxSize().padding(top = with(density) { barHeight.toDp() }, bottom = with(density) { dockHeight.toDp() }), contentAlignment = Alignment.Center) {
+                            Spinner(color = c.fg3)
+                        }
+                    } else {
                         MessageList(
                             state, actions, openImage,
                             Modifier.fillMaxSize().then(if (glass != null) Modifier.hazeSource(glass) else Modifier),
@@ -360,21 +686,29 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
                             snack = snack,
                             onRewind = { rewindingSeq = it.seq },
                         )
-                        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().onSizeChanged { dockHeight = it.height }) {
-                            CompositionLocalProvider(LocalGlassSource provides glass) { dock() }
-                        }
+                    }
+                    Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().onSizeChanged { dockHeight = it.height }) {
+                        CompositionLocalProvider(LocalGlassSource provides glass) { dock() }
                     }
                 }
-                Column(Modifier.align(Alignment.TopStart).fillMaxWidth().onSizeChanged { barHeight = it.height }.glassPane(glass, rimTop = false)) { bar() }
+                Column(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .fillMaxWidth()
+                        .onSizeChanged { barHeight = it.height }
+                        .then(if (ui == UiStyle.Clear) Modifier.glassPane(glass, rimTop = false) else Modifier),
+                ) { bar() }
             }
         } else {
             Column(Modifier.fillMaxSize().imePadding()) {
                 bar()
-                LoadingCover(state.loading, LoadingArt.Skeleton, Modifier.weight(1f)) {
-                    Column(Modifier.fillMaxSize()) {
+                Column(Modifier.weight(1f).fillMaxWidth()) {
+                    if (state.loading && state.items.isEmpty()) {
+                        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Spinner(color = c.fg3) }
+                    } else {
                         MessageList(state, actions, openImage, Modifier.weight(1f), snack = snack, onRewind = { rewindingSeq = it.seq })
-                        dock()
                     }
+                    dock()
                 }
             }
         }
@@ -391,12 +725,48 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
         }
     }
     when (sheet) {
-        ChatSheet.Attach -> ClaudercSheet(onDismiss = { sheet = null }) {
+        ChatSheet.Attach -> ClaudercSheet(onDismiss = { sheet = null }, anchor = attachAnchor) {
             SheetHead("添加图片", "单张不超过 10 MB，压缩后合计不超过 ${ChatLimits.MAX_IMAGES_TOTAL_BYTES shr 20} MB")
             MenuItem("拍照", onClick = { sheet = null; actions.onTakePhoto() }, icon = Symbols.PhotoCamera)
             MenuItem("从相册选择", onClick = { sheet = null; actions.onPickImages() }, icon = Symbols.Image)
         }
-        ChatSheet.Model -> ClaudercSheet(onDismiss = { sheet = null }) {
+        ChatSheet.Control -> when (ui) {
+            UiStyle.Plate -> PlateChatControlSlip(
+                title = title,
+                state = state,
+                onDismiss = { sheet = null },
+                onSetModel = actions.onSetModel,
+                onSetMode = actions.onSetMode,
+                onOpenGit = { state.session?.cwd?.let(actions.onOpenGit) },
+                onOpenTerm = actions.onOpenTerm,
+                onFork = { sheet = ChatSheet.Fork },
+                onWorktree = { actions.onClearWorktreeError(); sheet = ChatSheet.Worktree },
+            )
+            UiStyle.Clear -> ClearChatControlDrop(
+                title = title,
+                state = state,
+                onDismiss = { sheet = null },
+                onSetModel = actions.onSetModel,
+                onSetMode = actions.onSetMode,
+                onOpenGit = { state.session?.cwd?.let(actions.onOpenGit) },
+                onOpenTerm = actions.onOpenTerm,
+                onFork = { sheet = ChatSheet.Fork },
+                onWorktree = { actions.onClearWorktreeError(); sheet = ChatSheet.Worktree },
+            )
+            else -> InkChatControlPanel(
+                title = title,
+                state = state,
+                anchor = ctlAnchor,
+                onDismiss = { sheet = null },
+                onSetModel = actions.onSetModel,
+                onSetMode = actions.onSetMode,
+                onOpenGit = { state.session?.cwd?.let(actions.onOpenGit) },
+                onOpenTerm = actions.onOpenTerm,
+                onFork = { sheet = ChatSheet.Fork },
+                onWorktree = { actions.onClearWorktreeError(); sheet = ChatSheet.Worktree },
+            )
+        }
+        ChatSheet.Model -> ClaudercSheet(onDismiss = { sheet = null }, anchor = ctlAnchor, fromTop = ui == UiStyle.Ink) {
             SheetHead("模型")
             val models = state.models
             when {
@@ -457,6 +827,619 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, snack: SnackState = rem
             )
         }
         null -> Unit
+    }
+}
+
+/**
+ * 清玻's unified chat control top-falling frosted glass panel (demo.html `A.openChatCtl` in `.drop.glass`).
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ClearChatControlDrop(
+    title: String,
+    state: ChatUiState,
+    onDismiss: () -> Unit,
+    onSetModel: (ModelOption) -> Unit,
+    onSetMode: (String) -> Unit,
+    onOpenGit: () -> Unit,
+    onOpenTerm: () -> Unit,
+    onFork: () -> Unit,
+    onWorktree: () -> Unit,
+) {
+    val c = Clauderc.colors
+    val dirName = state.session?.cwd?.let(::baseName).orEmpty()
+    val branch = state.session?.branch?.takeIf { it.isNotBlank() }
+    val ctxPct = contextPercent(state.session?.context)
+    val meta = listOfNotNull(
+        dirName.takeIf { it.isNotEmpty() },
+        branch,
+        ctxPct?.let { "上下文 $it%" },
+    ).joinToString(" · ")
+    val canAct = state.online && state.session != null
+    val canTerm = state.online && state.state != SessionState.Stopped
+
+    ClearDropPanel(onDismiss = onDismiss, tag = "clearChatCtlDrop") {
+        val close = LocalMorphClose.current
+        fun dismissThen(action: () -> Unit) {
+            if (close != null) close(action) else { onDismiss(); action() }
+        }
+        SheetHead(title, meta.ifEmpty { null })
+        Column(Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("模型", fontSize = 12.5.sp, color = c.fg3, fontWeight = FontWeight.Medium)
+            val models = state.models
+            when {
+                models == null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val fallback = modelLabel(state.model)
+                    if (fallback.isNotEmpty()) InkCtlChip(fallback, selected = true, enabled = false, onClick = {})
+                    Spinner(size = 14.dp, color = c.fg3)
+                }
+                state.modelsError != null -> Text(state.modelsError, fontSize = 13.sp, color = c.fg2)
+                else -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    models.forEach { m ->
+                        InkCtlChip(
+                            label = m.label.ifEmpty { m.id },
+                            selected = m.current,
+                            enabled = state.online,
+                            onClick = { if (!m.current) onSetModel(m) },
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.size(2.dp))
+            Text("权限模式", fontSize = 12.5.sp, color = c.fg3, fontWeight = FontWeight.Medium)
+            val current = state.permissionMode
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (current.isNotEmpty() && current !in PermissionMode.switchable) {
+                    InkCtlChip(permissionModeLabel(current), selected = true, enabled = false, onClick = {})
+                }
+                PermissionMode.switchable.forEach { mode ->
+                    InkCtlChip(
+                        label = permissionModeLabel(mode),
+                        selected = mode == current,
+                        enabled = state.online,
+                        onClick = { if (mode != current) onSetMode(mode) },
+                    )
+                }
+            }
+        }
+        HorizontalDivider(Modifier.padding(start = 24.dp, end = 24.dp, top = 14.dp, bottom = 4.dp), thickness = 1.dp, color = c.line)
+        MenuItem("查看 git 仓库", onClick = { dismissThen(onOpenGit) }, icon = Symbols.AccountTree, supporting = dirName.ifEmpty { null }, enabled = canAct)
+        MenuItem("打开终端视图", onClick = { dismissThen(onOpenTerm) }, icon = Symbols.Terminal, supporting = "实时 TUI", enabled = canTerm)
+        MenuItem("Fork 新会话", onClick = { dismissThen(onFork) }, icon = Symbols.CallSplit, supporting = "从当前上下文分叉", enabled = canAct)
+        MenuItem("新建 Worktree 会话", onClick = { dismissThen(onWorktree) }, icon = Symbols.AltRoute, supporting = "独立分支隔离改动", enabled = canAct)
+    }
+}
+
+/**
+ * 印版's unified chat control slip (demo.html `A.openChatCtl` in `.slip`):
+ * opens as a left-printing letterpress slip with crisp square ink model chips, permission mode
+ * chips, and 4 quick actions.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PlateChatControlSlip(
+    title: String,
+    state: ChatUiState,
+    onDismiss: () -> Unit,
+    onSetModel: (ModelOption) -> Unit,
+    onSetMode: (String) -> Unit,
+    onOpenGit: () -> Unit,
+    onOpenTerm: () -> Unit,
+    onFork: () -> Unit,
+    onWorktree: () -> Unit,
+) {
+    val c = Clauderc.colors
+    val dirName = state.session?.cwd?.let(::baseName).orEmpty()
+    val branch = state.session?.branch?.takeIf { it.isNotBlank() }
+    val ctxPct = contextPercent(state.session?.context)
+    val meta = listOfNotNull(
+        dirName.takeIf { it.isNotEmpty() },
+        branch,
+        ctxPct?.let { "上下文 $it%" },
+    ).joinToString(" · ")
+    val canAct = state.online && state.session != null
+    val canTerm = state.online && state.state != SessionState.Stopped
+
+    PlateSlipPanel(onDismiss = onDismiss, tag = "plateChatCtlSlip") {
+        val close = LocalMorphClose.current
+        fun dismissThen(action: () -> Unit) {
+            if (close != null) close(action) else { onDismiss(); action() }
+        }
+        SheetHead(title, meta.ifEmpty { null })
+        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("模型", fontFamily = MonoFamily, fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, color = c.fg2)
+            val models = state.models
+            when {
+                models == null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val fallback = modelLabel(state.model)
+                    if (fallback.isNotEmpty()) {
+                        PlateCtlChip(fallback, selected = true, enabled = false, onClick = {})
+                    }
+                    Spinner(size = 14.dp, color = c.fg3)
+                }
+                state.modelsError != null -> Text(state.modelsError, fontSize = 13.sp, color = c.fg2)
+                else -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    models.forEach { m ->
+                        PlateCtlChip(
+                            label = m.label.ifEmpty { m.id },
+                            selected = m.current,
+                            enabled = state.online,
+                            onClick = { if (!m.current) onSetModel(m) },
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.size(2.dp))
+            Text("权限模式", fontFamily = MonoFamily, fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, color = c.fg2)
+            val current = state.permissionMode
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (current.isNotEmpty() && current !in PermissionMode.switchable) {
+                    PlateCtlChip(permissionModeLabel(current), selected = true, enabled = false, onClick = {})
+                }
+                PermissionMode.switchable.forEach { mode ->
+                    PlateCtlChip(
+                        label = permissionModeLabel(mode),
+                        selected = mode == current,
+                        enabled = state.online,
+                        onClick = { if (mode != current) onSetMode(mode) },
+                    )
+                }
+            }
+        }
+        HorizontalDivider(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp), thickness = 1.5.dp, color = c.fg)
+        MenuItem("查看 git 仓库", onClick = { dismissThen(onOpenGit) }, icon = Symbols.AccountTree, supporting = dirName.ifEmpty { null }, enabled = canAct)
+        MenuItem("打开终端视图", onClick = { dismissThen(onOpenTerm) }, icon = Symbols.Terminal, supporting = "实时 TUI", enabled = canTerm)
+        MenuItem("Fork 新会话", onClick = { dismissThen(onFork) }, icon = Symbols.CallSplit, supporting = "从当前上下文分叉", enabled = canAct)
+        MenuItem("新建 Worktree 会话", onClick = { dismissThen(onWorktree) }, icon = Symbols.AltRoute, supporting = "独立分支隔离改动", enabled = canAct)
+    }
+}
+
+@Composable
+private fun PlateCtlChip(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val c = Clauderc.colors
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val sweep by animateFloatAsState(
+        targetValue = if (!selected && enabled && pressed) 1f else 0f,
+        animationSpec = tween(if (pressed) 220 else 160, easing = Motion.plateEasePress),
+        label = "plateCtlChipSweep",
+    )
+    val fg = when {
+        selected -> c.bg
+        !enabled -> c.fg3
+        else -> lerp(c.fg, c.bg, sweep)
+    }
+    Box(
+        Modifier
+            .pressShrink(press, PressKind.Plain)
+            .background(if (selected) c.fg else c.bg, RectangleShape)
+            .plateSweepFill(sweep, c.fg, PlateSweep.LeftToRight)
+            .border(1.5.dp, if (enabled || selected) c.fg else c.fg3, RectangleShape)
+            .clickable(press, indication = null, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            fontFamily = MonoFamily,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = fg,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * 浮墨's unified chat control panel (demo.html `A.openChatCtl`): blooms downward from the top
+ * title/branch pill with session meta, model chips, permission mode chips, and 4 quick actions.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun InkChatControlPanel(
+    title: String,
+    state: ChatUiState,
+    anchor: Rect?,
+    onDismiss: () -> Unit,
+    onSetModel: (ModelOption) -> Unit,
+    onSetMode: (String) -> Unit,
+    onOpenGit: () -> Unit,
+    onOpenTerm: () -> Unit,
+    onFork: () -> Unit,
+    onWorktree: () -> Unit,
+) {
+    val c = Clauderc.colors
+    val dirName = state.session?.cwd?.let(::baseName).orEmpty()
+    val branch = state.session?.branch?.takeIf { it.isNotBlank() }
+    val ctxPct = contextPercent(state.session?.context)
+    val meta = listOfNotNull(
+        dirName.takeIf { it.isNotEmpty() },
+        branch,
+        ctxPct?.let { "上下文 $it%" },
+    ).joinToString(" · ")
+    val canAct = state.online && state.session != null
+    val canTerm = state.online && state.state != SessionState.Stopped
+
+    MorphOverlay(onDismiss = onDismiss, anchor = anchor, fromTop = true, tag = "inkChatCtlPanel") {
+        val close = LocalMorphClose.current
+        fun dismissThen(action: () -> Unit) {
+            if (close != null) close(action) else { onDismiss(); action() }
+        }
+        Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+            Column(Modifier.padding(start = 22.dp, end = 22.dp, top = 20.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (meta.isNotEmpty()) {
+                    Text(meta, fontSize = 13.sp, color = c.fg2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            Column(Modifier.padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("模型", fontSize = 12.5.sp, color = c.fg3, fontWeight = FontWeight.Medium)
+                val models = state.models
+                when {
+                    models == null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val fallback = modelLabel(state.model)
+                        if (fallback.isNotEmpty()) {
+                            InkCtlChip(fallback, selected = true, enabled = false, onClick = {})
+                        }
+                        Spinner(size = 14.dp, color = c.fg3)
+                    }
+                    state.modelsError != null -> Text(state.modelsError, fontSize = 13.sp, color = c.fg2)
+                    else -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        models.forEach { m ->
+                            InkCtlChip(
+                                label = m.label.ifEmpty { m.id },
+                                selected = m.current,
+                                enabled = state.online,
+                                onClick = { if (!m.current) onSetModel(m) },
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.size(2.dp))
+                Text("权限模式", fontSize = 12.5.sp, color = c.fg3, fontWeight = FontWeight.Medium)
+                val current = state.permissionMode
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (current.isNotEmpty() && current !in PermissionMode.switchable) {
+                        InkCtlChip(permissionModeLabel(current), selected = true, enabled = false, onClick = {})
+                    }
+                    PermissionMode.switchable.forEach { mode ->
+                        InkCtlChip(
+                            label = permissionModeLabel(mode),
+                            selected = mode == current,
+                            enabled = state.online,
+                            onClick = { if (mode != current) onSetMode(mode) },
+                        )
+                    }
+                }
+            }
+            HorizontalDivider(Modifier.padding(start = 22.dp, end = 22.dp, top = 16.dp, bottom = 6.dp), thickness = 1.dp, color = c.edge)
+            Text("快捷操作", modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 4.dp, bottom = 4.dp), fontSize = 12.5.sp, color = c.fg3)
+            InkCtlActionRow(Symbols.AccountTree, "查看 git 仓库", dirName, enabled = canAct) { dismissThen(onOpenGit) }
+            InkCtlActionRow(Symbols.Terminal, "打开终端视图", "实时 TUI", enabled = canTerm) { dismissThen(onOpenTerm) }
+            InkCtlActionRow(Symbols.CallSplit, "Fork 新会话", "从当前上下文分叉", enabled = canAct) { dismissThen(onFork) }
+            InkCtlActionRow(Symbols.AltRoute, "新建 Worktree 会话", "独立分支隔离改动", enabled = canAct) { dismissThen(onWorktree) }
+        }
+    }
+}
+
+@Composable
+private fun InkCtlChip(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val c = Clauderc.colors
+    Box(
+        Modifier
+            .clip(CircleShape)
+            .background(if (selected) c.inverse else c.surface2)
+            .then(if (selected) Modifier else Modifier.border(1.dp, c.edge, CircleShape))
+            .clickable(enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            fontSize = 13.5.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = when {
+                selected -> c.onInverse
+                enabled -> c.fg
+                else -> c.fg3
+            },
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun InkCtlActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    trailing: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val c = Clauderc.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = if (enabled) c.fg2 else c.fg3, modifier = Modifier.size(20.dp))
+        Text(title, modifier = Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Medium, color = if (enabled) c.fg else c.fg3)
+        if (trailing.isNotEmpty()) {
+            Text(trailing, fontSize = 13.sp, color = c.fg3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Icon(Symbols.ChevronRight, contentDescription = null, tint = c.fg3, modifier = Modifier.size(18.dp))
+    }
+}
+
+/**
+ * 浮墨's unified 30dp floating bottom island (demo.html `.island`):
+ * hosts tasks, working status, blocked/limit rows, and composer OR pending confirmation inside ONE
+ * seamlessly resizing floating card with hairline dividers between active sections.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun InkChatIsland(
+    state: ChatUiState,
+    actions: ChatActions,
+    input: MutableState<TextFieldValue>,
+    onAttach: (Rect?) -> Unit,
+    onModels: () -> Unit,
+    onAllow: (String) -> Unit,
+    onDeny: (String) -> Unit,
+    onAnswer: (String, List<clauderc.app.protocol.Answer>) -> Unit,
+) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    val ui = Clauderc.style
+    val tile = ui == UiStyle.Tile
+    val haptic = LocalHapticFeedback.current
+    var field by input
+    val text = field.text
+    val keyboard = WindowInsets.isImeVisible
+    val focus = LocalFocusManager.current
+    val wasUp = remember { BooleanArray(1) }
+    LaunchedEffect(keyboard) {
+        if (!keyboard && wasUp[0]) focus.clearFocus()
+        wasUp[0] = keyboard
+    }
+    val word = if (field.selection.collapsed) slashWord(text, field.selection.end) else null
+    val hits = filterCommands(state.commands, word)
+    val enabled = state.online
+    val attachAnchor = rememberAnchorBox()
+    val divColor = if (tile) c.line else c.edge
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 14.dp),
+    ) {
+        var shown by remember { mutableStateOf(emptyList<Command>() to "") }
+        if (hits != null && word != null) shown = hits to word.query
+        val overlap = with(LocalDensity.current) { (sp.sp2 - 2.dp).roundToPx() }
+        Lift(visible = hits != null && enabled && state.pending == null, modifier = Modifier.floatAbove(overlap)) {
+            SlashPopup(shown.first, query = shown.second) { cmd ->
+                val w = word ?: return@SlashPopup
+                when {
+                    cmd.name.equals("model", ignoreCase = true) -> {
+                        field = TextFieldValue(text.removeRange(w.start, w.end), TextRange(w.start))
+                        onModels()
+                    }
+                    cmd.panel == true -> if (actions.onSend("/" + cmd.name)) {
+                        haptic.tap()
+                        val rest = text.removeRange(w.start, w.end).trim()
+                        field = TextFieldValue(rest, TextRange(rest.length))
+                        actions.onDraft(rest)
+                        actions.onOpenTerm()
+                    }
+                    else -> {
+                        field = pickCommand(field, w, cmd.name)
+                        actions.onDraft(field.text)
+                    }
+                }
+            }
+        }
+
+        val trayRadius = if (tile) 28.dp else 30.dp
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .then(
+                    if (tile) {
+                        Modifier
+                            .shadow(if (c.isDark) 0.dp else 8.dp, RoundedCornerShape(trayRadius), ambientColor = c.scrim, spotColor = c.scrim)
+                            .tileSurface(c.card, trayRadius)
+                    } else {
+                        Modifier
+                            .shadow(if (c.isDark) 0.dp else 10.dp, RoundedCornerShape(trayRadius), ambientColor = c.scrim, spotColor = c.scrim)
+                            .inkSurface(c.float, c.edge, trayRadius)
+                    },
+                )
+                .animateContentSize(tween(260, easing = Motion.inkEase))
+                .testTag(if (tile) "tileChatTray" else "inkChatIsland"),
+        ) {
+            var hasAbove = false
+            if (state.tasks.isNotEmpty()) {
+                TaskBar(state.tasks, inIsland = true)
+                hasAbove = true
+            }
+            if (state.state == SessionState.Working) {
+                if (hasAbove) HorizontalDivider(thickness = 1.dp, color = divColor)
+                WorkingRow(state.workingSinceMillis, enabled, actions.onInterrupt, state.activity, inIsland = true)
+                hasAbove = true
+            }
+            if (state.unknownDialog && state.pending == null && !state.rewinding) {
+                if (hasAbove) HorizontalDivider(thickness = 1.dp, color = divColor)
+                Box(Modifier.padding(vertical = 8.dp)) { BlockedRow(enabled, actions.onOpenTerm) }
+                hasAbove = true
+            }
+            state.limit?.let { l ->
+                if (hasAbove) HorizontalDivider(thickness = 1.dp, color = divColor)
+                LimitRow(l, state.resumeText, enabled, actions.onResumeText, actions.onAutoResume, inIsland = true)
+                hasAbove = true
+            }
+            if (hasAbove) HorizontalDivider(thickness = 1.dp, color = divColor)
+
+            AnimatedContent(
+                targetState = state.pending,
+                contentAlignment = Alignment.BottomStart,
+                contentKey = { it?.toolUseId },
+                transitionSpec = {
+                    val room = SizeTransform(clip = false) { _, _ -> Motion.enter() }
+                    if (targetState != null) (Motion.panelIn + fadeIn(Motion.enter())).togetherWith(fadeOut(Motion.exit())).using(room)
+                    else (fadeIn(Motion.enter()) togetherWith Motion.panelOut + fadeOut(Motion.exit())).using(room).apply { targetContentZIndex = -1f }
+                },
+                label = "inkIslandPanel",
+            ) { pending ->
+                if (pending != null) {
+                    PendingPanel(
+                        pending = pending,
+                        enabled = enabled,
+                        onAllow = { onAllow(pending.toolUseId) },
+                        onDeny = { onDeny(pending.toolUseId) },
+                        onAnswer = { onAnswer(pending.toolUseId, it) },
+                        inIsland = true,
+                    )
+                } else {
+                    Column(Modifier.fillMaxWidth()) {
+                        if (state.attachments.isNotEmpty()) {
+                            Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(sp.sp2),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    state.attachments.forEach { a ->
+                                        androidx.compose.runtime.key(a.id) {
+                                            val bitmap = rememberChatImage(a) { a.jpeg }
+                                            val press = remember { MutableInteractionSource() }
+                                            Box(Modifier.size(60.dp).clip(RoundedCornerShape(12.dp)).background(c.surface)) {
+                                                if (bitmap != null) Image(bitmap, contentDescription = a.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                                Box(
+                                                    Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .padding(3.dp)
+                                                        .pressShrink(press)
+                                                        .size(20.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color.Black.copy(alpha = 0.55f))
+                                                        .clickable(press, PressIndication(Color.White), role = Role.Button, onClickLabel = "移除") { actions.onRemoveImage(a.id) }
+                                                        .semantics { contentDescription = "移除 ${a.name}" },
+                                                    contentAlignment = Alignment.Center,
+                                                ) { Icon(Symbols.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp)) }
+                                            }
+                                        }
+                                    }
+                                    val press = remember { MutableInteractionSource() }
+                                    Box(
+                                        Modifier
+                                            .pressShrink(press)
+                                            .size(60.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(c.surface2)
+                                            .border(1.dp, c.edge, RoundedCornerShape(12.dp))
+                                            .clickable(press, PressIndication(c.fg2), role = Role.Button, onClickLabel = "再添加图片") { onAttach(attachAnchor.rect) },
+                                        contentAlignment = Alignment.Center,
+                                    ) { Icon(Symbols.Add, contentDescription = "再添加图片", tint = c.fg2) }
+                                }
+                                Text(
+                                    "%.1f / %d MB".format(state.attachments.bytes / 1048576.0, ChatLimits.MAX_IMAGES_TOTAL_BYTES shr 20),
+                                    fontSize = Clauderc.fontSizes.caption,
+                                    color = c.fg3,
+                                    modifier = Modifier.padding(start = sp.sp2),
+                                )
+                            }
+                        }
+                        state.attachError?.let { err ->
+                            Text(err, Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp), fontSize = Clauderc.fontSizes.caption, color = c.danger, lineHeight = 1.5.em)
+                        }
+                        Row(
+                            Modifier.fillMaxWidth().padding(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.Bottom,
+                        ) {
+                            val attachPress = remember { MutableInteractionSource() }
+                            Box(
+                                Modifier
+                                    .captureAnchor(attachAnchor)
+                                    .pressShrink(attachPress, PressKind.Icon)
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(c.surface2)
+                                    .clickable(attachPress, PressIndication(c.fg2), enabled = enabled, role = Role.Button) { onAttach(attachAnchor.rect) },
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(Symbols.Image, contentDescription = "添加图片", tint = if (enabled) c.fg2 else c.fg3, modifier = Modifier.size(20.dp)) }
+                            BasicTextField(
+                                value = field,
+                                onValueChange = {
+                                    if (it.text != field.text) actions.onDraft(it.text)
+                                    field = it
+                                },
+                                enabled = enabled,
+                                modifier = Modifier.weight(1f).padding(horizontal = 4.dp, vertical = 12.dp).testTag("composer"),
+                                textStyle = TextStyle(color = c.fg, fontSize = Clauderc.fontSizes.body, lineHeight = 1.4.em),
+                                cursorBrush = SolidColor(c.accent),
+                                maxLines = 5,
+                                decorationBox = { inner ->
+                                    Box {
+                                        if (text.isEmpty()) {
+                                            Text(
+                                                when {
+                                                    !enabled -> "离线，不能发送"
+                                                    state.state == SessionState.Stopped -> "发消息会先唤醒会话"
+                                                    else -> "发消息"
+                                                },
+                                                color = c.fg3,
+                                                fontSize = Clauderc.fontSizes.body,
+                                            )
+                                        }
+                                        inner()
+                                    }
+                                },
+                            )
+                            val canSend = enabled && !state.sending && !state.rewinding && (text.isNotBlank() || state.attachments.isNotEmpty())
+                            val sendPress = remember { MutableInteractionSource() }
+                            val sendFill = when {
+                                !canSend -> c.surface2
+                                tile -> c.accent
+                                else -> c.inverse
+                            }
+                            val sendFg = when {
+                                !canSend -> c.fg3
+                                tile -> c.onAccent
+                                else -> c.onInverse
+                            }
+                            Box(
+                                Modifier
+                                    .pressShrink(sendPress, PressKind.Send)
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(sendFill)
+                                    .clickable(sendPress, PressIndication(sendFg), enabled = canSend, role = Role.Button, onClickLabel = "发送") {
+                                        when {
+                                            isModelCommand(text) -> {
+                                                field = TextFieldValue()
+                                                actions.onDraft("")
+                                                onModels()
+                                            }
+                                            actions.onSend(text) -> {
+                                                haptic.tap()
+                                                field = TextFieldValue()
+                                                if (isPanelCommand(state.commands, text)) actions.onOpenTerm()
+                                            }
+                                        }
+                                    }
+                                    .semantics { contentDescription = "发送" },
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(Symbols.ArrowUpward, contentDescription = null, tint = sendFg, modifier = Modifier.size(22.dp)) }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -849,20 +1832,22 @@ private fun OutgoingBubble(out: Outgoing) {
 @Composable
 private fun UserBubbleLayout(text: String, pictures: Int, faded: Boolean, queued: Boolean = false, modifier: Modifier = Modifier, picture: @Composable (Int) -> Unit) {
     val c = Clauderc.colors
-    // 贴纸 speaks in its accent; the other two in black on white.
-    val sticker = Clauderc.style == UiStyle.Sticker
+    val ui = Clauderc.style
+    val userFg = when (ui) {
+        UiStyle.Tile -> c.onAccent
+        UiStyle.Ink -> c.onInverse
+        UiStyle.Plate, UiStyle.Clear -> c.bg
+    }
     Box(modifier.fillMaxWidth().padding(top = Clauderc.spacing.sp2).alpha(if (faded) 0.5f else 1f), contentAlignment = Alignment.CenterEnd) {
         Column(Modifier.fillMaxWidth(0.82f), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            // The rewind button lines up with the text bubble, or with the pictures when there is no text.
             if (pictures > 0) {
                 Row(if (text.isEmpty()) Modifier.rewindBand() else Modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) { repeat(pictures) { picture(it) } }
             }
             if (text.isNotEmpty()) {
-                // Its links show and open as a reply's do; nothing else in it is read as Markdown.
                 val runs = remember(text) { linkRuns(text) }
                 BubbleSelection(enabled = true, mine = true) {
                     RunsText(
-                        runs, Int.MAX_VALUE, if (sticker) c.onAccent else c.bg,
+                        runs, Int.MAX_VALUE, userFg,
                         Modifier.rewindBand().testTag("userBubble").bubble(mine = true).padding(horizontal = 16.dp, vertical = 10.dp),
                     )
                 }
@@ -874,22 +1859,21 @@ private fun UserBubbleLayout(text: String, pictures: Int, faded: Boolean, queued
     }
 }
 
-/**
- * A chat bubble (.bubble), the user's [mine] or a reply. 清玻: 22dp corners, black for the user and grey
- * for replies. 格栅: 6dp corners, and a reply has no bubble, only a heavy rule down its left edge.
- * 贴纸: ink-outlined stickers with no shadow, the user's in the accent, a reply white, each with an
- * 8dp corner at the bottom on its own side.
- */
 @Composable
 private fun Modifier.bubble(mine: Boolean): Modifier {
     val c = Clauderc.colors
     return when (Clauderc.style) {
         UiStyle.Clear -> clip(RoundedCornerShape(22.dp)).background(if (mine) c.fg else c.surface)
-        UiStyle.Grid -> if (mine) clip(RoundedCornerShape(6.dp)).background(c.fg) else drawBehind { drawRect(c.fg, size = Size(2.dp.toPx(), size.height)) }
-        UiStyle.Sticker -> if (mine) {
-            sticker(c.accent, c.ink, 22.dp, bottomEnd = 8.dp)
+        UiStyle.Plate -> if (mine) background(c.fg) else drawBehind { drawRect(c.fg, size = Size(2.dp.toPx(), size.height)) }
+        UiStyle.Tile -> if (mine) {
+            clip(RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp)).background(c.accent)
         } else {
-            sticker(c.panel, c.ink, 22.dp, bottomStart = 8.dp)
+            clip(RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp)).background(c.card)
+        }
+        UiStyle.Ink -> if (mine) {
+            clip(RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp)).background(c.inverse)
+        } else {
+            clip(RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp)).background(c.card).border(1.dp, c.edge, RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp))
         }
     }
 }
@@ -930,7 +1914,7 @@ private fun AssistantBubble(text: String, typed: Boolean = false) {
                 typer.shown.toInt(),
                 Clauderc.colors.fg,
                 Modifier.width(IntrinsicSize.Max).bubble(mine = false)
-                    .padding(start = if (Clauderc.style == UiStyle.Grid) 14.dp else 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp).testTag("reply"),
+                    .padding(start = if (Clauderc.style == UiStyle.Plate) 14.dp else 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp).testTag("reply"),
             )
         }
     }
@@ -1050,7 +2034,7 @@ private fun ToolGroupRow(tools: List<ToolCall>, working: Boolean, outputs: ToolO
     val scope = rememberCoroutineScope()
     val scroll = LocalChatScroll.current
     val turn by animateFloatAsState(if (fold.expanded) 90f else 0f, Motion.turn(), label = "chevron")
-    val grid = Clauderc.style == UiStyle.Grid
+    val plate = Clauderc.style == UiStyle.Plate
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier
@@ -1064,8 +2048,8 @@ private fun ToolGroupRow(tools: List<ToolCall>, working: Boolean, outputs: ToolO
             Text(
                 remember(tools, c.fg, c.danger) { groupSummary(tools, c.fg, c.danger) },
                 Modifier.weight(1f),
-                fontSize = if (grid) 12.sp else 13.sp,
-                fontFamily = if (grid) MonoFamily else null,
+                fontSize = if (plate) 12.sp else 13.sp,
+                fontFamily = if (plate) MonoFamily else null,
                 lineHeight = 1.5.em,
                 color = c.fg2,
                 maxLines = 1,
@@ -1184,17 +2168,111 @@ private fun FoldText(text: AnnotatedString, fetching: Boolean = false) {
     }
 }
 
+/**
+ * Post-answer banner floating above the composer when another online session is still waiting for confirmation
+ * (demo.html showNextBar / .next-slot): lets the user hop across pending approvals in one tap.
+ */
+@Composable
+private fun NextPendingBanner(
+    entry: PendingEntry,
+    onOpen: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    val ui = Clauderc.style
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val arrowShift by animateDpAsState(
+        targetValue = if (ui == UiStyle.Plate && pressed) 6.dp else 0.dp,
+        animationSpec = tween(160, easing = Motion.plateEasePress),
+        label = "nextArrowShift",
+    )
+    val surface = when (ui) {
+        UiStyle.Ink -> Modifier.inkSurface(c.float, c.edge, 22.dp)
+        UiStyle.Tile -> Modifier.tileSurface(c.card, 20.dp)
+        UiStyle.Clear -> Modifier.clip(RoundedCornerShape(22.dp)).glassPane(LocalGlassSource.current)
+        UiStyle.Plate -> Modifier.plateHardShadow(c.fg, 3.dp, pressed).plateBox(c.bg, c.fg, 2.dp)
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = if (ui == UiStyle.Plate) 18.dp else sp.sp3, vertical = sp.sp1)
+            .pressShrink(press, if (ui == UiStyle.Plate) PressKind.Primary else PressKind.Card)
+            .then(surface)
+            .clickable(press, PressIndication(c.fg), role = Role.Button, onClick = onOpen)
+            .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp)
+            .testTag("nextPendingBanner"),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StatusGlyph(Glyph.Need)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(
+                "下一个待确认 · ${entry.machineName}",
+                fontSize = 11.5.sp,
+                fontFamily = if (ui == UiStyle.Plate) MonoFamily else null,
+                color = c.fg3,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                display(entry.session),
+                fontSize = 14.sp,
+                fontWeight = if (ui == UiStyle.Plate) FontWeight.ExtraBold else FontWeight.SemiBold,
+                color = c.fg,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        val tagBg = when (ui) {
+            UiStyle.Ink -> c.inverse
+            UiStyle.Plate -> c.fg
+            else -> c.accent
+        }
+        val tagFg = when (ui) {
+            UiStyle.Ink -> c.onInverse
+            UiStyle.Plate -> c.bg
+            else -> c.onAccent
+        }
+        Row(
+            Modifier
+                .clip(if (ui == UiStyle.Plate) RectangleShape else CircleShape)
+                .background(tagBg)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "下一个",
+                fontSize = 12.5.sp,
+                fontFamily = if (ui == UiStyle.Plate) MonoFamily else null,
+                fontWeight = FontWeight.Bold,
+                color = tagFg,
+            )
+            if (ui == UiStyle.Plate) {
+                Text(
+                    "→",
+                    fontSize = 12.5.sp,
+                    fontFamily = MonoFamily,
+                    fontWeight = FontWeight.Bold,
+                    color = tagFg,
+                    modifier = Modifier.offset(x = arrowShift),
+                )
+            }
+        }
+        SymbolButton(Symbols.Close, "关闭提示", onClick = onDismiss, small = true, tint = c.fg3)
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableState<TextFieldValue>, onAttach: () -> Unit, onModels: () -> Unit) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val haptic = LocalHapticFeedback.current
-    // 贴纸 floats an ink-outlined input on its paper and sends with the accent; 清玻 floats glass over the
-    // messages; 格栅 squares the corners.
     val ui = Clauderc.style
-    val card = ui == UiStyle.Sticker
-    val wrap = if (ui == UiStyle.Grid) c.bg else Color.Transparent
+    val wrap = if (ui == UiStyle.Plate) c.bg else Color.Transparent
     var field by input
     val text = field.text
     // With the keyboard put away there is nothing to type into, so the field lets go and its cursor stops
@@ -1212,8 +2290,17 @@ private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableSta
     val enabled = state.online
     // The blocks over the input rise whole over the messages as their room opens, so each brings the gap
     // under it into that room and paints the page behind it, out over the side padding too.
-    val block = Modifier.coverBehind(wrap, sp.sp3).padding(bottom = sp.sp2)
-    Column(Modifier.fillMaxWidth().background(wrap).navigationBarsPadding().padding(start = sp.sp3, end = sp.sp3, top = sp.sp2, bottom = sp.sp3)) {
+    val plate = ui == UiStyle.Plate
+    val sidePad = if (plate) 18.dp else sp.sp3
+    val block = if (plate) Modifier.coverBehind(wrap, sidePad) else Modifier.coverBehind(wrap, sp.sp3).padding(bottom = sp.sp2)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(wrap)
+            .then(if (plate) Modifier.topLine(c.fg, 2.dp) else Modifier)
+            .navigationBarsPadding()
+            .padding(start = sidePad, end = sidePad, top = if (plate) 2.dp else sp.sp2, bottom = if (plate) 14.dp else sp.sp3),
+    ) {
         // Keep the last matches while the popup leaves.
         var shown by remember { mutableStateOf(emptyList<Command>() to "") }
         if (hits != null && word != null) shown = hits to word.query
@@ -1247,21 +2334,35 @@ private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableSta
         var tasks by remember { mutableStateOf(state.tasks) }
         if (state.tasks.isNotEmpty()) tasks = state.tasks
         Lift(visible = state.tasks.isNotEmpty()) {
-            Box(block) { TaskBar(tasks) }
+            Column(block) {
+                TaskBar(tasks, inIsland = plate)
+                if (plate) HorizontalDivider(thickness = 1.dp, color = c.line)
+            }
         }
         Lift(visible = state.state == SessionState.Working) {
-            Box(block) { WorkingRow(state.workingSinceMillis, enabled, actions.onInterrupt, state.activity) }
+            Column(block) {
+                WorkingRow(state.workingSinceMillis, enabled, actions.onInterrupt, state.activity, inIsland = plate)
+                if (plate) HorizontalDivider(thickness = 1.dp, color = c.line)
+            }
         }
         // Where 「工作中」 sits: the session waits on something only the terminal can show. Not while the
         // agent rewinds: the panel it has open is what reads as a dialog.
         Lift(visible = state.unknownDialog && state.pending == null && !state.rewinding) {
-            Box(block) { BlockedRow(enabled, actions.onOpenTerm) }
+            Column(block) {
+                BlockedRow(enabled, actions.onOpenTerm)
+                if (plate) HorizontalDivider(thickness = 1.dp, color = c.line)
+            }
         }
         // Keep the last limit while the row leaves.
         var limit by remember { mutableStateOf(state.limit) }
         state.limit?.let { limit = it }
         Lift(visible = state.limit != null) {
-            limit?.let { l -> Box(block) { LimitRow(l, state.resumeText, enabled, actions.onResumeText, actions.onAutoResume) } }
+            limit?.let { l ->
+                Column(block) {
+                    LimitRow(l, state.resumeText, enabled, actions.onResumeText, actions.onAutoResume, inIsland = plate)
+                    if (plate) HorizontalDivider(thickness = 1.dp, color = c.line)
+                }
+            }
         }
         Lift(visible = state.attachments.isNotEmpty()) {
             // The pictures scroll; the size used stays at the end, however many there are.
@@ -1295,14 +2396,21 @@ private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableSta
                         }
                     }
                     val press = remember { MutableInteractionSource() }
-                    // 贴纸 outlines it in ink (.thumb-add).
+                    val ui = Clauderc.style
+                    val tileShape = RoundedCornerShape(if (ui == UiStyle.Plate) 0.dp else 12.dp)
                     Box(
                         Modifier
                             .pressShrink(press)
                             .size(60.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (card) c.card else c.surface)
-                            .then(if (card) Modifier.border(2.dp, c.ink, RoundedCornerShape(12.dp)) else Modifier)
+                            .clip(tileShape)
+                            .background(when (ui) { UiStyle.Tile -> c.card; UiStyle.Ink -> c.float; else -> c.surface })
+                            .then(
+                                when (ui) {
+                                    UiStyle.Plate -> Modifier.border(1.dp, c.fg, tileShape)
+                                    UiStyle.Ink -> Modifier.border(1.dp, c.edge, tileShape)
+                                    else -> Modifier
+                                },
+                            )
                             .clickable(press, PressIndication(c.fg2), role = Role.Button, onClickLabel = "再添加图片", onClick = onAttach),
                         contentAlignment = Alignment.Center,
                     ) { Icon(Symbols.Add, contentDescription = "再添加图片", tint = c.fg2) }
@@ -1320,96 +2428,233 @@ private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableSta
         Lift(visible = state.attachError != null) {
             Text(shownError, block.fillMaxWidth().padding(horizontal = sp.sp2), fontSize = Clauderc.fontSizes.caption, color = c.danger, lineHeight = 1.5.em)
         }
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .then(
-                    when (ui) {
-                        UiStyle.Sticker -> Modifier.sticker(c.float, c.ink, 28.dp)
-                        UiStyle.Grid -> Modifier.clip(RoundedCornerShape(6.dp)).background(c.surface)
-                        UiStyle.Clear -> Modifier.clip(RoundedCornerShape(28.dp)).glassPane(LocalGlassSource.current)
-                    },
-                )
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(sp.sp1),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            val attachPress = remember { MutableInteractionSource() }
-            // An icon button (.icon-btn): 贴纸 tilts it and rings it in ink while pressed.
-            Box(
-                Modifier
-                    .pressShrink(attachPress, StickerPress.Icon)
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .then(if (card) Modifier.sticker(Color.Transparent, c.ink, 999.dp, border = 0.dp, source = attachPress) else Modifier)
-                    .clickable(attachPress, PressIndication(c.fg2), enabled = enabled, role = Role.Button, onClick = onAttach),
-                contentAlignment = Alignment.Center,
-            ) { Icon(Symbols.Image, contentDescription = "添加图片", tint = if (enabled) c.fg2 else c.fg3) }
-            BasicTextField(
-                value = field,
-                onValueChange = {
-                    if (it.text != field.text) actions.onDraft(it.text)
-                    field = it
-                },
-                enabled = enabled,
-                modifier = Modifier.weight(1f).padding(horizontal = 4.dp, vertical = 12.dp).testTag("composer"),
-                textStyle = TextStyle(color = c.fg, fontSize = Clauderc.fontSizes.body, lineHeight = 1.4.em),
-                cursorBrush = SolidColor(c.accent),
-                maxLines = 5,
-                decorationBox = { inner ->
-                    Box {
-                        if (text.isEmpty()) {
-                            Text(
-                                when {
-                                    !enabled -> "离线，不能发送"
-                                    state.state == SessionState.Stopped -> "发消息会先唤醒会话"
-                                    else -> "发消息"
-                                },
-                                color = c.fg3,
-                                fontSize = Clauderc.fontSizes.body,
-                            )
-                        }
-                        inner()
-                    }
-                },
+        if (plate) {
+            // 印版 input row (demo.html .input): bottom-sweeping 90°-spinning + button, animated underline field, and double-stamp Send button with upward arrow nudge.
+            var focused by remember { mutableStateOf(false) }
+            val focusRule by animateFloatAsState(
+                targetValue = if (focused) 1f else 0f,
+                animationSpec = tween(420, easing = Motion.plateEasePress),
+                label = "plateInputFocusRule",
             )
+            val attachPress = remember { MutableInteractionSource() }
+            val attachPressed by attachPress.collectIsPressedAsState()
+            val attachSweep by animateFloatAsState(
+                targetValue = if (enabled && attachPressed) 1f else 0f,
+                animationSpec = tween(if (attachPressed) 220 else 160, easing = Motion.plateEasePress),
+                label = "plateAttachSweep",
+            )
+            val attachRot by animateFloatAsState(
+                targetValue = if (enabled && attachPressed) 90f else 0f,
+                animationSpec = tween(if (attachPressed) 220 else 180, easing = Motion.plateEasePress),
+                label = "plateAttachRot",
+            )
+            val attachTint = if (enabled) lerp(c.fg, c.bg, attachSweep) else c.fg3
             val canSend = enabled && !state.sending && !state.rewinding && (text.isNotBlank() || state.attachments.isNotEmpty())
             val sendPress = remember { MutableInteractionSource() }
-            val sendFill = when {
-                canSend && card -> c.accent
-                canSend -> c.fg
-                card -> c.surface2
-                else -> c.surface2
-            }
-            Box(
+            val sendPressed by sendPress.collectIsPressedAsState()
+            val arrowLift by animateDpAsState(
+                targetValue = if (canSend && sendPressed) (-4).dp else 0.dp,
+                animationSpec = tween(160, easing = Motion.plateEasePress),
+                label = "plateSendLift",
+            )
+            val sendFill = if (canSend) c.fg else c.surface2
+            val sendFg = if (canSend) c.bg else c.fg3
+            Row(
                 Modifier
-                    .pressShrink(sendPress, StickerPress.Send)
-                    .size(44.dp)
-                    .then(
-                        when (ui) {
-                            UiStyle.Sticker -> Modifier.sticker(sendFill, if (canSend) c.ink else c.fg3, 22.dp)
-                            UiStyle.Grid -> Modifier.clip(RoundedCornerShape(4.dp)).background(sendFill)
-                            UiStyle.Clear -> Modifier.clip(CircleShape).background(sendFill).then(if (canSend) Modifier.topHighlight(Color.White.copy(alpha = 0.22f)) else Modifier)
-                        },
+                    .fillMaxWidth()
+                    .padding(top = 12.dp, bottom = 4.dp, end = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Box(
+                    Modifier
+                        .pressShrink(attachPress, PressKind.Plain)
+                        .size(36.dp)
+                        .background(c.bg, RectangleShape)
+                        .plateSweepFill(attachSweep, c.fg, PlateSweep.BottomToTop)
+                        .border(1.5.dp, if (enabled) c.fg else c.fg3, RectangleShape)
+                        .clickable(attachPress, indication = null, enabled = enabled, role = Role.Button, onClick = onAttach)
+                        .semantics { contentDescription = "添加图片" }
+                        .testTag("plateAttachBtn"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Symbols.Add,
+                        contentDescription = null,
+                        tint = attachTint,
+                        modifier = Modifier.size(20.dp).graphicsLayer { rotationZ = attachRot },
                     )
-                    .clickable(sendPress, PressIndication(if (card) c.onAccent else c.bg), enabled = canSend, role = Role.Button, onClickLabel = "发送") {
-                        when {
-                            isModelCommand(text) -> {
-                                field = TextFieldValue()
-                                actions.onDraft("")
-                                onModels()
-                            }
-                            actions.onSend(text) -> {
-                                haptic.tap()
-                                field = TextFieldValue()
-                                if (isPanelCommand(state.commands, text)) actions.onOpenTerm()
+                }
+                BasicTextField(
+                    value = field,
+                    onValueChange = {
+                        if (it.text != field.text) actions.onDraft(it.text)
+                        field = it
+                    },
+                    enabled = enabled,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 36.dp)
+                        .onFocusChanged { focused = it.isFocused }
+                        .drawBehind {
+                            val baseH = 1.5.dp.toPx()
+                            drawRect(c.fg, Offset(0f, size.height - baseH), Size(size.width, baseH))
+                            if (focusRule > 0.005f) {
+                                val thickH = 3.dp.toPx()
+                                val w = size.width * focusRule
+                                drawRect(c.fg, Offset((size.width - w) / 2f, size.height - thickH), Size(w, thickH))
                             }
                         }
-                    }
-                    .semantics { contentDescription = "发送" },
-                contentAlignment = Alignment.Center,
+                        .padding(vertical = 8.dp)
+                        .testTag("composer"),
+                    textStyle = TextStyle(color = c.fg, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, lineHeight = 1.4.em),
+                    cursorBrush = SolidColor(c.fg),
+                    maxLines = 5,
+                    decorationBox = { inner ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (text.isEmpty()) {
+                                Text(
+                                    when {
+                                        !enabled -> "离线，不能发送"
+                                        state.state == SessionState.Stopped -> "发消息会先唤醒会话"
+                                        else -> "发消息"
+                                    },
+                                    color = c.fg3,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Normal,
+                                )
+                            }
+                            inner()
+                        }
+                    },
+                )
+                Box(
+                    Modifier
+                        .pressShrink(sendPress, PressKind.Primary)
+                        .size(36.dp)
+                        .plateStamp(sendFill, c.bg, c.fg, source = sendPress, enabled = canSend)
+                        .clickable(sendPress, PressIndication(sendFg), enabled = canSend, role = Role.Button, onClickLabel = "发送") {
+                            when {
+                                isModelCommand(text) -> {
+                                    field = TextFieldValue()
+                                    actions.onDraft("")
+                                    onModels()
+                                }
+                                actions.onSend(text) -> {
+                                    haptic.tap()
+                                    field = TextFieldValue()
+                                    if (isPanelCommand(state.commands, text)) actions.onOpenTerm()
+                                }
+                            }
+                        }
+                        .semantics { contentDescription = "发送" },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Symbols.ArrowUpward,
+                        contentDescription = null,
+                        tint = sendFg,
+                        modifier = Modifier.size(20.dp).offset(y = arrowLift),
+                    )
+                }
+            }
+        } else {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .then(
+                        when (ui) {
+                            UiStyle.Tile -> Modifier.tileSurface(c.float, 28.dp)
+                            UiStyle.Ink -> Modifier.inkSurface(c.float, c.edge, 28.dp)
+                            UiStyle.Plate -> Modifier.plateBox(c.bg, c.fg, 1.5.dp)
+                            UiStyle.Clear -> Modifier.clip(RoundedCornerShape(28.dp)).glassPane(LocalGlassSource.current)
+                        },
+                    )
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(sp.sp1),
+                verticalAlignment = Alignment.Bottom,
             ) {
-                Icon(Symbols.ArrowUpward, contentDescription = null, tint = if (!canSend) c.fg3 else if (card) c.onAccent else c.bg, modifier = Modifier.size(22.dp))
+                val attachPress = remember { MutableInteractionSource() }
+                Box(
+                    Modifier
+                        .pressShrink(attachPress, PressKind.Icon)
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .clickable(attachPress, PressIndication(c.fg2), enabled = enabled, role = Role.Button, onClick = onAttach),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Symbols.Image, contentDescription = "添加图片", tint = if (enabled) c.fg2 else c.fg3) }
+                BasicTextField(
+                    value = field,
+                    onValueChange = {
+                        if (it.text != field.text) actions.onDraft(it.text)
+                        field = it
+                    },
+                    enabled = enabled,
+                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp, vertical = 12.dp).testTag("composer"),
+                    textStyle = TextStyle(color = c.fg, fontSize = Clauderc.fontSizes.body, lineHeight = 1.4.em),
+                    cursorBrush = SolidColor(c.accent),
+                    maxLines = 5,
+                    decorationBox = { inner ->
+                        Box {
+                            if (text.isEmpty()) {
+                                Text(
+                                    when {
+                                        !enabled -> "离线，不能发送"
+                                        state.state == SessionState.Stopped -> "发消息会先唤醒会话"
+                                        else -> "发消息"
+                                    },
+                                    color = c.fg3,
+                                    fontSize = Clauderc.fontSizes.body,
+                                )
+                            }
+                            inner()
+                        }
+                    },
+                )
+                val canSend = enabled && !state.sending && !state.rewinding && (text.isNotBlank() || state.attachments.isNotEmpty())
+                val sendPress = remember { MutableInteractionSource() }
+                val sendFill = when {
+                    !canSend -> c.surface2
+                    ui == UiStyle.Tile -> c.accent
+                    ui == UiStyle.Ink -> c.inverse
+                    else -> c.fg
+                }
+                val sendFg = when {
+                    !canSend -> c.fg3
+                    ui == UiStyle.Tile -> c.onAccent
+                    ui == UiStyle.Ink -> c.onInverse
+                    else -> c.bg
+                }
+                Box(
+                    Modifier
+                        .pressShrink(sendPress, PressKind.Send)
+                        .size(44.dp)
+                        .then(
+                            when (ui) {
+                                UiStyle.Plate -> Modifier.background(sendFill)
+                                UiStyle.Tile, UiStyle.Ink -> Modifier.clip(CircleShape).background(sendFill)
+                                UiStyle.Clear -> Modifier.clip(CircleShape).background(sendFill).then(if (canSend) Modifier.topHighlight(Color.White.copy(alpha = 0.22f)) else Modifier)
+                            },
+                        )
+                        .clickable(sendPress, PressIndication(sendFg), enabled = canSend, role = Role.Button, onClickLabel = "发送") {
+                            when {
+                                isModelCommand(text) -> {
+                                    field = TextFieldValue()
+                                    actions.onDraft("")
+                                    onModels()
+                                }
+                                actions.onSend(text) -> {
+                                    haptic.tap()
+                                    field = TextFieldValue()
+                                    if (isPanelCommand(state.commands, text)) actions.onOpenTerm()
+                                }
+                            }
+                        }
+                        .semantics { contentDescription = "发送" },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Symbols.ArrowUpward, contentDescription = null, tint = sendFg, modifier = Modifier.size(22.dp))
+                }
             }
         }
     }
@@ -1433,14 +2678,18 @@ private fun Modifier.floatAbove(overlap: Int) = layout { measurable, constraints
  * left blank. 「中断」 sits at the end; a subagent's page has no [onInterrupt].
  */
 @Composable
-internal fun WorkingRow(sinceMillis: Long?, enabled: Boolean, onInterrupt: (() -> Unit)?, activity: String? = null) {
+internal fun WorkingRow(sinceMillis: Long?, enabled: Boolean, onInterrupt: (() -> Unit)?, activity: String? = null, inIsland: Boolean = false) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
-    // 清玻 and 贴纸 float the line as a pill: glass, or an ink-outlined sticker.
-    val pill = when (Clauderc.style) {
-        UiStyle.Clear -> Modifier.heightIn(min = 40.dp).clip(CircleShape).glassPane(LocalGlassSource.current).padding(start = sp.sp4, end = sp.sp1)
-        UiStyle.Sticker -> Modifier.heightIn(min = 40.dp).sticker(c.float, c.ink, 999.dp).padding(start = sp.sp4, end = sp.sp1)
-        UiStyle.Grid -> Modifier.padding(start = sp.sp3, end = sp.sp2)
+    val pill = if (inIsland) {
+        Modifier.heightIn(min = 44.dp).padding(start = 18.dp, end = 8.dp)
+    } else {
+        when (Clauderc.style) {
+            UiStyle.Clear -> Modifier.heightIn(min = 40.dp).clip(CircleShape).glassPane(LocalGlassSource.current).padding(start = sp.sp4, end = sp.sp1)
+            UiStyle.Tile -> Modifier.heightIn(min = 40.dp).tileSurface(c.float, 999.dp).padding(start = sp.sp4, end = sp.sp1)
+            UiStyle.Ink -> Modifier.heightIn(min = 40.dp).inkSurface(c.float, c.edge, 999.dp).padding(start = sp.sp4, end = sp.sp1)
+            UiStyle.Plate -> Modifier.plateBox(c.bg, c.fg, 1.5.dp).padding(start = sp.sp3, end = sp.sp2)
+        }
     }
     Row(
         Modifier.fillMaxWidth().then(pill),
@@ -1465,7 +2714,68 @@ internal fun WorkingRow(sinceMillis: Long?, enabled: Boolean, onInterrupt: (() -
                 Text(if (seconds != null) "工作中 · ${elapsed(seconds)}" else "工作中", fontSize = Clauderc.fontSizes.label, color = c.fg2, maxLines = 1)
             }
         }
-        if (onInterrupt != null) TextAction("中断", onClick = onInterrupt, tone = TextTone.Ink, enabled = enabled)
+        if (onInterrupt != null) {
+            if (Clauderc.style == UiStyle.Plate) {
+                PlateStopButton(enabled = enabled, onClick = onInterrupt)
+            } else {
+                TextAction("中断", onClick = onInterrupt, tone = TextTone.Ink, enabled = enabled)
+            }
+        }
+    }
+}
+
+/**
+ * 印版's differentiated vermilion danger stop button (demo.html `.working .stop`):
+ * 32dp square with 1.5dp vermilion border, 2dp vermilion hard shadow collapsing on press,
+ * 10dp inner square inverting to white on vermilion press fill, and an infinite pulsing outer
+ * vermilion alert frame driven off the shared [LocalLoopClock].
+ */
+@Composable
+private fun PlateStopButton(enabled: Boolean, onClick: () -> Unit) {
+    val c = Clauderc.colors
+    val clock = LocalLoopClock.current
+    if (enabled) clock.Use()
+    val pulse by remember(clock, enabled) {
+        derivedStateOf {
+            if (!enabled) 0f else (clock.millis % Motion.PLATE_DANGER_PULSE_MS) / Motion.PLATE_DANGER_PULSE_MS.toFloat()
+        }
+    }
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val accent = if (enabled) c.danger else c.fg3
+    val boxFill = if (enabled && pressed) c.danger else c.bg
+    val innerFill = if (enabled && pressed) Color.White else accent
+    Box(
+        Modifier
+            .padding(vertical = 4.dp, horizontal = 2.dp)
+            .pressShrink(press, PressKind.Primary)
+            .size(32.dp)
+            .drawBehind {
+                // Infinite pulsing vermilion outer alert ring.
+                if (enabled) {
+                    val p = pulse.coerceIn(0f, 1f)
+                    val scale = 1f + 0.22f * p
+                    val alpha = 0.72f * (1f - p)
+                    val base = 4.dp.toPx()
+                    val rw = (size.width + base * 2f) * scale
+                    val rh = (size.height + base * 2f) * scale
+                    drawRect(
+                        color = c.danger.copy(alpha = alpha),
+                        topLeft = Offset((size.width - rw) / 2f, (size.height - rh) / 2f),
+                        size = Size(rw, rh),
+                        style = Stroke(1.dp.toPx()),
+                    )
+                }
+            }
+            .plateHardShadow(accent, 2.dp, pressed = pressed || !enabled)
+            .background(boxFill, RectangleShape)
+            .border(1.5.dp, accent, RectangleShape)
+            .clickable(press, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = "中断" }
+            .testTag("plateStopButton"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(10.dp).background(innerFill, RectangleShape))
     }
 }
 
@@ -1552,17 +2862,18 @@ private fun BlockedRow(enabled: Boolean, onOpenTerm: () -> Unit) {
  * then and the switch that has the agent send it; with the switch on, when it will go out, in the accent.
  */
 @Composable
-private fun LimitRow(limit: clauderc.app.protocol.Limit, text: String, enabled: Boolean, onText: (String) -> Unit, onSwitch: (Boolean) -> Unit) {
+private fun LimitRow(limit: clauderc.app.protocol.Limit, text: String, enabled: Boolean, onText: (String) -> Unit, onSwitch: (Boolean) -> Unit, inIsland: Boolean = false) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val ui = Clauderc.style
-    val grid = ui == UiStyle.Grid
-    val surface = when (ui) {
+    val plate = ui == UiStyle.Plate
+    val surface = if (inIsland) Modifier else when (ui) {
         UiStyle.Clear -> Modifier.clip(RoundedCornerShape(22.dp)).glassPane(LocalGlassSource.current)
-        UiStyle.Grid -> Modifier.clip(RoundedCornerShape(6.dp)).background(c.surface)
-        UiStyle.Sticker -> Modifier.sticker(c.card, c.ink, 22.dp)
+        UiStyle.Plate -> Modifier.plateBox(c.bg, c.fg, 1.5.dp)
+        UiStyle.Tile -> Modifier.tileSurface(c.card, 22.dp)
+        UiStyle.Ink -> Modifier.inkSurface(c.float, c.edge, 22.dp)
     }
-    val small = if (grid) 12.sp else Clauderc.fontSizes.label
+    val small = if (plate) 12.sp else Clauderc.fontSizes.label
     val on = limit.autoResume != null
     Column(
         Modifier.fillMaxWidth().then(surface).padding(start = sp.sp4, end = sp.sp2, top = sp.sp3, bottom = sp.sp2).testTag("limitRow"),
@@ -1579,22 +2890,23 @@ private fun LimitRow(limit: clauderc.app.protocol.Limit, text: String, enabled: 
                 limit.autoResume?.let { r -> withStyle(SpanStyle(color = c.accent)) { append(" · ${clauderc.app.ui.TimeText.ahead(r.at)} 自动发出") } }
             },
             fontSize = small,
-            fontFamily = if (grid) MonoFamily else null,
+            fontFamily = if (plate) MonoFamily else null,
             color = c.fg2,
             modifier = Modifier.testTag("limitText"),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(sp.sp3), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "到点发送",
-                fontSize = if (grid) 13.sp else Clauderc.fontSizes.label,
-                fontFamily = if (grid) MonoFamily else null,
-                fontWeight = if (ui == UiStyle.Sticker) androidx.compose.ui.text.font.FontWeight.Bold else null,
+                fontSize = if (plate) 13.sp else Clauderc.fontSizes.label,
+                fontFamily = if (plate) MonoFamily else null,
+                fontWeight = if (plate) androidx.compose.ui.text.font.FontWeight.Bold else null,
                 color = c.fg,
             )
             val field = when (ui) {
                 UiStyle.Clear -> Modifier.clip(RoundedCornerShape(Clauderc.radii.sm)).background(c.fg.copy(alpha = 0.06f))
-                UiStyle.Grid -> Modifier.background(c.bg).border(1.dp, c.fg)
-                UiStyle.Sticker -> Modifier.clip(RoundedCornerShape(12.dp)).background(c.card).border(2.dp, c.ink, RoundedCornerShape(12.dp))
+                UiStyle.Plate -> Modifier.background(c.bg).border(1.5.dp, c.fg)
+                UiStyle.Tile -> Modifier.clip(RoundedCornerShape(12.dp)).background(c.surface)
+                UiStyle.Ink -> Modifier.clip(RoundedCornerShape(12.dp)).background(c.surface2).border(1.dp, c.edge, RoundedCornerShape(12.dp))
             }
             BasicTextField(
                 value = text,
@@ -1602,11 +2914,11 @@ private fun LimitRow(limit: clauderc.app.protocol.Limit, text: String, enabled: 
                 enabled = enabled,
                 singleLine = true,
                 modifier = Modifier.weight(1f).heightIn(min = 36.dp).then(field).padding(horizontal = sp.sp3).testTag("limitInput"),
-                textStyle = TextStyle(color = c.fg, fontSize = if (grid) 14.sp else Clauderc.fontSizes.body, fontFamily = if (grid) MonoFamily else null),
+                textStyle = TextStyle(color = c.fg, fontSize = if (plate) 14.sp else Clauderc.fontSizes.body, fontFamily = if (plate) MonoFamily else null),
                 cursorBrush = SolidColor(c.accent),
                 decorationBox = { inner ->
                     Box(Modifier.heightIn(min = 36.dp), contentAlignment = Alignment.CenterStart) {
-                        if (text.isEmpty()) Text("要发的话", color = c.fg3, fontSize = if (grid) 14.sp else Clauderc.fontSizes.body)
+                        if (text.isEmpty()) Text("要发的话", color = c.fg3, fontSize = if (plate) 14.sp else Clauderc.fontSizes.body)
                         inner()
                     }
                 },

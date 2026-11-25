@@ -49,11 +49,18 @@ object Symbols {
     val KeyboardArrowUp by lazy { symbol("keyboard_arrow_up", SymbolPaths.keyboardArrowUp) }
     val KeyboardReturn by lazy { symbol("keyboard_return", SymbolPaths.keyboardReturn) }
     val Mail by lazy { symbol("mail", SymbolPaths.mail) }
+    val Menu by lazy { symbol("menu", "M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z") }
     val MoreVert by lazy { symbol("more_vert", SymbolPaths.moreVert) }
     val OpenInBrowser by lazy { symbol("open_in_browser", SymbolPaths.openInBrowser) }
     val Palette by lazy { symbol("palette", SymbolPaths.palette) }
     val PhotoCamera by lazy { symbol("photo_camera", SymbolPaths.photoCamera) }
     val PowerSettingsNew by lazy { symbol("power_settings_new", SymbolPaths.powerSettingsNew) }
+    val QrCodeScanner by lazy {
+        symbol(
+            "qr_code_scanner",
+            "M80-680v-200h200v80H160v120H80Zm0 600v-200h80v120h120v80H80Zm600 0v-80h120v-120h80v200H680Zm120-600v-120H680v-80h200v200H800ZM700-260h60v60h-60v-60Zm0-120h60v60h-60v-60Zm-60 60h60v60h-60v-60Zm-60 60h60v60h-60v-60Zm-60-60h60v60h-60v-60Zm120-120h60v60h-60v-60Zm-60 60h60v60h-60v-60Zm-60-60h60v60h-60v-60Zm240-320v240H520v-240h240ZM440-440v240H200v-240h240Zm0-320v240H200v-240h240Zm-60 500v-120H260v120h120Zm0-320v-120H260v120h120Zm320 0v-120H580v120h120Z",
+        )
+    }
     val RadioChecked by lazy { symbol("radio_button_checked", SymbolPaths.radioButtonChecked) }
     val RadioUnchecked by lazy { symbol("radio_button_unchecked", SymbolPaths.radioButtonUnchecked) }
     val Refresh by lazy { symbol("refresh", SymbolPaths.refresh) }
