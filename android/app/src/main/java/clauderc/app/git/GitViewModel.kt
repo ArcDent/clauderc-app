@@ -45,6 +45,8 @@ sealed interface GitOp {
     val verb: String
     data class Stage(val path: String) : GitOp { override val verb = "暂存" }
     data class Unstage(val path: String) : GitOp { override val verb = "取消暂存" }
+    data class StageAll(val paths: List<String>) : GitOp { override val verb = "全部暂存" }
+    data class UnstageAll(val paths: List<String>) : GitOp { override val verb = "全部取消暂存" }
     data class Commit(val message: String) : GitOp { override val verb = "提交" }
     data object Pull : GitOp { override val verb = "拉取" }
     data class Push(val setUpstream: Boolean = false, val branch: String = "") : GitOp { override val verb = "推送" }
@@ -231,6 +233,7 @@ class GitViewModel(
 
     /** Runs a write operation, asking first when a session is working in the directory or dir.busy fails. */
     fun request(op: GitOp) {
+        if ((op is GitOp.StageAll && op.paths.isEmpty()) || (op is GitOp.UnstageAll && op.paths.isEmpty())) return
         val before = _state.getAndUpdate { if (it.dir == null || it.running) it else it.copy(running = true) }
         val dir = before.dir ?: return
         if (before.running) return
@@ -266,6 +269,18 @@ class GitViewModel(
                 when (op) {
                     is GitOp.Stage -> relay.call(Method.GIT_STAGE, machineId, GitPathRequest(dir, op.path), GitPathRequest.serializer(), Empty.serializer())
                     is GitOp.Unstage -> relay.call(Method.GIT_UNSTAGE, machineId, GitPathRequest(dir, op.path), GitPathRequest.serializer(), Empty.serializer())
+                    is GitOp.StageAll -> {
+                        for (path in op.paths) {
+                            relay.call(Method.GIT_STAGE, machineId, GitPathRequest(dir, path), GitPathRequest.serializer(), Empty.serializer())
+                        }
+                        _messages.send("已全部暂存")
+                    }
+                    is GitOp.UnstageAll -> {
+                        for (path in op.paths) {
+                            relay.call(Method.GIT_UNSTAGE, machineId, GitPathRequest(dir, path), GitPathRequest.serializer(), Empty.serializer())
+                        }
+                        _messages.send("已全部取消暂存")
+                    }
                     is GitOp.Commit -> {
                         val res = relay.call(Method.GIT_COMMIT, machineId, GitCommitRequest(dir, op.message.trim()), GitCommitRequest.serializer(), GitCommitResponse.serializer())
                         _state.update { if (it.dir == dir) it.copy(message = "") else it }

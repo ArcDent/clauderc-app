@@ -2,6 +2,7 @@ package clauderc.app.ui.components
 
 import android.view.ViewGroup
 import android.view.WindowManager
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -96,6 +98,7 @@ fun MorphOverlay(
     anchor: Rect? = null,
     fromTop: Boolean = false,
     tall: Boolean = false,
+    smoothResize: Boolean = true,
     tag: String = "morphPanel",
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -167,9 +170,9 @@ fun MorphOverlay(
             val alignMod = if (fromTop) {
                 Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 0.dp)
             } else {
-                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 2.dp)
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 2.dp)
             }
-            val clipShape = remember(anchor, outerWindowBounds, fromTop, bleedPx, panelRadiusPx, density) {
+            val clipShape = remember(anchor, fromTop, bleedPx, panelRadiusPx, density) {
                 MorphClipShape(
                     progress = { progress.value },
                     anchorInWindow = anchor,
@@ -207,6 +210,13 @@ fun MorphOverlay(
                         }
                         .shadow(if (c.isDark) 20.dp else 14.dp, cardShape, clip = false)
                         .inkSurface(c.float, c.edge, 30.dp)
+                        .then(
+                            if (smoothResize) {
+                                Modifier.animateContentSize(animationSpec = tween(Motion.INK_MORPH_RESIZE_MS, easing = Motion.inkEase))
+                            } else {
+                                Modifier
+                            },
+                        )
                         .pointerInput(Unit) { detectTapGestures {} },
                 ) {
                     val bodyMod = Modifier

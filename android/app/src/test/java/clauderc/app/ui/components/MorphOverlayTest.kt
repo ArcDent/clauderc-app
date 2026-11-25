@@ -147,4 +147,38 @@ class MorphOverlayTest {
         assertTrue("outer morph stays open underneath", outer)
         compose.onNodeWithTag("outerMorph").assertIsDisplayed()
     }
+
+    @Test fun morphOverlaySmoothlyAnimatesHeightWhenAsyncContentLoads() {
+        var loaded by mutableStateOf(false)
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            ClaudercTheme(darkTheme = true, style = UiStyle.Ink) {
+                MorphOverlay(onDismiss = {}, tag = "asyncMorph") {
+                    if (!loaded) {
+                        Box(Modifier.size(width = 200.dp, height = 60.dp)) { Text("加载中") }
+                    } else {
+                        Box(Modifier.size(width = 200.dp, height = 360.dp)) { Text("已加载") }
+                    }
+                }
+            }
+        }
+        compose.mainClock.advanceTimeBy(600)
+        compose.waitForIdle()
+        val hLoading = compose.onNodeWithTag("asyncMorph").fetchSemanticsNode().boundsInRoot.height
+
+        loaded = true
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        val hStart = compose.onNodeWithTag("asyncMorph").fetchSemanticsNode().boundsInRoot.height
+        compose.mainClock.advanceTimeBy(120)
+        compose.waitForIdle()
+        val hMid = compose.onNodeWithTag("asyncMorph").fetchSemanticsNode().boundsInRoot.height
+
+        compose.mainClock.advanceTimeBy(600)
+        compose.waitForIdle()
+        val hLoaded = compose.onNodeWithTag("asyncMorph").fetchSemanticsNode().boundsInRoot.height
+
+        assertTrue("card does not snap on first frame (hLoading=$hLoading hStart=$hStart)", hStart < hLoaded)
+        assertTrue("card grows smoothly instead of snapping (hLoading=$hLoading hMid=$hMid hLoaded=$hLoaded)", hMid > hLoading && hMid < hLoaded)
+    }
 }

@@ -1,8 +1,13 @@
 package clauderc.app.git
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -184,7 +189,7 @@ fun CommitMorphPanel(
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
-    MorphOverlay(onDismiss = onClose, anchor = anchor, fromTop = false, tall = true, tag = "inkCommitMorph") {
+    MorphOverlay(onDismiss = onClose, anchor = anchor, fromTop = false, tall = true, smoothResize = false, tag = "inkCommitMorph") {
         val close = LocalMorphClose.current
         Column(Modifier.fillMaxWidth()) {
             Row(
@@ -210,63 +215,80 @@ fun CommitMorphPanel(
                 )
                 SymbolButton(Symbols.Close, "关闭", onClick = { close?.invoke(null) ?: onClose() }, small = true)
             }
-            val show = state.value
-            when {
-                state.error != null -> Text(state.error, Modifier.padding(20.dp), color = c.danger, fontSize = Clauderc.fontSizes.label)
-                show == null -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { Spinner(color = c.fg3) }
-                else -> LazyColumn(
-                    Modifier.weight(1f, fill = false).fillMaxWidth().testTag("inkCommitList"),
-                    contentPadding = PaddingValues(bottom = 16.dp),
-                ) {
-                    item(key = "subj") {
-                        val subject = show.message.substringBefore('\n')
-                        val body = show.message.substringAfter('\n', "").trim()
-                        Column(Modifier.padding(horizontal = 20.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(subject, fontSize = 19.sp, fontWeight = FontWeight.Medium, lineHeight = 1.35.em, color = c.fg)
-                            if (body.isNotEmpty()) Text(body, fontSize = Clauderc.fontSizes.label, color = c.fg2, lineHeight = 1.65.em)
-                        }
+            AnimatedContent(
+                targetState = state,
+                modifier = Modifier.weight(1f, fill = false).fillMaxWidth(),
+                contentKey = { st ->
+                    when {
+                        st.error != null -> "err:${st.error}"
+                        st.value == null -> "loading"
+                        else -> "show:${st.value.hash}"
                     }
-                    item(key = "meta") {
-                        HorizontalDivider(Modifier.padding(horizontal = 20.dp), thickness = 1.dp, color = c.edge)
-                        Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Meta("作者", show.author)
-                            Meta("时间", commitTime.format(show.time.atZone(ZoneId.systemDefault())))
-                            if (show.parents.isNotEmpty()) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(sp.sp4), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("父提交", Modifier.width(56.dp), fontSize = Clauderc.fontSizes.label, color = c.fg3)
-                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        show.parents.forEach { ph ->
-                                            Text(
-                                                ph.take(7),
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(c.surface2)
-                                                    .clickable(role = Role.Button) { onOpenParent(ph) }
-                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                                                    .testTag("commitParent:${ph.take(7)}"),
-                                                fontFamily = MonoFamily,
-                                                fontSize = Clauderc.fontSizes.monoSm,
-                                                color = c.fg,
-                                            )
+                },
+                transitionSpec = {
+                    (fadeIn(tween(240, delayMillis = 50, easing = Motion.inkEase)) togetherWith fadeOut(tween(110)))
+                        .using(SizeTransform(clip = true) { _, _ -> tween(Motion.INK_MORPH_RESIZE_MS, easing = Motion.inkEase) })
+                },
+                label = "inkCommitBody",
+            ) { current ->
+                val show = current.value
+                when {
+                    current.error != null -> Text(current.error, Modifier.padding(20.dp), color = c.danger, fontSize = Clauderc.fontSizes.label)
+                    show == null -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { Spinner(color = c.fg3) }
+                    else -> LazyColumn(
+                        Modifier.fillMaxWidth().testTag("inkCommitList"),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                    ) {
+                        item(key = "subj") {
+                            val subject = show.message.substringBefore('\n')
+                            val body = show.message.substringAfter('\n', "").trim()
+                            Column(Modifier.padding(horizontal = 20.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(subject, fontSize = 19.sp, fontWeight = FontWeight.Medium, lineHeight = 1.35.em, color = c.fg)
+                                if (body.isNotEmpty()) Text(body, fontSize = Clauderc.fontSizes.label, color = c.fg2, lineHeight = 1.65.em)
+                            }
+                        }
+                        item(key = "meta") {
+                            HorizontalDivider(Modifier.padding(horizontal = 20.dp), thickness = 1.dp, color = c.edge)
+                            Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Meta("作者", show.author)
+                                Meta("时间", commitTime.format(show.time.atZone(ZoneId.systemDefault())))
+                                if (show.parents.isNotEmpty()) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(sp.sp4), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("父提交", Modifier.width(56.dp), fontSize = Clauderc.fontSizes.label, color = c.fg3)
+                                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            show.parents.forEach { ph ->
+                                                Text(
+                                                    ph.take(7),
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(c.surface2)
+                                                        .clickable(role = Role.Button) { onOpenParent(ph) }
+                                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                        .testTag("commitParent:${ph.take(7)}"),
+                                                    fontFamily = MonoFamily,
+                                                    fontSize = Clauderc.fontSizes.monoSm,
+                                                    color = c.fg,
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                    item(key = "files-head") {
-                        Row(
-                            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 6.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text("${show.files.size} 个改动文件", fontSize = 13.sp, color = c.fg2, fontWeight = FontWeight.Medium)
-                            Counts(show.files.sumOf { it.added }, show.files.sumOf { it.deleted })
+                        item(key = "files-head") {
+                            Row(
+                                Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("${show.files.size} 个改动文件", fontSize = 13.sp, color = c.fg2, fontWeight = FontWeight.Medium)
+                                Counts(show.files.sumOf { it.added }, show.files.sumOf { it.deleted })
+                            }
                         }
-                    }
-                    itemsIndexed(show.files, key = { _, it -> it.path }) { _, f ->
-                        val rowAnchor = rememberAnchorBox()
-                        CommitFileRow(f, Modifier.captureAnchor(rowAnchor)) { onOpenFileAt(f, rowAnchor.rect) }
+                        itemsIndexed(show.files, key = { _, it -> it.path }) { _, f ->
+                            val rowAnchor = rememberAnchorBox()
+                            CommitFileRow(f, Modifier.captureAnchor(rowAnchor)) { onOpenFileAt(f, rowAnchor.rect) }
+                        }
                     }
                 }
             }
@@ -294,7 +316,7 @@ fun DiffMorphPanel(
     val c = Clauderc.colors
     val diff = state.value
     val lines = remember(diff?.patch) { parsePatch(diff?.patch.orEmpty()) }
-    MorphOverlay(onDismiss = onClose, anchor = anchor, fromTop = fromTop, tall = true, tag = "inkDiffMorph") {
+    MorphOverlay(onDismiss = onClose, anchor = anchor, fromTop = fromTop, tall = true, smoothResize = false, tag = "inkDiffMorph") {
         val close = LocalMorphClose.current
         Column(Modifier.fillMaxWidth()) {
             Row(
@@ -314,8 +336,26 @@ fun DiffMorphPanel(
                 }
                 SymbolButton(Symbols.Close, "关闭", onClick = { close?.invoke(null) ?: onClose() }, small = true)
             }
-            Box(Modifier.weight(1f, fill = false).fillMaxWidth()) {
-                DiffBody(state = state, lines = lines, framed = false)
+            AnimatedContent(
+                targetState = state,
+                modifier = Modifier.weight(1f, fill = false).fillMaxWidth(),
+                contentKey = { st ->
+                    val d = st.value
+                    when {
+                        st.error != null -> "err:${st.error}"
+                        d == null -> "loading"
+                        d.binary -> "binary:${d.path}"
+                        else -> "diff:${d.path}:${d.patch.orEmpty().length}"
+                    }
+                },
+                transitionSpec = {
+                    (fadeIn(tween(240, delayMillis = 50, easing = Motion.inkEase)) togetherWith fadeOut(tween(110)))
+                        .using(SizeTransform(clip = true) { _, _ -> tween(Motion.INK_MORPH_RESIZE_MS, easing = Motion.inkEase) })
+                },
+                label = "inkDiffBody",
+            ) { current ->
+                val curLines = remember(current.value?.patch) { parsePatch(current.value?.patch.orEmpty()) }
+                DiffBody(state = current, lines = curLines, framed = false)
             }
             if (onToggleStage != null && staged != null) {
                 Row(

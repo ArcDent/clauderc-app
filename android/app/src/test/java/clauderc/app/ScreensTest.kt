@@ -3,6 +3,7 @@ package clauderc.app
 import clauderc.app.ui.theme.page
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
@@ -20,7 +22,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageShader
 import androidx.compose.ui.graphics.ShaderBrush
@@ -31,6 +36,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ApplicationProvider
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -158,6 +164,7 @@ class ScreensTest {
         nav: Int? = null,
         look: UiStyle = UiStyle.Clear,
         navPlate: PlateNavStyle = PlateNavStyle.Float,
+        pendingTitle: String = "clauderc 协议",
         after: Long = 1_000,
         fresh: Boolean = false,
         open: (() -> Unit)? = null,
@@ -167,7 +174,7 @@ class ScreensTest {
         style = look
         plateNav = navPlate
         val samplePending = listOf(
-            PendingEntry("m-1", "工作室 Mac mini", session("s-need", "clauderc 协议", SessionState.Pending, "default")),
+            PendingEntry("m-1", "工作室 Mac mini", session("s-need", pendingTitle, SessionState.Pending, "default")),
             PendingEntry("m-1", "工作室 Mac mini", session("s-need-2", "周报整理", SessionState.Pending, "default")),
         )
         content = {
@@ -776,11 +783,19 @@ class ScreensTest {
     }
 
     /**
-     * README's screenshots in 贴纸, light and dark: one made-up developer's day on 「书房的 Mac」 with
-     * shop-web, shop-api and infra, every time counted back from now so the rows read as minutes ago.
+     * README's screenshots in 浮墨 (Ink), plus the four-style showcase strip, light and dark:
+     * one made-up developer's day on 「书房的 Mac」 with shop-web, shop-api and infra.
      */
     @Test fun readmeShots() {
         compose.mainClock.autoAdvance = false
+        // Verify the adaptive launcher icon inflates and renders cleanly.
+        val appCtx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val launcherIcon = requireNotNull(appCtx.getDrawable(R.mipmap.ic_launcher)) { "ic_launcher missing" }
+        val iconBmp = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+        launcherIcon.setBounds(0, 0, 256, 256)
+        launcherIcon.draw(android.graphics.Canvas(iconBmp))
+        File(out, "app-icon-android.png").outputStream().use { iconBmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+
         val now = Instant.now()
         val web = "/Users/me/code/shop-web"
         val api = "/Users/me/code/shop-api"
@@ -856,14 +871,21 @@ class ScreensTest {
         )
         val timeout = ChatUiState(
             session = list.sessions[3], loading = false, state = SessionState.Working, workingSinceMillis = System.currentTimeMillis() - 84_000,
-            model = "claude-opus-5-5", permissionMode = "default", activity = "Investigating… (1m 24s · ↓ 3.2k tokens)",
+            model = "claude-opus-5-5", permissionMode = "default", activity = "排查中… (1m 24s · ↓ 3.2k tokens)",
+            tasks = listOf(
+                clauderc.app.protocol.ChatTask("1", "筛出近三天异常超时订单", status = "completed"),
+                clauderc.app.protocol.ChatTask("2", "排查微信回调与超时状态机", activeForm = "正在排查支付回调与超时状态机", status = "in_progress"),
+                clauderc.app.protocol.ChatTask("3", "补回调幂等与边界单测", status = "pending"),
+            ),
             items = listOf(
-                ChatItem(1, ItemKind.USER, text = "这两天有订单付了钱还显示超时，查一下原因。"),
-                ChatItem(2, ItemKind.ASSISTANT, text = "我先让一个子代理把最近三天超时的订单列出来。"),
-                agentCall(3, clauderc.app.protocol.Subagent("a0", "general-purpose", "列出最近三天超时的订单", running = false, startedAt = now.minusSeconds(300))),
-                ChatItem(4, ItemKind.ASSISTANT, text = "超时的订单都在晚上 8 点到 10 点，全走的微信支付。我再派两个子代理，分头查回调日志和订单状态机。"),
-                agentCall(5, subagents[0]),
-                agentCall(6, subagents[1]),
+                ChatItem(1, ItemKind.USER, text = "线上告警说昨晚 8 点到 10 点有 14 笔已支付订单被判超时。"),
+                ChatItem(2, ItemKind.ASSISTANT, text = "收到，我先对照订单表和支付流水缩小范围。"),
+                ChatItem(3, ItemKind.USER, text = "这两天有订单付了钱还显示超时，查一下原因。"),
+                ChatItem(4, ItemKind.ASSISTANT, text = "我先让一个子代理把最近三天超时的订单列出来。"),
+                agentCall(5, clauderc.app.protocol.Subagent("a0", "general-purpose", "列出最近三天超时的订单", running = false, startedAt = now.minusSeconds(300))),
+                ChatItem(6, ItemKind.ASSISTANT, text = "超时的订单都在晚上 8 点到 10 点，全走的微信支付。我再派两个子代理，分头查回调日志和订单状态机。"),
+                agentCall(7, subagents[0]),
+                agentCall(8, subagents[1]),
             ),
         )
         fun commit(hash: String, parents: List<String>, hoursAgo: Long, subject: String, lane: Int, edges: List<Pair<Int, Int>>, refs: List<Ref>? = null) =
@@ -878,7 +900,7 @@ class ScreensTest {
             commit("0fa93d5", listOf("6e2b81c"), 74, "购物车数量为 0 时不能下单", 0, listOf(0 to 0)),
             commit("6e2b81c", emptyList(), 98, "接入前端错误监控", 0, emptyList()),
         )
-        val git = GitUiState(dir = web, status = GitStatusResponse("main", "origin/main", 0, 0), commits = commits)
+        val git = GitUiState(dir = web, status = GitStatusResponse("main", "origin/main", 2, 0), commits = commits)
 
         for (isDark in listOf(false, true)) {
             val tail = if (isDark) "-dark" else ""
@@ -888,12 +910,25 @@ class ScreensTest {
             shot("readme-agents$tail", isDark, look = s, fresh = true) { ChatScreen(timeout, ChatActions()) }
             shot("readme-git$tail", isDark, nav = 1, look = s, fresh = true) { GitScreen(git, GitActions()) }
             cover(tail, isDark)
+
+            // Four-style comparison strip: 浮墨 · 素卡 · 清玻 · 印版
+            for (st in UiStyle.entries) {
+                shot("readme-style-${st.name.lowercase()}$tail", isDark, nav = 0, look = st, pendingTitle = "结算页改版", fresh = true) {
+                    SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {})
+                }
+            }
+            stylesCover(tail, isDark)
         }
     }
 
-    private fun cover(tail: String, isDark: Boolean) {
-        val phones = listOf("sessions" to 96, "permission" to 44, "agents" to 136, "git" to 70).map { (name, top) ->
-            val shot = android.graphics.BitmapFactory.decodeFile(File(out, "readme-$name$tail.png").path)
+    private fun composeCoverCanvas(
+        filename: String,
+        isDark: Boolean,
+        canvasHeight: Int,
+        entries: List<Pair<String, Int>>,
+    ) {
+        val phones = entries.map { (file, top) ->
+            val shot = android.graphics.BitmapFactory.decodeFile(File(out, file).path)
             val half = Bitmap.createScaledBitmap(shot, 720, shot.height * 720 / shot.width, true)
             Bitmap.createScaledBitmap(half, 360, half.height / 2, true).asImageBitmap() to top
         }
@@ -902,14 +937,55 @@ class ScreensTest {
         style = UiStyle.Ink
         content = {
             view = LocalView.current
+            val backdrop = if (isDark) Color(0xFF0A0A0C) else Color(0xFFF2F0EA)
+            val bezelBg = if (isDark) Color(0xFF1A1A1E) else Color(0xFFFFFFFF)
+            val bezelRim = if (isDark) Color(0x24FFFFFF) else Color(0x16000000)
             CompositionLocalProvider(LocalDensity provides Density(1f)) {
-                Box(Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).requiredSize(1800.dp, 820.dp).page()) {
+                Box(
+                    Modifier
+                        .wrapContentSize(Alignment.TopStart, unbounded = true)
+                        .requiredSize(1800.dp, canvasHeight.dp)
+                        .background(backdrop)
+                        .drawBehind {
+                            drawRect(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        Color(0xFFD97757).copy(alpha = if (isDark) 0.11f else 0.085f),
+                                        Color.Transparent,
+                                    ),
+                                    center = Offset(size.width * 0.28f, size.height * 0.18f),
+                                    radius = size.width * 0.44f,
+                                ),
+                            )
+                            drawRect(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        (if (isDark) Color(0xFFFFFFFF) else Color(0xFFD97757)).copy(alpha = if (isDark) 0.045f else 0.055f),
+                                        Color.Transparent,
+                                    ),
+                                    center = Offset(size.width * 0.78f, size.height * 0.84f),
+                                    radius = size.width * 0.40f,
+                                ),
+                            )
+                        },
+                ) {
                     phones.forEachIndexed { i, (phone, top) ->
-                        Box(
-                            Modifier.offset((85 + i * 420).dp, (top - 5).dp).size(370.dp, (phone.height + 10).dp)
-                                .tileSurface(Clauderc.colors.card, 46.dp).padding(5.dp)
-                                .drawBehind { drawRoundRect(ShaderBrush(ImageShader(phone)), cornerRadius = CornerRadius(40f)) },
-                        )
+                        val outerShape = RoundedCornerShape(46.dp)
+                        val bezelMod = Modifier
+                            .offset((84 + i * 420).dp, (top - 6).dp)
+                            .size(372.dp, (phone.height + 12).dp)
+                            .then(
+                                if (isDark) {
+                                    Modifier.shadow(28.dp, outerShape, ambientColor = Color.Black, spotColor = Color.Black)
+                                } else {
+                                    Modifier.shadow(18.dp, outerShape, ambientColor = Color(0x22000000), spotColor = Color(0x22000000))
+                                },
+                            )
+                            .background(bezelBg, outerShape)
+                            .border(1.5.dp, bezelRim, outerShape)
+                            .padding(6.dp)
+                            .drawBehind { drawRoundRect(ShaderBrush(ImageShader(phone)), cornerRadius = CornerRadius(40f)) }
+                        Box(bezelMod)
                     }
                 }
             }
@@ -917,9 +993,32 @@ class ScreensTest {
         compose.waitForIdle()
         compose.mainClock.advanceTimeBy(100)
         compose.waitForIdle()
-        val bmp = Bitmap.createBitmap(1800, 820, Bitmap.Config.ARGB_8888)
+        val bmp = Bitmap.createBitmap(1800, canvasHeight, Bitmap.Config.ARGB_8888)
         view!!.draw(android.graphics.Canvas(bmp))
-        File(out, "readme-cover$tail.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        File(out, filename).outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    private fun cover(tail: String, isDark: Boolean) {
+        composeCoverCanvas(
+            filename = "readme-cover$tail.png",
+            isDark = isDark,
+            canvasHeight = 860,
+            entries = listOf(
+                "readme-sessions$tail.png" to 56,
+                "readme-permission$tail.png" to 24,
+                "readme-agents$tail.png" to 66,
+                "readme-git$tail.png" to 40,
+            ),
+        )
+    }
+
+    private fun stylesCover(tail: String, isDark: Boolean) {
+        composeCoverCanvas(
+            filename = "readme-styles$tail.png",
+            isDark = isDark,
+            canvasHeight = 840,
+            entries = UiStyle.entries.map { "readme-style-${it.name.lowercase()}$tail.png" to 30 },
+        )
     }
 
     /** Variants across the four styles. */
@@ -1081,6 +1180,13 @@ class ScreensTest {
             shot("$name-04c-create-note$tail", isDark, look = s) { CreateSessionScreen(createNote, {}, {}, {}, {}, {}, {}, {}) }
             shot("$name-05-git$tail", isDark, nav = 1, look = s) { GitScreen(git, GitActions(), pendingCount = 2) }
             shot("$name-06-status$tail", isDark, nav = 1, look = s) { GitScreen(git.copy(tab = GitTab.Status, busySession = "clauderc 协议"), GitActions(), pendingCount = 2) }
+            if (!isDark || s == UiStyle.Ink) {
+                shot("$name-06b-commit-sheet$tail", isDark, nav = 1, look = s, fresh = true, open = {
+                    compose.onNodeWithTag("gitCommitBar").performClick()
+                }) {
+                    GitScreen(git.copy(tab = GitTab.Status), GitActions(), pendingCount = 2)
+                }
+            }
             shot("$name-07-commit$tail", isDark, look = s) { CommitScreen("a1f3c92", Loadable(show), onBack = {}, onOpenFile = {}) }
             shot("$name-08-diff$tail", isDark, look = s) { DiffScreen("envelope.go", "a1f3c92", Loadable(GitDiffResponse("envelope.go", patch = patch)), onBack = {}) }
             shot("$name-09-pair$tail", isDark, look = s) { PairScreen(PairUiState.Scanning, {}, {}, scanner = { _, _ -> }) }

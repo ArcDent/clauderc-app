@@ -19,6 +19,12 @@ object Symbols {
     val Backspace by lazy { symbol("backspace", SymbolPaths.backspace) }
     val CallSplit by lazy { symbol("call_split", SymbolPaths.callSplit) }
     val Check by lazy { symbol("check", SymbolPaths.check) }
+    val CheckCircle by lazy {
+        symbol(
+            "check_circle",
+            "m424-312.31 268.92-268.92-42.15-42.15L424-396.62l-114-114L267.85-468.46 424-312.31ZM480.07-100q-78.84 0-148.21-29.92t-120.68-81.21q-51.31-51.29-81.25-120.63Q100-401.1 100-479.93q0-78.84 29.92-148.21t81.21-120.68q51.29-51.31 120.63-81.25Q401.1-860 479.93-860q78.84 0 148.21 29.92t120.68 81.21q51.31 51.29 81.25 120.63Q860-558.9 860-480.07q0 78.84-29.92 148.21t-81.21 120.68q-51.29 51.31-120.63 81.25Q558.9-100 480.07-100Zm-.07-60q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Z",
+        )
+    }
     val CheckBox by lazy { symbol("check_box", SymbolPaths.checkBox) }
     val CheckBoxOutlineBlank by lazy { symbol("check_box_outline_blank", SymbolPaths.checkBoxOutlineBlank) }
     val ChevronRight by lazy { symbol("chevron_right", SymbolPaths.chevronRight) }
@@ -64,6 +70,7 @@ object Symbols {
     val RadioChecked by lazy { symbol("radio_button_checked", SymbolPaths.radioButtonChecked) }
     val RadioUnchecked by lazy { symbol("radio_button_unchecked", SymbolPaths.radioButtonUnchecked) }
     val Refresh by lazy { symbol("refresh", SymbolPaths.refresh) }
+    val Remove by lazy { symbol("remove", "M220-450v-60h520v60H220Z") }
     val Settings by lazy { symbol("settings", SymbolPaths.settings) }
     val SettingsFilled by lazy { symbol("settings_filled", SymbolPaths.settingsFilled) }
     val Style by lazy { symbol("style", SymbolPaths.style) }
