@@ -1,8 +1,12 @@
 package clauderc.app.chat
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.click
@@ -1590,5 +1594,52 @@ class ChatScreenTest {
         compose.waitForIdle()
         compose.onNodeWithTag("tileChatPillGroup").assertIsDisplayed()
         compose.onNodeWithTag("tileChatTray").assertIsDisplayed()
+    }
+
+    @Test fun floatingPendingPanelStaysBelowTopBarAndKeepsSafeBottomInsetForOtherInput() {
+        val longQuestion = Pending(
+            toolUseId = "q-tall",
+            kind = PendingKind.QUESTION,
+            questions = listOf(
+                Question(
+                    question = "新的图标预览页发到哪里比较方便？",
+                    options = listOf(
+                        Option("发到 display.arcdent.me（推荐）", "照 notify 页的做法放到 tccloud 的 /opt/engine-3d/site/icon/，地址 https://display.arcdent.me/icon/，公开可访问、无敏感内容。会先备份再传。"),
+                        Option("只留本地文件", "页面和素材留在 /srv/ops/reports/icon-redesign/，你自己电脑上打开，不上公网。"),
+                        Option("发到内网 arclinux", "传到 arclinux 的静态目录，只走 tailnet，不暴露公网。"),
+                    ),
+                ),
+            ),
+        )
+        var style by mutableStateOf(UiStyle.Ink)
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = style) {
+                // Short 420dp viewport simulates the soft keyboard shrinking available height.
+                Box(Modifier.size(width = 360.dp, height = 420.dp)) {
+                    ChatScreen(baseState().copy(pending = longQuestion), ChatActions())
+                }
+            }
+        }
+
+        for (ui in listOf(UiStyle.Ink, UiStyle.Clear)) {
+            style = ui
+            compose.waitForIdle()
+            val topBar = compose.onNodeWithTag("chatTopBar").getBoundsInRoot()
+            val panelNodes = compose.onAllNodesWithTag("pendingPanel")
+            val panel = panelNodes[panelNodes.fetchSemanticsNodes().lastIndex].getBoundsInRoot()
+            assertTrue("$ui: pendingPanel top (${panel.top}) must stay at or below topBar bottom (${topBar.bottom})", panel.top >= topBar.bottom)
+            if (ui == UiStyle.Ink) {
+                val island = compose.onNodeWithTag("inkChatIsland").getBoundsInRoot()
+                assertTrue("Ink: inkChatIsland top (${island.top}) must stay at or below topBar bottom (${topBar.bottom})", island.top >= topBar.bottom)
+            }
+
+            compose.onNodeWithText("其他").performScrollTo().performClick()
+            compose.waitForIdle()
+            val input = compose.onNode(hasSetTextAction()).performScrollTo().getBoundsInRoot()
+            val panelAfter = panelNodes[panelNodes.fetchSemanticsNodes().lastIndex].getBoundsInRoot()
+            assertTrue("$ui: pendingPanel stays below topBar after opening Other", panelAfter.top >= topBar.bottom)
+            val bottomGap = panelAfter.bottom - input.bottom
+            assertTrue("$ui: expected >= 13dp safe bottom inset under UnderlineField, got $bottomGap", bottomGap >= 13.dp)
+        }
     }
 }

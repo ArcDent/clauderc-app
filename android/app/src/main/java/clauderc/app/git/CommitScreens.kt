@@ -61,6 +61,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -489,6 +490,57 @@ fun diffLineColors(kind: DiffKind, c: ClaudercColors): Pair<Color, Color> = when
     DiffKind.Context -> Color.Transparent to c.fg
 }
 
+/** Maximum expanded display characters per diff line before truncating with an omitted-count suffix. */
+const val MAX_DIFF_LINE_CHARS = 800
+
+/** Maximum horizontal width in pixels for the diff LazyColumn, safely below Compose Constraints' 15-bit bound (32766). */
+const val MAX_DIFF_WIDTH_PX = 24_000
+
+/** Maximum consecutive add/del lines per lazy diff group chunk so huge diffs stay virtualized and within height limits. */
+const val MAX_DIFF_GROUP_CHUNK_LINES = 64
+
+/** Expands tabs to 4 spaces and caps ultra-long single lines so minified/base64 diffs never stall or overflow layout. */
+fun formatDiffLine(raw: String, maxChars: Int = MAX_DIFF_LINE_CHARS): String {
+    if (raw.isEmpty()) return ""
+    val limit = maxChars.coerceAtLeast(1)
+    val out = StringBuilder(minOf(raw.length, limit))
+    var i = 0
+    while (i < raw.length) {
+        val ch = raw[i]
+        if (ch == '\t') {
+            if (out.length + 4 > limit) break
+            out.append("    ")
+            i++
+        } else if (ch.isHighSurrogate() && i + 1 < raw.length && raw[i + 1].isLowSurrogate()) {
+            if (out.length + 2 > limit) break
+            out.append(ch).append(raw[i + 1])
+            i += 2
+        } else {
+            if (out.length + 1 > limit) break
+            out.append(ch)
+            i++
+        }
+    }
+    val omitted = raw.length - i
+    if (omitted <= 0) return out.toString()
+    return "$out ${"…（已省略后 %,d 字符）".format(omitted)}"
+}
+
+/** Clamps the diff list's pixel width so Compose Constraints can never overflow on ultra-wide lines. */
+fun clampDiffContentWidthPx(
+    viewportWidthPx: Int,
+    measuredLineWidthPx: Int,
+    extraWidthPx: Int,
+    maxWidthPx: Int = MAX_DIFF_WIDTH_PX,
+): Int {
+    val floor = viewportWidthPx.coerceAtLeast(0)
+    val cap = maxOf(floor, maxWidthPx.coerceAtLeast(0))
+    val desired = (measuredLineWidthPx.coerceAtLeast(0).toLong() + extraWidthPx.coerceAtLeast(0).toLong())
+        .coerceAtMost(cap.toLong())
+        .toInt()
+    return maxOf(floor, desired)
+}
+
 /** Structured blocks for bordered, background-free diff rendering (demo.html K.diffHTML). */
 sealed interface DiffBlock {
     data class Hunk(val line: DiffLine, val first: Boolean) : DiffBlock
@@ -498,11 +550,16 @@ sealed interface DiffBlock {
         val lines: List<DiffLine>,
         val joinPrev: Boolean = false,
         val joinNext: Boolean = false,
+        val continuesFromPrev: Boolean = false,
+        val continuesToNext: Boolean = false,
     ) : DiffBlock
 }
 
-/** Groups consecutive Del lines and consecutive Add lines, linking directly adjacent Del+Add seams. */
-fun groupDiffLines(lines: List<DiffLine>): List<DiffBlock> {
+/**
+ * Groups consecutive Del lines and consecutive Add lines, linking directly adjacent Del+Add seams,
+ * and splits oversized consecutive groups into seamless [chunkSize]-line slices for LazyColumn virtualization.
+ */
+fun groupDiffLines(lines: List<DiffLine>, chunkSize: Int = MAX_DIFF_GROUP_CHUNK_LINES): List<DiffBlock> {
     val raw = mutableListOf<DiffBlock>()
     var i = 0
     while (i < lines.size) {
@@ -527,14 +584,36 @@ fun groupDiffLines(lines: List<DiffLine>): List<DiffBlock> {
             }
         }
     }
-    return raw.mapIndexed { idx, block ->
-        if (block !is DiffBlock.Group) return@mapIndexed block
+    val step = chunkSize.coerceAtLeast(1)
+    val out = ArrayList<DiffBlock>(raw.size)
+    raw.forEachIndexed { idx, block ->
+        if (block !is DiffBlock.Group) {
+            out += block
+            return@forEachIndexed
+        }
         val prev = raw.getOrNull(idx - 1) as? DiffBlock.Group
         val next = raw.getOrNull(idx + 1) as? DiffBlock.Group
         val joinPrev = block.kind == DiffKind.Add && prev?.kind == DiffKind.Del
         val joinNext = block.kind == DiffKind.Del && next?.kind == DiffKind.Add
-        block.copy(joinPrev = joinPrev, joinNext = joinNext)
+        if (block.lines.size <= step) {
+            out += block.copy(joinPrev = joinPrev, joinNext = joinNext)
+        } else {
+            val chunks = block.lines.chunked(step)
+            chunks.forEachIndexed { ci, slice ->
+                val first = ci == 0
+                val last = ci == chunks.lastIndex
+                out += DiffBlock.Group(
+                    kind = block.kind,
+                    lines = slice,
+                    joinPrev = if (first) joinPrev else false,
+                    joinNext = if (last) joinNext else false,
+                    continuesFromPrev = !first,
+                    continuesToNext = !last,
+                )
+            }
+        }
     }
+    return out
 }
 
 private val LineNoWidth = 34.dp
@@ -575,7 +654,8 @@ private fun DiffBody(state: Loadable<GitDiffResponse>, lines: List<DiffLine>, fr
     val ui = Clauderc.style
     val card = Clauderc.look.cards
     val diff = state.value
-    val blocks = remember(lines) { groupDiffLines(lines) }
+    val formatted = remember(lines) { lines.map { it.copy(text = formatDiffLine(it.text)) } }
+    val blocks = remember(formatted) { groupDiffLines(formatted) }
     var expanded by remember { mutableStateOf(false) }
     val changed = lines.count { it.kind != DiffKind.Hunk }
     when {
@@ -606,18 +686,28 @@ private fun DiffBody(state: Loadable<GitDiffResponse>, lines: List<DiffLine>, fr
             }
             val measurer = rememberTextMeasurer()
             val density = LocalDensity.current
-            val longestLine = remember(lines) {
-                lines.maxByOrNull { it.text.replace("\t", "    ").length }?.text?.replace("\t", "    ").orEmpty()
+            val longestLine = remember(formatted) {
+                formatted.maxByOrNull { it.text.length }?.text.orEmpty()
             }
-            val longestCodeDp = remember(longestLine, density) {
-                if (longestLine.isEmpty()) 0.dp
-                else with(density) {
-                    measurer.measure(longestLine, TextStyle(fontFamily = MonoFamily, fontSize = 11.5.sp), softWrap = false).size.width.toDp()
-                }
+            val longestCodePx = remember(longestLine, density) {
+                if (longestLine.isEmpty()) 0
+                else measurer.measure(
+                    longestLine,
+                    TextStyle(fontFamily = MonoFamily, fontSize = 11.5.sp),
+                    softWrap = false,
+                    maxLines = 1,
+                    constraints = Constraints(maxWidth = MAX_DIFF_WIDTH_PX),
+                ).size.width
             }
             AnimatedVisibility(shown, enter = fadeIn(Motion.enter())) {
                 BoxWithConstraints(frame.fillMaxWidth().then(if (framed) Modifier.fillMaxHeight() else Modifier)) {
-                    val contentWidth = maxOf(maxWidth, longestCodeDp + 136.dp)
+                    val contentWidth = with(density) {
+                        clampDiffContentWidthPx(
+                            viewportWidthPx = maxWidth.roundToPx(),
+                            measuredLineWidthPx = longestCodePx,
+                            extraWidthPx = 136.dp.roundToPx(),
+                        ).toDp()
+                    }
                     Box(Modifier.fillMaxWidth().then(if (framed) Modifier.fillMaxHeight() else Modifier).horizontalScroll(rememberScrollState())) {
                         LazyColumn(
                             Modifier
@@ -679,13 +769,14 @@ private fun DiffHunkRow(text: String, first: Boolean) {
             }
             .padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
-        Text(text, fontFamily = MonoFamily, fontSize = 11.sp, color = c.fg3, softWrap = false)
+        Text(text, fontFamily = MonoFamily, fontSize = 11.sp, color = c.fg3, softWrap = false, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
 /**
  * Consecutive deleted or added lines framed in a background-free bordered box with a 3dp solid left rail.
- * Adjacent Del + Add groups meet along a single hairline divider with zero vertical gap (demo.html .dgrp).
+ * Adjacent Del + Add groups meet along a single hairline divider with zero vertical gap (demo.html .dgrp),
+ * and oversized groups chunk into seamless continuations without breaking borders or the left rail.
  */
 @Composable
 private fun DiffGroupBox(block: DiffBlock.Group) {
@@ -694,10 +785,12 @@ private fun DiffGroupBox(block: DiffBlock.Group) {
     val accent = if (block.kind == DiffKind.Del) c.delFg else c.addFg
     val borderColor = accent.copy(alpha = 0.58f)
     val radius = if (plate) 0.dp else 8.dp
-    val topR = if (block.joinPrev) 0.dp else radius
-    val bottomR = if (block.joinNext) 0.dp else radius
+    val openTop = block.joinPrev || block.continuesFromPrev
+    val openBottom = block.joinNext || block.continuesToNext
+    val topR = if (openTop) 0.dp else radius
+    val bottomR = if (openBottom) 0.dp else radius
     val shape = RoundedCornerShape(topStart = topR, topEnd = topR, bottomStart = bottomR, bottomEnd = bottomR)
-    val tag = if (block.kind == DiffKind.Del) "diffDelGroup" else "diffAddGroup"
+    val tag = if (block.continuesFromPrev) null else if (block.kind == DiffKind.Del) "diffDelGroup" else "diffAddGroup"
 
     Column(
         Modifier
@@ -705,8 +798,8 @@ private fun DiffGroupBox(block: DiffBlock.Group) {
             .padding(
                 start = 6.dp,
                 end = 6.dp,
-                top = if (block.joinPrev) 0.dp else 4.dp,
-                bottom = if (block.joinNext) 0.dp else 4.dp,
+                top = if (openTop) 0.dp else 4.dp,
+                bottom = if (openBottom) 0.dp else 4.dp,
             )
             .clip(shape)
             .drawBehind {
@@ -724,9 +817,9 @@ private fun DiffGroupBox(block: DiffBlock.Group) {
                     bottomLeft = CornerRadius(br, br),
                 )
                 val outline = Path().apply { addRoundRect(rr) }
-                // Outer 1dp border clipped so joining Del+Add seams never double-stroke.
-                val clipTop = if (block.joinPrev) stroke else 0f
-                val clipBottom = if (block.joinNext) h - stroke else h
+                // Outer 1dp border clipped so joining Del+Add seams and chunked continuations never double-stroke.
+                val clipTop = if (openTop) stroke else 0f
+                val clipBottom = if (openBottom) h - stroke else h
                 val clipRect = Path().apply { addRect(Rect(0f, clipTop, w, clipBottom)) }
                 clipPath(clipRect) {
                     drawPath(outline, borderColor, style = Stroke(stroke))
@@ -738,8 +831,11 @@ private fun DiffGroupBox(block: DiffBlock.Group) {
                 // Solid 3dp left rail in red/green.
                 drawRect(accent, Offset.Zero, Size(rail, h))
             }
-            .padding(vertical = 2.dp)
-            .testTag(tag),
+            .padding(
+                top = if (block.continuesFromPrev) 0.dp else 2.dp,
+                bottom = if (block.continuesToNext) 0.dp else 2.dp,
+            )
+            .then(if (tag != null) Modifier.testTag(tag) else Modifier),
     ) {
         block.lines.forEach { line ->
             DiffLineRow(line, inGroup = true, groupColor = accent)
@@ -780,12 +876,14 @@ private fun DiffLineRow(l: DiffLine, inGroup: Boolean, groupColor: Color?) {
         )
         Spacer(Modifier.width(SignCodeGap))
         Text(
-            l.text.replace("\t", "    "),
+            l.text,
             modifier = Modifier.padding(end = 12.dp),
             fontFamily = MonoFamily,
             fontSize = 11.5.sp,
             color = fg,
             softWrap = false,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             lineHeight = 1.68.em,
         )
     }
