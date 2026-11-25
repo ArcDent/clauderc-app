@@ -18,6 +18,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -63,8 +64,8 @@ class LiveReplyTest {
     private fun show(initial: ChatUiState) {
         state = initial
         compose.mainClock.autoAdvance = false
-        // 格栅 stacks the input under the list, so the list's bottom is where the messages end.
-        compose.setContent { ClaudercTheme(darkTheme = false, style = UiStyle.Grid) { ChatScreen(state, ChatActions()) } }
+        // 印版 stacks the input under the list, so the list's bottom is where the messages end.
+        compose.setContent { ClaudercTheme(darkTheme = false, style = UiStyle.Plate) { ChatScreen(state, ChatActions()) } }
         compose.mainClock.advanceTimeByFrame()
     }
 
@@ -261,7 +262,7 @@ class LiveReplyTest {
         compose.mainClock.advanceTimeBy(durM)
         compose.onNodeWithText("Incubating…").assertIsDisplayed()
         compose.onNodeWithText(" (1m 17s · ↓ 7.5k tokens)").assertIsDisplayed()
-        compose.onNodeWithText("中断").assertIsDisplayed()
+        compose.onNodeWithContentDescription("中断").assertIsDisplayed()
         compose.onNode(hasText("工作中", substring = true)).assertDoesNotExist()
         fun star() = compose.onNodeWithTag("cliStar").captureToImage().asAndroidBitmap()
         val a = star()
@@ -273,7 +274,7 @@ class LiveReplyTest {
         show(ChatUiState(loading = false, items = items(4), state = SessionState.Working, workingSinceMillis = System.currentTimeMillis() - 42_000))
         compose.mainClock.advanceTimeBy(durM)
         compose.onNode(hasText("工作中 · ", substring = true)).assertIsDisplayed()
-        compose.onNodeWithText("中断").assertIsDisplayed()
+        compose.onNodeWithContentDescription("中断").assertIsDisplayed()
         fun star() = compose.onNodeWithTag("cliStar").captureToImage().asAndroidBitmap()
         val a = star()
         compose.mainClock.advanceTimeBy(130)

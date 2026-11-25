@@ -61,16 +61,16 @@ class GlyphsTest {
         assertTrue("the ring moved $moves times in 12 frames", moves in 2..6)
     }
 
-    /** 格栅's star steps through Claude Code's ten frames every 1.2s and comes back to the dot. */
-    @Test fun gridStarStepsLikeClaudeCode() {
+    /** 印版's star steps through Claude Code's ten frames every 1.2s and comes back to the dot. */
+    @Test fun plateStarStepsLikeClaudeCode() {
         val frames = (0 until 10).map { CliGlyphs.star(it * 120L + 60) }
         assertEquals(listOf("·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"), frames)
         assertEquals("·", CliGlyphs.star(1_200))
         assertEquals("✢", CliGlyphs.star(1_200 + 120))
     }
 
-    /** 格栅's spinner turns the braille dots in ten steps of 80ms. */
-    @Test fun gridSpinnerTurnsBrailleDots() {
+    /** 印版's spinner turns the braille dots in ten steps of 80ms. */
+    @Test fun plateSpinnerTurnsBrailleDots() {
         val frames = (0 until 10).map { CliGlyphs.braille(it * 80L) }
         assertEquals(listOf("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"), frames)
         assertEquals("⠋", CliGlyphs.braille(800))
@@ -78,8 +78,8 @@ class GlyphsTest {
         assertEquals("⠙", CliGlyphs.braille(880))
     }
 
-    /** 格栅's 「等你」 dot is full for 61% of each 1.2s and faint for the rest. */
-    @Test fun gridNeedDotBlinks() {
+    /** 印版's 「等你」 dot is full for 61% of each 1.2s and faint for the rest. */
+    @Test fun plateNeedDotBlinks() {
         assertEquals(1f, CliGlyphs.blink(0), 0f)
         assertEquals(1f, CliGlyphs.blink(731), 0f)
         assertEquals(0.25f, CliGlyphs.blink(732), 0f)
@@ -88,10 +88,10 @@ class GlyphsTest {
     }
 
     /** The star redraws its own canvas when the frame changes, and only then. */
-    @Test fun gridStarRedrawsOnItsSteps() {
+    @Test fun plateStarRedrawsOnItsSteps() {
         compose.mainClock.autoAdvance = false
         compose.setContent {
-            ClaudercTheme(darkTheme = false, style = UiStyle.Grid) {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Plate) {
                 Box(Modifier.testTag("star").size(48.dp).background(Color.White), contentAlignment = Alignment.Center) { StatusGlyph(Glyph.Work) }
             }
         }

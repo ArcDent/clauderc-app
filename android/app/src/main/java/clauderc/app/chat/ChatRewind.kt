@@ -67,7 +67,7 @@ import clauderc.app.ui.components.MenuItem
 import clauderc.app.ui.components.SheetHead
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.TextTone
-import clauderc.app.ui.components.sticker
+import androidx.compose.ui.draw.clip
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
@@ -194,8 +194,8 @@ private fun RewindButton(onClick: () -> Unit, progress: () -> Float, modifier: M
         contentAlignment = Alignment.Center,
     ) {
         when (Clauderc.style) {
-            UiStyle.Sticker -> {
-                val fill = lerp(c.card, c.accent, on)
+            UiStyle.Tile, UiStyle.Ink -> {
+                val fill = lerp(if (Clauderc.style == UiStyle.Ink) c.float else c.card, c.accent, on)
                 Box(
                     Modifier
                         .graphicsLayer {
@@ -205,23 +205,21 @@ private fun RewindButton(onClick: () -> Unit, progress: () -> Float, modifier: M
                             scaleY = scaleX
                         }
                         .size(36.dp)
-                        .sticker(fill, c.ink, 18.dp),
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(fill)
+                        .then(if (Clauderc.style == UiStyle.Ink) Modifier.border(1.dp, c.edge, androidx.compose.foundation.shape.CircleShape) else Modifier),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Symbols.HistoryRegular, contentDescription = null, tint = lerp(c.fg, c.onAccent, on), modifier = Modifier.size(20.dp))
                 }
             }
-            UiStyle.Grid -> {
-                // A one-line bubble: its line at 15sp × 1.55 and 10dp above and below. The text rounds its line
-                // to whole pixels, so beside a one-line bubble the square takes the bubble's own height.
+            UiStyle.Plate -> {
                 val side = with(LocalDensity.current) { (15 * 1.55f).sp.toDp() } + 20.dp
                 val square = Modifier.heightIn(max = side).fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true)
                 Box(square.background(c.fg.copy(alpha = on)).border(1.5.dp, lerp(c.surface2, c.fg, on)), contentAlignment = Alignment.Center) {
                     Icon(Symbols.History, contentDescription = null, tint = lerp(c.fg2, c.bg, on), modifier = Modifier.size(20.dp))
                 }
             }
-            // rotationZ turns clockwise, so coming back from 120° the icon turns the other way, as a clock set back.
-            // The tint is the icon's 22dp plus 8dp all round (border-radius: 50%; box-shadow: 0 0 0 8px).
             UiStyle.Clear -> Icon(
                 Symbols.HistoryRegular,
                 contentDescription = null,
@@ -267,11 +265,11 @@ internal fun RewindSheet(item: ChatItem, files: List<String>, onDismiss: () -> U
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     var mode by remember { mutableStateOf(if (files.isEmpty()) RewindRestore.CONVERSATION else RewindRestore.BOTH) }
-    val grid = Clauderc.style == UiStyle.Grid
+    val plate = Clauderc.style == UiStyle.Plate
     val (rule, ruleWidth) = when (Clauderc.style) {
         UiStyle.Clear -> c.surface2 to 2.dp
-        UiStyle.Grid -> c.fg3 to 2.dp
-        UiStyle.Sticker -> c.accent to 3.dp
+        UiStyle.Plate -> c.fg to 2.dp
+        UiStyle.Tile, UiStyle.Ink -> c.accent to 3.dp
     }
     ClaudercSheet(onDismiss = onDismiss) {
         SheetHead(
@@ -286,8 +284,8 @@ internal fun RewindSheet(item: ChatItem, files: List<String>, onDismiss: () -> U
                 .padding(start = 12.dp)
                 .testTag("rewindQuote"),
             color = c.fg2,
-            fontSize = if (grid) 13.sp else 14.sp,
-            fontFamily = if (grid) MonoFamily else null,
+            fontSize = if (plate) 13.sp else 14.sp,
+            fontFamily = if (plate) MonoFamily else null,
             lineHeight = 1.55.em,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,

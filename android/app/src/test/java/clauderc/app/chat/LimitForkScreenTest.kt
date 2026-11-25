@@ -46,7 +46,7 @@ class LimitForkScreenTest {
     )
 
     private fun show(state: ChatUiState, actions: ChatActions = ChatActions()) {
-        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, actions) } }
+        compose.setContent { ClaudercTheme(darkTheme = false, style = clauderc.app.data.UiStyle.Clear) { ChatScreen(state, actions) } }
     }
 
     private fun openMenu() {
@@ -100,7 +100,7 @@ class LimitForkScreenTest {
 
     @Test fun theDialogClosesOnceTheSessionIsCreated() {
         var state by mutableStateOf(base)
-        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, ChatActions()) } }
+        compose.setContent { ClaudercTheme(darkTheme = false, style = clauderc.app.data.UiStyle.Clear) { ChatScreen(state, ChatActions()) } }
         openMenu()
         compose.onNodeWithText("Worktree").performClick()
         compose.waitForIdle()

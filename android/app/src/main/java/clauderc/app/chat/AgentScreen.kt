@@ -1,7 +1,5 @@
 package clauderc.app.chat
 
-import clauderc.app.ui.components.LoadingArt
-import clauderc.app.ui.components.LoadingCover
 import clauderc.app.ui.theme.page
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -32,6 +30,7 @@ import clauderc.app.ui.components.AppBar
 import clauderc.app.ui.components.BarTitle
 import clauderc.app.ui.components.SnackHost
 import clauderc.app.ui.components.SnackState
+import clauderc.app.ui.components.Spinner
 import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Lift
@@ -84,9 +83,12 @@ fun AgentScreen(state: ChatUiState, header: AgentHeader, actions: ChatActions, s
                     }
                 },
             )
-            // Opening, blocks light up over the messages until the record is read.
-            LoadingCover(state.loading, LoadingArt.Blocks, Modifier.weight(1f), label = "正在读取子代理记录") {
-                Column(Modifier.fillMaxSize()) {
+            if (state.loading && state.items.isEmpty()) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Spinner(color = c.fg3)
+                }
+            } else {
+                Column(Modifier.weight(1f).fillMaxWidth()) {
                     MessageList(
                         state.copy(notice = if (ended) AGENT_ENDED else null, waking = false, outgoing = emptyList()),
                         actions,

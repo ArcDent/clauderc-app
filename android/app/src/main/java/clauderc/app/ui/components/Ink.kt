@@ -1,122 +1,206 @@
 package clauderc.app.ui.components
 
-import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathFillType
-import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.node.DrawModifierNode
-import androidx.compose.ui.node.ModifierNodeElement
-import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import clauderc.app.ui.theme.Motion
-import clauderc.app.ui.theme.onPresses
-import kotlinx.coroutines.Job
+import clauderc.app.ui.theme.Clauderc
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
-// Drawing helpers of 贴纸: ink outlines and rings.
+/** Card corner radius shared by 素卡 and 浮墨 grouped cards. */
+val CardCorner = 24.dp
+
+/** 印版's heavy editorial rule over a list or masthead. */
+val PlateRule = 2.dp
 
 /**
- * 贴纸's ink-outlined surface (border: [border] solid ink): the [fill], the content clipped to the
- * corners and an ink border inside the edge, with no shadow. [top] and [bottom] false square that end
- * off and leave out its border, for the middle items of a group drawn as one card. [bottomStart] and
- * [bottomEnd] give those corners their own radius, as a chat bubble's tail. With a [source] the ink
- * line grows 2dp further in while it is pressed (box-shadow: inset 0 0 0 2px ink), in durS on the
- * spring curve: a button's line doubles, and a borderless one shows a ring.
+ * 素卡's card surface: clean rounded fill with no border or heavy shadow.
+ * [top] and [bottom] square off the meeting edges of adjacent rows in a grouped list.
  */
-fun Modifier.sticker(
-    fill: Color,
-    ink: Color,
-    corner: Dp,
-    border: Dp = 2.dp,
-    source: InteractionSource? = null,
-    top: Boolean = true,
-    bottom: Boolean = true,
-    bottomStart: Dp? = null,
-    bottomEnd: Dp? = null,
-): Modifier = this then StickerElement(fill, ink, corner, border, source, top, bottom, bottomStart, bottomEnd)
-
-private data class StickerElement(
-    val fill: Color,
-    val ink: Color,
-    val corner: Dp,
-    val border: Dp,
-    val source: InteractionSource?,
-    val top: Boolean,
-    val bottom: Boolean,
-    val bottomStart: Dp?,
-    val bottomEnd: Dp?,
-) : ModifierNodeElement<StickerNode>() {
-    override fun create() = StickerNode(this)
-    override fun update(node: StickerNode) = node.update(this)
+fun Modifier.tileSurface(fill: Color, corner: Dp = CardCorner, top: Boolean = true, bottom: Boolean = true): Modifier {
+    val shape = RoundedCornerShape(
+        topStart = if (top) corner else 0.dp,
+        topEnd = if (top) corner else 0.dp,
+        bottomStart = if (bottom) corner else 0.dp,
+        bottomEnd = if (bottom) corner else 0.dp,
+    )
+    return clip(shape).background(fill)
 }
 
-private class StickerNode(private var spec: StickerElement) : Modifier.Node(), DrawModifierNode {
-    private val pushed = Animatable(0f)
-    private var job: Job? = null
-
-    override fun onAttach() = follow()
-
-    fun update(next: StickerElement) {
-        val newSource = next.source != spec.source
-        spec = next
-        if (newSource && isAttached) follow()
-        invalidateDraw()
-    }
-
-    private fun follow() {
-        job?.cancel()
-        val source = spec.source ?: return
-        job = coroutineScope.onPresses(source, { pushed.animateTo(1f, Motion.push()) }, { pushed.animateTo(0f, Motion.push()) })
-    }
-
-    override fun ContentDrawScope.draw() {
-        val s = spec
-        val w = size.width
-        val h = size.height
-        val b = s.border.toPx() + PressedInk.toPx() * pushed.value
-        val cap = if (s.top && s.bottom) minOf(w, h) / 2 else minOf(w / 2, h)
-        fun radius(d: Dp) = minOf(d.toPx(), cap)
-        val r = radius(s.corner)
-        val tr = if (s.top) r else 0f
-        val bl = if (s.bottom) s.bottomStart?.let(::radius) ?: r else 0f
-        val br = if (s.bottom) s.bottomEnd?.let(::radius) ?: r else 0f
-        val outer = shape(0f, 0f, w, h, tr, tr, br, bl)
-        drawPath(outer, s.fill)
-        clipPath(outer) { this@draw.drawContent() }
-        if (b > 0f) {
-            fun inset(x: Float) = (x - b).coerceAtLeast(0f)
-            val inner = shape(b, if (s.top) b else 0f, w - b, if (s.bottom) h - b else h, inset(tr), inset(tr), inset(br), inset(bl))
-            val ring = Path().apply {
-                fillType = PathFillType.EvenOdd
-                addPath(outer)
-                addPath(inner)
+/**
+ * 浮墨's floating card/pill surface: solid dark/light fill with a 1dp hairline edge.
+ */
+fun Modifier.inkSurface(fill: Color, edge: Color, corner: Dp = CardCorner, top: Boolean = true, bottom: Boolean = true): Modifier {
+    val shape = RoundedCornerShape(
+        topStart = if (top) corner else 0.dp,
+        topEnd = if (top) corner else 0.dp,
+        bottomStart = if (bottom) corner else 0.dp,
+        bottomEnd = if (bottom) corner else 0.dp,
+    )
+    return clip(shape).background(fill).then(
+        if (top && bottom) Modifier.border(1.dp, edge, shape)
+        else Modifier.drawBehind {
+            val s = 1.dp.toPx()
+            val topR = if (top) corner.toPx() else 0f
+            val botR = if (bottom) corner.toPx() else 0f
+            val rr = RoundRect(
+                rect = Rect(s / 2f, s / 2f, size.width - s / 2f, size.height - s / 2f),
+                topLeft = CornerRadius(topR, topR),
+                topRight = CornerRadius(topR, topR),
+                bottomRight = CornerRadius(botR, botR),
+                bottomLeft = CornerRadius(botR, botR),
+            )
+            val outline = Path().apply { addRoundRect(rr) }
+            val clipTop = if (top) 0f else s
+            val clipBottom = if (bottom) size.height else size.height - s
+            clipPath(Path().apply { addRect(Rect(0f, clipTop, size.width, clipBottom)) }) {
+                drawPath(outline, edge, style = Stroke(s))
             }
-            drawPath(ring, s.ink)
+        },
+    )
+}
+
+/** Direction of 印版's mechanical ink sweep fill on press (demo.html). */
+enum class PlateSweep { LeftToRight, RightToLeft, BottomToTop }
+
+/** Draws an expanding ink sweep fill at [progress] (0..1) inside a 印版 control. */
+fun Modifier.plateSweepFill(progress: Float, fillColor: Color, direction: PlateSweep): Modifier = drawBehind {
+    val p = progress.coerceIn(0f, 1f)
+    if (p <= 0.001f) return@drawBehind
+    when (direction) {
+        PlateSweep.LeftToRight -> drawRect(fillColor, Offset.Zero, Size(size.width * p, size.height))
+        PlateSweep.RightToLeft -> {
+            val w = size.width * p
+            drawRect(fillColor, Offset(size.width - w, 0f), Size(w, size.height))
+        }
+        PlateSweep.BottomToTop -> {
+            val h = size.height * p
+            drawRect(fillColor, Offset(0f, size.height - h), Size(size.width, h))
         }
     }
+}
 
-    private fun shape(l: Float, t: Float, r: Float, b: Float, topLeft: Float, topRight: Float, bottomRight: Float, bottomLeft: Float) = Path().apply {
-        addRoundRect(RoundRect(l, t, r, b, CornerRadius(topLeft), CornerRadius(topRight), CornerRadius(bottomRight), CornerRadius(bottomLeft)))
+/** Draws a single solid offset shadow for 印版 cards/badges that collapses cleanly on press. */
+fun Modifier.plateHardShadow(color: Color, offsetDp: Dp = 3.dp, pressed: Boolean = false): Modifier = drawBehind {
+    if (!pressed) {
+        val o = offsetDp.toPx()
+        drawRect(color, Offset(o, o), size)
     }
 }
 
-/** How much further in 贴纸's ink line reaches while pressed. */
-private val PressedInk = 2.dp
-
-/** An ink ring [ring] wide just outside the box (box-shadow: 0 0 0 ring ink). The box's own content covers the middle. */
-fun Modifier.inkFrame(ink: Color, corner: Dp, ring: Dp): Modifier = drawBehind {
-    val r = ring.toPx()
-    drawRoundRect(ink, Offset(-r, -r), Size(size.width + 2 * r, size.height + 2 * r), CornerRadius(corner.toPx() + r))
+/**
+ * 印版's primary stamp button: square solid fill with a two-layer offset letterpress shadow
+ * (`2.5dp paper, 4dp ink`) that collapses cleanly when pressed (demo.html `.pbtn.pri` / `.input .send`).
+ */
+@Composable
+fun Modifier.plateStamp(
+    fill: Color,
+    paper: Color,
+    ink: Color,
+    source: InteractionSource? = null,
+    enabled: Boolean = true,
+): Modifier {
+    val pressed = if (source != null) source.collectIsPressedAsState().value else false
+    return drawBehind {
+        if (enabled && !pressed) {
+            val gap = 2.5.dp.toPx()
+            val outer = 4.dp.toPx()
+            drawRect(ink, Offset(outer, outer), size)
+            drawRect(paper, Offset(gap, gap), size)
+        }
+    }
+        .background(fill, RectangleShape)
+        .border(1.5.dp, if (enabled) ink else Clauderc.colors.fg3, RectangleShape)
 }
 
-/** Text and icons on 贴纸's yellow stickers (the picked tab): ink-dark in both light and dark. */
-val StickerOnYellow = Color(0xFF1E1B2E)
+/** 印版's outlined square frame (1.5dp ink border, 0dp corners). */
+fun Modifier.plateBox(fill: Color, borderColor: Color, borderWidth: Dp = 1.5.dp): Modifier =
+    background(fill, RectangleShape).border(borderWidth, borderColor, RectangleShape)
+
+/**
+ * 印版's hatched framed quota progress bar (demo.html `.pbar`):
+ * 1.5dp solid ink border, diagonal 45° ink hatching in the unfilled area, solid ink fill for [fraction].
+ */
+fun Modifier.plateHatchedBar(fraction: Float, ink: Color, paper: Color): Modifier = drawWithCache {
+    onDrawBehind {
+        val w = size.width
+        val h = size.height
+        val stroke = 1.5.dp.toPx()
+        val f = fraction.coerceIn(0f, 1f)
+        drawRect(paper, Offset.Zero, size)
+        // Diagonal hatch lines across the bar at 45 degrees.
+        val hatchColor = ink.copy(alpha = 0.24f)
+        val step = 6.dp.toPx()
+        val lineW = 1.dp.toPx()
+        val clip = Path().apply { addRect(androidx.compose.ui.geometry.Rect(0f, 0f, w, h)) }
+        clipPath(clip) {
+            var x = -h
+            while (x < w + h) {
+                drawLine(hatchColor, Offset(x, h), Offset(x + h, 0f), strokeWidth = lineW)
+                x += step
+            }
+        }
+        if (f > 0f) {
+            drawRect(ink, Offset.Zero, Size(w * f, h))
+        }
+        // Crisp border on top.
+        drawRect(ink, Offset(stroke / 2f, stroke / 2f), Size(w - stroke, h - stroke), style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+    }
+}
+
+/** Builds a scalloped cookie/flower [Path] with configurable lobe depth [ampFrac], [lobes], and [rotRad]. */
+fun buildCookiePath(
+    cx: Float,
+    cy: Float,
+    radius: Float,
+    ampFrac: Float,
+    lobes: Int,
+    rotRad: Float = 0f,
+    steps: Int = 120,
+): Path = Path().apply {
+    val amp = radius * ampFrac
+    for (i in 0..steps) {
+        val a = (2.0 * PI * i / steps) - PI / 2.0
+        val r = radius + amp * cos(lobes * (a - rotRad)).toFloat()
+        val x = cx + r * cos(a).toFloat()
+        val y = cy + r * sin(a).toFloat()
+        if (i == 0) moveTo(x, y) else lineTo(x, y)
+    }
+    close()
+}
+
+/**
+ * 素卡's scalloped cookie/flower shape (demo.html pending badge).
+ */
+val CookieShape: Shape = androidx.compose.foundation.shape.GenericShape { size, _ ->
+    val cx = size.width / 2f
+    val cy = size.height / 2f
+    addPath(buildCookiePath(cx, cy, minOf(cx, cy) * 0.87f, ampFrac = 0.11f, lobes = 8))
+}
+
+/** A crisp vertical accent/ink divider line along the left edge. */
+fun Modifier.leftRail(color: Color, width: Dp): Modifier = drawBehind {
+    drawRect(color, Offset.Zero, Size(width.toPx(), size.height))
+}

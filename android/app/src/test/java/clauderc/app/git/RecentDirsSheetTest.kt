@@ -9,7 +9,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.ClaudercTheme
-import clauderc.app.ui.theme.StickerLightColors
+import clauderc.app.ui.theme.PlateLightColors
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import org.junit.Assert.assertEquals
@@ -45,13 +45,14 @@ class RecentDirsSheetTest {
         return Bitmap.createBitmap(w.width, w.height, Bitmap.Config.ARGB_8888).also { w.draw(Canvas(it)) }
     }
 
-    private val ink = StickerLightColors.ink.toArgb()
+    private val ink = PlateLightColors.ink.toArgb()
 
-    private fun isInk(px: Int) = listOf(16, 8, 0).all { s -> abs((px shr s and 0xFF) - (ink shr s and 0xFF)) < 24 }
+    /** Matches opaque ink pixels (excluding the translucent dark scrim above the sheet). */
+    private fun isInk(px: Int) = (px ushr 24) >= 0xF0 && listOf(16, 8, 0).all { s -> abs((px shr s and 0xFF) - (ink shr s and 0xFF)) < 24 }
 
     @Test fun theOutlineRunsAlongTheSheetsEdgeAndNotAcrossTheList() {
         compose.mainClock.autoAdvance = false
-        compose.setContent { ClaudercTheme(darkTheme = false, style = UiStyle.Sticker) { GitScreen(GitUiState(dirs = dirs), GitActions()) } }
+        compose.setContent { ClaudercTheme(darkTheme = false, style = UiStyle.Plate) { GitScreen(GitUiState(dirs = dirs), GitActions()) } }
         compose.mainClock.advanceTimeBy(1_000)
         compose.onAllNodesWithText("选择目录")[0].performClick()
         // The sheet's window lays out on Robolectric's looper and slides up on the test clock: step both.
@@ -64,18 +65,26 @@ class RecentDirsSheetTest {
 
         val bmp = sheetWindow()
         val w = bmp.width
+        val inset = (14f * compose.density.density).toInt()
         val px = IntArray(w)
-        // Rows that are ink almost all the way across, away from the rounded corners.
+        // Rows that are opaque ink across the slip's 14dp-inset width.
+        val span = (inset + 20) until (w - inset - 20)
         val lines = (0 until bmp.height).filter { y ->
             bmp.getPixels(px, 0, w, 0, y, w, 1)
-            val span = (w * 0.15).toInt() until (w * 0.85).toInt()
             span.count { isInk(px[it]) } > span.count() * 0.9
         }
-        assertTrue("the sheet has its ink top edge", lines.isNotEmpty())
+        assertTrue("the slip has its ink top & bottom edges", lines.size >= 2)
         val top = lines.first()
-        assertTrue("no ink line below the top edge: rows ${lines.filter { it > top + 6 }}", lines.all { it <= top + 6 })
-        // The sides run down from the top edge to the bottom of the sheet.
-        val sides = listOf(top + 200, (top + bmp.height) / 2, bmp.height - 40).map { y -> isInk(bmp.getPixel(1, y)) && isInk(bmp.getPixel(w - 2, y)) }
-        assertEquals("ink down both sides", listOf(true, true, true), sides)
+        val bottom = lines.last()
+        assertTrue("slip spans the list height: top=$top, bottom=$bottom", bottom - top > 300)
+        // No opaque ink line cuts across the directory list body (away from the top border, title rule, and bottom edge/shadow).
+        val bodyLines = lines.filter { it > top + (80 * compose.density.density).toInt() && it < bottom - (12 * compose.density.density).toInt() }
+        assertTrue("no ink line cuts across the directory list: $bodyLines", bodyLines.isEmpty())
+        // Both vertical borders of the 14dp-inset PlateSlipPanel run cleanly from top to bottom.
+        val sides = listOf(top + 200, (top + bottom) / 2, bottom - 40).map { y ->
+            ((inset - 2)..(inset + 3)).any { x -> isInk(bmp.getPixel(x, y)) } &&
+                ((w - inset - 4)..(w - inset + 1)).any { x -> isInk(bmp.getPixel(x, y)) }
+        }
+        assertEquals("ink down both sides of the slip", listOf(true, true, true), sides)
     }
 }

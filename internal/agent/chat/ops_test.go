@@ -585,13 +585,24 @@ const inputScreen = "\x1b[?25h────────\n❯ \n─────�
 // there is one; received bytes go to the key log.
 func stepAttach(t *testing.T, screens ...string) func(*chat.Options) {
 	t.Helper()
+	return slowStepAttach(t, 0, screens...)
+}
+
+// slowStepAttach is stepAttach drawing each next screen only delay after
+// its Enter, as a slow terminal does.
+func slowStepAttach(t *testing.T, delay time.Duration, screens ...string) func(*chat.Options) {
+	t.Helper()
 	dir := t.TempDir()
 	for i, s := range screens {
 		if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(i)), []byte("\x1b[2J\x1b[H"+strings.ReplaceAll(s, "\n", "\r\n")), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return shellAttach(`d='` + dir + `'; cr=$(printf '\r'); i=0; cat "$d/0"; while :; do c=$(dd bs=1 count=1 2>/dev/null); [ -z "$c" ] && exit; printf '%s' "$c" >> "$FAKE_ATTACH_LOG"; if [ "$c" = "$cr" ]; then i=$((i+1)); [ -f "$d/$i" ] && cat "$d/$i"; fi; done`)
+	draw := `cat "$d/$i"`
+	if delay > 0 {
+		draw = fmt.Sprintf(`sleep %.3f; %s`, delay.Seconds(), draw)
+	}
+	return shellAttach(`d='` + dir + `'; cr=$(printf '\r'); i=0; cat "$d/0"; while :; do c=$(dd bs=1 count=1 2>/dev/null); [ -z "$c" ] && exit; printf '%s' "$c" >> "$FAKE_ATTACH_LOG"; if [ "$c" = "$cr" ]; then i=$((i+1)); [ -f "$d/$i" ] && { ` + draw + `; }; fi; done`)
 }
 
 // A prompt that comes up while chat.interrupt waits for the terminal would
@@ -645,9 +656,7 @@ func TestAnswerAfterThePromptLeftTheScreen(t *testing.T) {
 // keys to the input box or to whatever came up.
 func TestAnswerLooksForEachQuestion(t *testing.T) {
 	t.Parallel()
-	q1 := questionScreen("你喜欢哪种颜色？", "❯ 1. 红", "  2. 绿", "  3. 蓝")
-	q2 := questionScreen("你喜欢哪种动物？", "❯ 1. 猫", "  2. 狗")
-	review := questionScreen("Review your answers", "● 你喜欢哪种颜色？ → 绿", "● 你喜欢哪种动物？ → 狗", "❯ 1. Submit answers", "  2. Cancel")
+	q1, q2, review := answerScreens()
 	const changed = "待确认的内容已变化，请看最新的请求再回答"
 	cases := []struct {
 		name    string
@@ -680,6 +689,133 @@ func TestAnswerLooksForEachQuestion(t *testing.T) {
 			}
 		})
 	}
+}
+
+// answerScreens are the two questions of twoQuestionInput and the review
+// page after them.
+func answerScreens() (q1, q2, review string) {
+	return questionScreen("你喜欢哪种颜色？", "❯ 1. 红", "  2. 绿", "  3. 蓝"),
+		questionScreen("你喜欢哪种动物？", "❯ 1. 猫", "  2. 狗"),
+		questionScreen("Review your answers", "● 你喜欢哪种颜色？ → 绿", "● 你喜欢哪种动物？ → 狗", "❯ 1. Submit answers", "  2. Cancel")
+}
+
+// A slow terminal draws the next question a while after the keys of the
+// one before: it is waited for while the prompt stays up, and only a
+// prompt that keeps showing the question answered is left with Esc, some
+// 3 seconds on. A prompt that closes meanwhile ends the wait at once.
+func TestAnswerWaitsForTheNextQuestion(t *testing.T) {
+	t.Parallel()
+	q1, q2, review := answerScreens()
+	cases := []struct {
+		name     string
+		delay    time.Duration
+		screens  []string
+		keys     string
+		err      string
+		min, max time.Duration
+	}{
+		{"drawn late", 1500 * time.Millisecond, []string{q1, q2, review},
+			"\x1b[B\r\x1b[B\r\r", "", 3 * time.Second, 0},
+		{"never drawn", 0, []string{q1},
+			"\x1b[B\r\x1b", "回答到一半，电脑上的题目变了，已按 Esc 退出这次提问", 3 * time.Second, 0},
+		// The keys of the first question take a second: waiting out the
+		// 3 seconds would take 4.
+		{"prompt closed", 0, []string{q1, inputScreen},
+			"\x1b[B\r", "待确认的内容已变化，请看最新的请求再回答", 0, 2500 * time.Millisecond},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t, setup{opts: slowStepAttach(t, c.delay, c.screens...)})
+			f.blockedOn(t, "toolu_q1", "AskUserQuestion", twoQuestionInput)
+			start := time.Now()
+			res := f.call(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_q1",
+				Answers: []protocol.Answer{{Selected: []int{1}}, {Selected: []int{1}}}})
+			took := time.Since(start)
+			if c.err == "" && res.Error != nil || c.err != "" && (res.Error == nil || res.Error.Message != c.err) {
+				t.Errorf("error %+v, want %q", res.Error, c.err)
+			}
+			if got := f.keyLog(); got != c.keys {
+				t.Errorf("keys %q, want %q", got, c.keys)
+			}
+			if took < c.min || c.max > 0 && took > c.max {
+				t.Errorf("took %v, want between %v and %v", took, c.min, c.max)
+			}
+		})
+	}
+}
+
+// Claude Code 2.1.331 realities verified against the live CLI:
+//   - a fresh attach to an already-blocked prompt leaves the cursor visible
+//     (Cursor=true, no \x1b[?25l),
+//   - multi-line or wrapped questions get a leading "│ " on every line,
+//   - 3-4 long headers wrap the tab bar so Submit sits on the next line, and
+//   - a brief clear-screen redraw between questions must not abort WaitFor.
+func TestAnswerClaude21331Screens(t *testing.T) {
+	t.Parallel()
+	t.Run("fresh attach visible cursor on single question", func(t *testing.T) {
+		t.Parallel()
+		// No \x1b[?25l: cursor stays visible as on a fresh `claude attach`.
+		screen := "────────\n ☐ 颜色\n\n 你喜欢哪种颜色？\n\n ❯ 1. 红\n   2. 绿\n   3. 蓝\n   4. Type something.\n────────\n   5. Chat about this\n Enter to select · ↑/↓ to navigate · Esc to cancel"
+		f := newFixture(t, setup{screen: screen})
+		f.blockedOn(t, "toolu_q1", "AskUserQuestion", `{"questions":[{"question":"你喜欢哪种颜色？","header":"颜色","multiSelect":false,"options":[{"label":"红"},{"label":"绿"},{"label":"蓝"}]}]}`)
+		f.ok(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_q1", Answers: []protocol.Answer{{Selected: []int{1}}}})
+		if got := f.keyLog(); got != "\x1b[B\r" {
+			t.Errorf("keys %q, want %q", got, "\x1b[B\r")
+		}
+	})
+
+	t.Run("fresh attach visible cursor on permission prompt", func(t *testing.T) {
+		t.Parallel()
+		screen := " Bash command\n\n   echo hi\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No"
+		f := newFixture(t, setup{screen: screen})
+		f.blockedOn(t, "toolu_p1", "Bash", `{"command":"echo hi"}`)
+		f.ok(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_p1", Decision: protocol.DecisionAllow})
+		if got := f.keyLog(); got != "\r" {
+			t.Errorf("keys %q, want %q", got, "\r")
+		}
+	})
+
+	t.Run("wrapped multiline question with rail and wrapped tab bar", func(t *testing.T) {
+		t.Parallel()
+		q1Text := "针对 `store.go` 的 **SQLite** 迁移：\n第一行说明包含 `v1 -> v2` 细节，且超过终端宽度自动折行？"
+		q2Text := "失败时是否回滚备份？"
+		input := fmt.Sprintf(`{"questions":[{"question":%q,"header":"非常长的数据库迁移与历史兼容策略标题一","multiSelect":false,"options":[{"label":"方案一"},{"label":"方案二"}]},{"question":%q,"header":"非常长的失败回滚与数据保护策略标题二","multiSelect":false,"options":[{"label":"是"},{"label":"否"}]}]}`, q1Text, q2Text)
+		q1 := "────────\n←  ☐ 非常长的数据库迁移与历史 ☒ 非常长的失败回滚与数据保护 ✔       →\n  兼容…                      策略…                      Submit\n\n│ 针对 `store.go` 的 **SQLite** 迁移：\n│ 第一行说明包含 `v1 -> v2`\n│ 细节，且超过终端宽度自动折行？\n\n❯ 1. 方案一\n  2. 方案二"
+		q2 := "────────\n←  ☒ 非常长的数据库迁移与历史 ☐ 非常长的失败回滚与数据保护 ✔       →\n  兼容…                      策略…                      Submit\n\n│ 失败时是否\n│ 回滚备份？\n\n❯ 1. 是\n  2. 否"
+		review := "────────\n←  ☒ 非常长的数据库迁移与历史 ☒ 非常长的失败回滚与数据保护 ✔       →\n  兼容…                      策略…                      Submit\n\nReview your answers\n❯ 1. Submit answers\n  2. Cancel"
+		f := newFixture(t, setup{opts: stepAttach(t, q1, q2, review)})
+		f.blockedOn(t, "toolu_q1", "AskUserQuestion", input)
+		f.ok(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{
+			SessionID: shortID, ToolUseID: "toolu_q1",
+			Answers: []protocol.Answer{{Selected: []int{0}}, {Selected: []int{1}}},
+		})
+		if got := f.keyLog(); got != "\r\x1b[B\r\r" {
+			t.Errorf("keys %q, want %q", got, "\r\x1b[B\r\r")
+		}
+	})
+
+	t.Run("mid-redraw blank frame between questions", func(t *testing.T) {
+		t.Parallel()
+		q1, q2, review := answerScreens()
+		dir := t.TempDir()
+		for i, s := range []string{q1, q2, review} {
+			if err := os.WriteFile(filepath.Join(dir, strconv.Itoa(i)), []byte("\x1b[2J\x1b[H"+strings.ReplaceAll(s, "\n", "\r\n")), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Clears the screen on Enter, pauses 150ms (shorter than tabGoneWait), then draws the next page.
+		opts := shellAttach(`d='` + dir + `'; cr=$(printf '\r'); i=0; cat "$d/0"; while :; do c=$(dd bs=1 count=1 2>/dev/null); [ -z "$c" ] && exit; printf '%s' "$c" >> "$FAKE_ATTACH_LOG"; if [ "$c" = "$cr" ]; then i=$((i+1)); if [ -f "$d/$i" ]; then printf '\033[2J\033[H'; sleep 0.15; cat "$d/$i"; fi; fi; done`)
+		f := newFixture(t, setup{opts: opts})
+		f.blockedOn(t, "toolu_q1", "AskUserQuestion", twoQuestionInput)
+		f.ok(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{
+			SessionID: shortID, ToolUseID: "toolu_q1",
+			Answers: []protocol.Answer{{Selected: []int{1}}, {Selected: []int{1}}},
+		})
+		if got := f.keyLog(); got != "\x1b[B\r\x1b[B\r\r" {
+			t.Errorf("keys %q, want %q", got, "\x1b[B\r\x1b[B\r\r")
+		}
+	})
 }
 
 // The /model picker chat.setModel opens is its own, not a panel left open:

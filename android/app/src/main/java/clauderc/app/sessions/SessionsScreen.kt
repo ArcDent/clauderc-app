@@ -37,15 +37,22 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
@@ -112,9 +119,19 @@ import clauderc.app.machines.NavClearance
 import androidx.compose.animation.animateContentSize
 import androidx.compose.ui.unit.sp
 import clauderc.app.protocol.Subagent
-import clauderc.app.ui.components.Spinner
 import clauderc.app.protocol.Session
 import clauderc.app.protocol.SessionState
+import clauderc.app.ui.components.Spinner
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import clauderc.app.machines.InkStatusPanel
+import clauderc.app.machines.MachineSwitcherSheet
+import clauderc.app.machines.PendingEntry
+import clauderc.app.machines.RelayStatusSheet
+import clauderc.app.net.RelayLink
+import clauderc.app.protocol.Machine
+import clauderc.app.protocol.SessionList
+import clauderc.app.ui.needsYou
 import clauderc.app.ui.TimeText
 import clauderc.app.ui.components.AppBar
 import clauderc.app.ui.components.GroupBlock
@@ -124,21 +141,27 @@ import clauderc.app.ui.components.FieldLabel
 import clauderc.app.ui.components.Glyph
 import clauderc.app.ui.components.Hero
 import clauderc.app.ui.components.MenuItem
+import clauderc.app.ui.components.PillButton
+import clauderc.app.ui.components.PillStyle
 import clauderc.app.ui.components.SheetHead
 import clauderc.app.ui.components.SnackHost
-import clauderc.app.ui.components.LoadingCover
-import clauderc.app.ui.components.LoadingArt
 import clauderc.app.ui.components.SnackState
+import clauderc.app.ui.components.Spinner
 import clauderc.app.ui.components.StatusGlyph
 import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.TextTone
 import clauderc.app.ui.components.UnderlineField
+import clauderc.app.ui.components.captureAnchor
 import clauderc.app.ui.components.groupDivider
+import clauderc.app.ui.components.rememberAnchorBox
+import java.time.Instant
 import clauderc.app.data.UiStyle
 import clauderc.app.git.busyText
 import clauderc.app.git.busyTitle
-import clauderc.app.ui.components.sticker
+import clauderc.app.ui.components.inkSurface
+import clauderc.app.ui.components.plateHatchedBar
+import clauderc.app.ui.components.tileSurface
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
@@ -160,12 +183,31 @@ fun glyphOf(state: SessionState) = when (state) {
     SessionState.Stopped -> Glyph.Stop
 }
 
+/** Sub-view of 浮墨's Sessions page: 「活跃」 shows flat active rows, 「全部」 shows grouped directories. */
+enum class InkListTab { Active, All }
+
+private fun isRecentlyActive(s: Session, nowEpochSec: Long): Boolean {
+    if (s.state == SessionState.Stopped) return false
+    val delta = nowEpochSec - s.lastActiveAt.epochSecond
+    return delta in -60L..900L
+}
+
+private fun activeOrder(s: Session): Int = when {
+    s.state == SessionState.Pending -> 0
+    needsReply(s) -> 1
+    s.state == SessionState.Working -> 2
+    else -> 3
+}
+
 private sealed interface Overlay {
     data class ConfirmStop(val session: Session) : Overlay
     data class ConfirmRemove(val session: Session) : Overlay
     data class Rename(val group: SessionGroup) : Overlay
     /** The branch sheet of one directory, looked up again on every change so it shows fresh branches. */
-    data class Branches(val profileId: String, val dir: String) : Overlay
+    data class Branches(val profileId: String, val dir: String, val anchor: Rect? = null) : Overlay
+    data class Status(val anchor: Rect? = null) : Overlay
+    data class PickProfile(val anchor: Rect? = null) : Overlay
+    data class Relay(val anchor: Rect? = null) : Overlay
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -193,13 +235,58 @@ fun SessionsScreen(
     onSwitchBranch: (DirGroup, String) -> Unit = { _, _ -> },
     onConfirmSwitch: () -> Unit = {},
     onDismissSwitch: () -> Unit = {},
+    paired: Boolean = true,
+    loadFailed: Boolean = false,
+    onPair: () -> Unit = {},
+    onRetry: () -> Unit = {},
+    machines: List<Machine> = emptyList(),
+    allSessions: Map<String, SessionList> = emptyMap(),
+    pendingEntries: List<PendingEntry> = emptyList(),
+    dirFilter: String? = null,
+    onSelectDirFilter: (String?) -> Unit = {},
+    onSelectMachine: (Machine) -> Unit = {},
+    onOpenPending: (PendingEntry) -> Unit = {},
+    initialInkTab: InkListTab = InkListTab.Active,
+    onOpenDrawer: (() -> Unit)? = null,
+    onCreateAt: ((Rect?) -> Unit)? = null,
+    onPairAt: ((Rect?) -> Unit)? = null,
+    relays: List<RelayLink> = emptyList(),
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
+    val ui = Clauderc.style
     var overlay by remember { mutableStateOf<Overlay?>(null) }
+    var drawerOpen by remember { mutableStateOf(false) }
+    var machineSheetOpen by remember { mutableStateOf(false) }
+    var inkTab by remember(initialInkTab) { mutableStateOf(initialInkTab) }
     val machine = state.machine
     val online = machine?.online == true
     val pull = rememberPullToRefreshState()
+    val allDirs = remember(state.groups) {
+        state.groups.orEmpty().flatMap { it.dirs }.distinctBy { it.cwd }
+    }
+    val effectiveDirFilter = dirFilter?.takeIf { cwd -> allDirs.any { it.cwd == cwd } }
+    val filteredDirTitle = effectiveDirFilter?.let { cwd -> allDirs.firstOrNull { it.cwd == cwd }?.title }
+    var lastDirFilter by remember { mutableStateOf(effectiveDirFilter) }
+    LaunchedEffect(effectiveDirFilter) {
+        if (effectiveDirFilter != lastDirFilter) {
+            if (effectiveDirFilter != null) inkTab = InkListTab.All
+            lastDirFilter = effectiveDirFilter
+        }
+    }
+    val totalSessions = remember(state.groups) { state.groups.orEmpty().sumOf { it.sessions.size } }
+    val workingCount = remember(state.groups) {
+        state.groups.orEmpty().sumOf { g -> g.sessions.count { it.state == SessionState.Working } }
+    }
+    // Fall back to current machine's pending sessions when rendered standalone in unit tests.
+    val resolvedPending = remember(pendingEntries, state.groups, machine) {
+        if (pendingEntries.isNotEmpty() || machine == null) pendingEntries
+        else state.groups.orEmpty().flatMap { it.sessions }.filter(::needsYou).map { PendingEntry(machine.id, machine.name, it) }
+    }
+    val openPendingEntry: (PendingEntry) -> Unit = { entry ->
+        if (machine != null && entry.machineId == machine.id && pendingEntries.isEmpty()) onOpenChat(entry.session)
+        else onOpenPending(entry)
+    }
     // The row slid open to its 「停止」 or 「移出」; one at a time.
     val swipe = remember { SwipeHub() }
     // Rows confirmed for removal: false while the row folds away, true once session.remove went out. An id
@@ -222,111 +309,439 @@ fun SessionsScreen(
         onLeft = { s -> removing[s.id] = true; onRemove(s) },
     )
 
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            // The one way in to a new session (mockup round 7): the profile is picked on the form.
-            AppBar(actions = { if (machine != null) SymbolButton(Symbols.Add, "新建会话", onClick = onCreate, enabled = online) })
-            if (machine != null && !online) {
-                Row(
-                    Modifier.fillMaxWidth().background(c.surface).padding(horizontal = sp.page, vertical = sp.sp3),
-                    horizontalArrangement = Arrangement.spacedBy(sp.sp3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Symbols.CloudOff, contentDescription = null, tint = c.fg3, modifier = Modifier.size(20.dp))
-                    Text("已离线 · 最后在线 ${TimeText.clock(machine.lastSeenAt)}", fontSize = Clauderc.fontSizes.label, color = c.fg2)
+    val bottomClearance = if (ui == UiStyle.Clear) 144.dp else NavClearance
+    val inkTopPad = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 74.dp
+    val list = rememberLazyListState()
+    val clearHaze = if (ui == UiStyle.Clear) rememberHazeState() else null
+    val clearScrollPx = with(LocalDensity.current) { 90.dp.toPx() }
+    val tileScrollPx = with(LocalDensity.current) { 70.dp.toPx() }
+    val clearScrolled by remember(list, clearScrollPx) {
+        derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > clearScrollPx }
+    }
+    val tileScrolled by remember(list, tileScrollPx) {
+        derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > tileScrollPx }
+    }
+
+    val screenBody: @Composable () -> Unit = {
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().then(if (clearHaze != null) Modifier.hazeSource(clearHaze) else Modifier)) {
+                when (ui) {
+                    UiStyle.Ink -> Unit // Floating InkTopBar overlays the scroll container below.
+                    UiStyle.Clear -> Unit // Top action row scrolls inside list; ClearGlassTopBar fades in > 90dp.
+                    UiStyle.Plate -> if (machine == null) {
+                        AppBar(actions = { if (!paired) SymbolButton(Symbols.Add, "添加目标机", onClick = onPair) })
+                    }
+                    UiStyle.Tile -> if (machine == null) {
+                        AppBar(actions = { if (!paired) SymbolButton(Symbols.Add, "添加目标机", onClick = onPair) })
+                    }
                 }
-            }
-            // The machine's first session list deals cards over the page until it arrives.
-            LoadingCover(machine != null && state.groups == null, LoadingArt.Deal, Modifier.fillMaxSize(), label = "正在读取会话") {
-            PullToRefreshBox(
-                isRefreshing = state.refreshing,
-                onRefresh = onRefresh,
-                state = pull,
-                modifier = Modifier.fillMaxSize(),
-                indicator = {
-                    PullToRefreshDefaults.Indicator(
-                        state = pull,
-                        isRefreshing = state.refreshing,
-                        modifier = Modifier.align(Alignment.TopCenter),
-                        containerColor = c.sheet,
-                        color = c.fg,
-                    )
-                },
-            ) {
-                val list = rememberLazyListState()
-                LazyColumn(Modifier.fillMaxSize().stillLayer(list).testTag("sessionList"), state = list, contentPadding = PaddingValues(bottom = NavClearance)) {
-                    item {
-                        Hero(machine?.name ?: "会话", bottom = sp.sp2) {
-                            if (machine?.claudeVersion?.isNotEmpty() == true) Text("claude ${machine.claudeVersion}")
-                        }
+                if (ui != UiStyle.Ink && ui != UiStyle.Clear && machine != null && !online) {
+                    Row(
+                        Modifier.fillMaxWidth().background(c.surface).padding(horizontal = sp.page, vertical = sp.sp3),
+                        horizontalArrangement = Arrangement.spacedBy(sp.sp3),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Symbols.CloudOff, contentDescription = null, tint = c.fg3, modifier = Modifier.size(20.dp))
+                        Text("已离线 · 最后在线 ${TimeText.clock(machine.lastSeenAt)}", fontSize = Clauderc.fontSizes.label, color = c.fg2)
                     }
-                    state.usage?.takeIf { it.available }?.let { usage ->
-                        item(key = "usage") { UsageBlock(usage) }
-                    }
+                }
+                PullToRefreshBox(
+                    isRefreshing = state.refreshing,
+                    onRefresh = onRefresh,
+                    state = pull,
+                    modifier = Modifier.fillMaxSize(),
+                    indicator = {
+                        PullToRefreshDefaults.Indicator(
+                            state = pull,
+                            isRefreshing = state.refreshing,
+                            modifier = Modifier.align(Alignment.TopCenter).padding(top = if (ui == UiStyle.Ink) inkTopPad else 0.dp),
+                            containerColor = c.sheet,
+                            color = c.fg,
+                        )
+                    },
+                ) {
                     val groups = state.groups
-                    if (groups == null) {
-                        item {
-                            Text(
-                                if (machine == null) "先在目标机页选一台在线的目标机" else "正在读取会话",
-                                modifier = Modifier.padding(sp.page),
-                                fontSize = Clauderc.fontSizes.label,
-                                color = c.fg3,
-                            )
-                        }
-                    } else {
-                        groups.forEach { group ->
-                            item(key = "h:" + group.profile.id) {
-                                GroupHeader(group, onRename = { overlay = Overlay.Rename(group) }, onToggle = { onToggle(group) })
+                    LazyColumn(
+                        Modifier.fillMaxSize().stillLayer(list).testTag("sessionList"),
+                        state = list,
+                        contentPadding = PaddingValues(top = if (ui == UiStyle.Ink) inkTopPad else 0.dp, bottom = bottomClearance),
+                    ) {
+                        when {
+                            ui == UiStyle.Plate && machine != null -> item(key = "plateMast") {
+                                PlateMasthead(
+                                    machine = machine,
+                                    pendingEntries = resolvedPending,
+                                    workingCount = workingCount,
+                                    usage = state.usage,
+                                    onOpenMachines = { if (machines.isNotEmpty()) machineSheetOpen = true },
+                                    onOpenPending = openPendingEntry,
+                                    onRefresh = onRefresh,
+                                    onCreate = onCreate,
+                                )
                             }
-                            if (group.sessions.isEmpty()) {
-                                item(key = "e:" + group.profile.id) {
-                                    Fold(visible = !group.collapsed) {
-                                        if (Clauderc.look.cards) {
-                                            GroupBlock(padding = sp.sp4) { Text("没有会话", fontSize = Clauderc.fontSizes.label, color = c.fg3) }
-                                        } else {
+                            ui == UiStyle.Ink -> {
+                                if (machine != null && !online) {
+                                    item(key = "inkOffline") {
+                                        Row(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = sp.page, vertical = sp.sp2)
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(c.surface)
+                                                .padding(horizontal = sp.sp4, vertical = sp.sp3),
+                                            horizontalArrangement = Arrangement.spacedBy(sp.sp3),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Icon(Symbols.CloudOff, contentDescription = null, tint = c.fg3, modifier = Modifier.size(18.dp))
+                                            Text("已离线 · 最后在线 ${TimeText.clock(machine.lastSeenAt)}", fontSize = Clauderc.fontSizes.label, color = c.fg2)
+                                        }
+                                    }
+                                }
+                                if (groups != null) {
+                                    item(key = "inkBrushTabs") {
+                                        InkBrushTabs(
+                                            labels = listOf("活跃" to null, "全部" to null),
+                                            selected = if (inkTab == InkListTab.Active) 0 else 1,
+                                            onSelect = { inkTab = if (it == 0) InkListTab.Active else InkListTab.All },
+                                        )
+                                    }
+                                    if (effectiveDirFilter != null && filteredDirTitle != null) {
+                                        val dirCount = groups.flatMap { it.dirs }.filter { it.cwd == effectiveDirFilter }.sumOf { it.sessions.size }
+                                        item(key = "inkFilterNote") {
+                                            Row(
+                                                Modifier
+                                                    .padding(start = 24.dp, end = 20.dp, bottom = 10.dp)
+                                                    .clip(RoundedCornerShape(16.dp))
+                                                    .background(c.surface)
+                                                    .padding(start = 12.dp, end = 6.dp, top = 5.dp, bottom = 5.dp)
+                                                    .testTag("inkFilterNote"),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Text(
+                                                    "只看 $filteredDirTitle（$dirCount 个会话）",
+                                                    fontSize = 12.5.sp,
+                                                    color = c.fg2,
+                                                )
+                                                Icon(
+                                                    Symbols.Close,
+                                                    contentDescription = "清除目录筛选",
+                                                    tint = c.fg3,
+                                                    modifier = Modifier
+                                                        .size(22.dp)
+                                                        .clip(CircleShape)
+                                                        .clickable(role = Role.Button) { onSelectDirFilter(null) }
+                                                        .padding(3.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ui == UiStyle.Tile && machine != null -> {
+                                // 素卡 hero (demo.html .hero): right-aligned grouped white pill (refresh + scan) + circular +, then 30sp bold machine title.
+                                item(key = "tileHero") {
+                                    Column(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .statusBarsPadding()
+                                            .padding(start = 20.dp, end = 16.dp, top = 6.dp, bottom = 10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Row(
+                                                Modifier
+                                                    .tileSurface(c.card, 999.dp)
+                                                    .padding(horizontal = 4.dp)
+                                                    .testTag("tileToolPill"),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                SymbolButton(Symbols.Refresh, "刷新", onClick = onRefresh, small = true)
+                                                SymbolButton(Symbols.QrCodeScanner, "配对目标机", onClick = onPair, small = true)
+                                            }
+                                            Box(
+                                                Modifier
+                                                    .size(40.dp)
+                                                    .tileSurface(c.card, 20.dp)
+                                                    .testTag("tileAddCircle"),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                SymbolButton(Symbols.Add, "新建会话", onClick = onCreate, enabled = online, small = true)
+                                            }
+                                        }
+                                        Column(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .then(if (machines.isNotEmpty()) Modifier.clickable(role = Role.Button) { machineSheetOpen = true } else Modifier),
+                                            verticalArrangement = Arrangement.spacedBy(5.dp),
+                                        ) {
                                             Text(
-                                                "没有会话",
-                                                modifier = Modifier.padding(start = sp.page, end = sp.page, top = sp.sp2, bottom = sp.sp3),
-                                                fontSize = Clauderc.fontSizes.label,
-                                                color = c.fg3,
+                                                machine.name,
+                                                fontSize = 30.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = c.fg,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Box(Modifier.size(7.dp).clip(CircleShape).background(if (online) c.ok else c.fg3))
+                                                Text(
+                                                    if (machine.claudeVersion.isNotEmpty()) "${if (online) "在线" else "离线"} · Claude Code ${machine.claudeVersion}"
+                                                    else if (online) "在线" else "离线",
+                                                    fontSize = 13.sp,
+                                                    color = c.fg2,
+                                                )
+                                                if (machines.isNotEmpty()) Icon(Symbols.ExpandMore, contentDescription = null, tint = c.fg3, modifier = Modifier.size(16.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                                item(key = "tileBento") {
+                                    TileSessionsBento(
+                                        machine = machine,
+                                        machines = machines,
+                                        allSessions = allSessions,
+                                        pendingEntries = resolvedPending,
+                                        workingCount = workingCount,
+                                        totalSessions = totalSessions,
+                                        usage = state.usage,
+                                        onSelectMachine = onSelectMachine,
+                                        onOpenPending = openPendingEntry,
+                                        onCreate = onCreate,
+                                        onPair = onPair,
+                                    )
+                                }
+                            }
+                            else -> {
+                                // 清玻: scrolling top action row + 34sp .titlebtn with 180°-rotating chevron + 2-column 3dp hairline usage bars.
+                                item(key = "clearTopAndHero") {
+                                    Column(Modifier.fillMaxWidth().statusBarsPadding()) {
+                                        Row(
+                                            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp),
+                                            horizontalArrangement = Arrangement.End,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            if (machine != null) {
+                                                SymbolButton(Symbols.Refresh, "刷新", onClick = onRefresh)
+                                                SymbolButton(Symbols.Add, "新建会话", onClick = onCreate, enabled = online)
+                                            } else if (!paired) {
+                                                SymbolButton(Symbols.Add, "添加目标机", onClick = onPair)
+                                            }
+                                        }
+                                        val canSwitch = machine != null && machines.isNotEmpty()
+                                        val chevTurn by animateFloatAsState(
+                                            targetValue = if (machineSheetOpen) 180f else 0f,
+                                            animationSpec = Motion.enter(),
+                                            label = "clearMachineChev",
+                                        )
+                                        Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 2.dp, bottom = 6.dp)) {
+                                            Row(
+                                                Modifier
+                                                    .then(
+                                                        if (canSwitch) {
+                                                            Modifier
+                                                                .clip(RoundedCornerShape(12.dp))
+                                                                .clickable(role = Role.Button) { machineSheetOpen = true }
+                                                                .testTag("clearMachineTrigger")
+                                                        } else {
+                                                            Modifier
+                                                        },
+                                                    ),
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Text(
+                                                    machine?.name ?: "会话",
+                                                    fontSize = 34.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = c.fg,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false),
+                                                )
+                                                if (canSwitch) {
+                                                    Icon(
+                                                        Symbols.ExpandMore,
+                                                        contentDescription = null,
+                                                        tint = c.fg3,
+                                                        modifier = Modifier.size(26.dp).rotate(chevTurn),
+                                                    )
+                                                }
+                                            }
+                                            if (machine != null) {
+                                                val sub = buildString {
+                                                    if (machine.claudeVersion.isNotEmpty()) append("Claude Code ${machine.claudeVersion} · ")
+                                                    append(if (online) "在线" else "已离线 · 最后在线 ${TimeText.clock(machine.lastSeenAt)}")
+                                                }
+                                                Text(sub, modifier = Modifier.padding(top = 4.dp), fontSize = 14.sp, color = c.fg2)
+                                            }
+                                        }
+                                    }
+                                }
+                                state.usage?.takeIf { it.available }?.let { usage ->
+                                    item(key = "usage") { ClearUsageGrid(usage) }
+                                }
+                            }
+                        }
+                        if (groups == null) {
+                            item {
+                                when {
+                                    !paired && machine == null -> Column(
+                                        Modifier.fillMaxWidth().padding(sp.sp8),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(sp.sp3),
+                                    ) {
+                                        Icon(Symbols.Computer, contentDescription = null, tint = c.fg3, modifier = Modifier.size(40.dp))
+                                        Text("还没有目标机", fontSize = Clauderc.fontSizes.title)
+                                        Text("扫描目标机上的配对二维码后即可远程控制后台会话", fontSize = Clauderc.fontSizes.label, color = c.fg2, textAlign = TextAlign.Center)
+                                        val pairBtnAnchor = rememberAnchorBox()
+                                        PillButton(
+                                            "配对目标机",
+                                            onClick = { if (ui == UiStyle.Ink && onPairAt != null) onPairAt(pairBtnAnchor.rect) else onPair() },
+                                            style = PillStyle.Ink,
+                                            modifier = Modifier.captureAnchor(pairBtnAnchor),
+                                        )
+                                    }
+                                    machine == null && loadFailed -> Column(
+                                        Modifier.fillMaxWidth().padding(sp.sp8),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(sp.sp3),
+                                    ) {
+                                        Text("读不到目标机列表", fontSize = Clauderc.fontSizes.title)
+                                        PillButton("重试", onClick = onRetry, style = PillStyle.Tonal)
+                                    }
+                                    else -> Row(
+                                        Modifier.padding(sp.page),
+                                        horizontalArrangement = Arrangement.spacedBy(sp.sp3),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Spinner(size = 16.dp, color = c.fg3)
+                                        Text(
+                                            if (machine == null) "正在连接目标机" else "正在读取会话",
+                                            fontSize = Clauderc.fontSizes.label,
+                                            color = c.fg3,
+                                        )
+                                    }
+                                }
+                            }
+                        } else if (ui == UiStyle.Ink && inkTab == InkListTab.Active) {
+                            val nowEpoch = Instant.now().epochSecond
+                            val dirTitleByCwd = allDirs.associate { it.cwd to it.title }
+                            val activeRows = groups
+                                .flatMap { it.sessions }
+                                .filter { effectiveDirFilter == null || listedDir(it) == effectiveDirFilter }
+                                .filter { needsYou(it) || it.state == SessionState.Working || isRecentlyActive(it, nowEpoch) }
+                                .sortedWith(compareBy<Session>(::activeOrder).thenByDescending { it.lastActiveAt })
+                            if (activeRows.isEmpty()) {
+                                item(key = "inkActiveEmpty") {
+                                    Column(
+                                        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 28.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        Text("当前没有活跃的会话", fontSize = 15.sp, color = c.fg2)
+                                        if (totalSessions > 0) {
+                                            Text(
+                                                "查看全部 $totalSessions 个会话",
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .clickable(role = Role.Button) { inkTab = InkListTab.All }
+                                                    .padding(vertical = 4.dp),
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = c.accent,
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                activeRows.forEach { s ->
+                                    item(key = "act:${s.id}") {
+                                        val agents = runningAgents(s)
+                                        val dirTitle = dirTitleByCwd[listedDir(s)] ?: clauderc.app.ui.baseName(listedDir(s))
+                                        Leaving(s, rowActs) {
+                                            SessionRow(
+                                                s,
+                                                enabled = online,
+                                                onOpen = { onOpenChat(s) },
+                                                acts = rowActs,
+                                                tight = agents.isNotEmpty(),
+                                                indent = 0.dp,
+                                                dirPrefix = dirTitle.takeIf { it.isNotEmpty() },
+                                                draft = state.drafts[s.id],
+                                            )
+                                            AgentRows(
+                                                agents,
+                                                enabled = online,
+                                                spot = glyphSpot(0.dp),
+                                                tree = treeLine(),
+                                                indent = 0.dp,
+                                                onOpen = { onOpenAgent(s, it) },
                                             )
                                         }
                                     }
                                 }
                             }
-                            // One item per group, so folding can shrink the rows together like the mockup.
-                            if (group.sessions.isNotEmpty()) {
-                                item(key = "g:" + group.profile.id) {
-                                    Fold(visible = !group.collapsed) {
-                                        GroupBlock(ruled = true) {
-                                            group.dirs.forEachIndexed { i, dir ->
-                                                key(dir.cwd) {
-                                                    DirRow(
-                                                        dir,
-                                                        onToggle = { onToggleDir(group, dir) },
-                                                        modifier = Modifier.groupDivider(i > 0),
-                                                        onBranches = { overlay = Overlay.Branches(group.profile.id, dir.cwd); onBranches(dir) },
-                                                    )
-                                                    Fold(visible = !dir.collapsed) {
-                                                        val reveal = filterReveal(dir.branchFilter)
-                                                        Column {
-                                                            dir.rows.forEachIndexed { r, node ->
-                                                                key(node.session.id) {
-                                                                    SessionNodeRows(
-                                                                        node,
-                                                                        enabled = online,
-                                                                        onOpen = onOpenChat,
-                                                                        acts = rowActs,
-                                                                        onOpenAgent = onOpenAgent,
-                                                                        onToggleForks = { onToggleForks(node) },
-                                                                        showBranch = dir.rowsShowBranch,
-                                                                        drafts = state.drafts,
-                                                                        modifier = Modifier.graphicsLayer {
-                                                                            val p = Motion.rowIn(r, reveal.floatValue)
-                                                                            alpha = p
-                                                                            translationY = -4.dp.toPx() * (1 - p)
-                                                                        },
-                                                                    )
+                        } else {
+                            groups.forEach { group ->
+                                val dirsToShow = if (effectiveDirFilter == null) group.dirs else group.dirs.filter { it.cwd == effectiveDirFilter }
+                                if (effectiveDirFilter != null && dirsToShow.isEmpty()) return@forEach
+                                item(key = "h:" + group.profile.id) {
+                                    GroupHeader(group, onRename = { overlay = Overlay.Rename(group) }, onToggle = { onToggle(group) })
+                                }
+                                if (group.sessions.isEmpty()) {
+                                    item(key = "e:" + group.profile.id) {
+                                        Fold(visible = !group.collapsed) {
+                                            if (Clauderc.look.cards) {
+                                                GroupBlock(padding = sp.sp4) { Text("没有会话", fontSize = Clauderc.fontSizes.label, color = c.fg3) }
+                                            } else {
+                                                Text(
+                                                    "没有会话",
+                                                    modifier = Modifier.padding(start = sp.page, end = sp.page, top = sp.sp2, bottom = sp.sp3),
+                                                    fontSize = Clauderc.fontSizes.label,
+                                                    color = c.fg3,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                // One item per group, so folding can shrink the rows together like the mockup.
+                                if (dirsToShow.isNotEmpty()) {
+                                    item(key = "g:" + group.profile.id) {
+                                        Fold(visible = !group.collapsed) {
+                                            GroupBlock(ruled = true) {
+                                                dirsToShow.forEachIndexed { i, dir ->
+                                                    key(dir.cwd) {
+                                                        DirRow(
+                                                            dir,
+                                                            onToggle = { onToggleDir(group, dir) },
+                                                            modifier = Modifier.groupDivider(i > 0),
+                                                            onBranches = { rect -> overlay = Overlay.Branches(group.profile.id, dir.cwd, rect); onBranches(dir) },
+                                                        )
+                                                        Fold(visible = !dir.collapsed) {
+                                                            val reveal = filterReveal(dir.branchFilter)
+                                                            Column {
+                                                                dir.rows.forEachIndexed { r, node ->
+                                                                    key(node.session.id) {
+                                                                        SessionNodeRows(
+                                                                            node,
+                                                                            enabled = online,
+                                                                            onOpen = onOpenChat,
+                                                                            acts = rowActs,
+                                                                            onOpenAgent = onOpenAgent,
+                                                                            onToggleForks = { onToggleForks(node) },
+                                                                            showBranch = dir.rowsShowBranch,
+                                                                            drafts = state.drafts,
+                                                                            modifier = Modifier.graphicsLayer {
+                                                                                val p = Motion.rowIn(r, reveal.floatValue)
+                                                                                alpha = p
+                                                                                translationY = -4.dp.toPx() * (1 - p)
+                                                                            },
+                                                                        )
+                                                                    }
                                                                 }
                                                             }
                                                         }
@@ -341,9 +756,82 @@ fun SessionsScreen(
                     }
                 }
             }
+            if (ui == UiStyle.Tile && machine != null) {
+                TileMiniBar(
+                    visible = tileScrolled,
+                    title = machine.name,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    trailing = { SymbolButton(Symbols.Add, "新建会话", onClick = onCreate, enabled = online, small = true) },
+                )
             }
+            if (ui == UiStyle.Clear && machine != null) {
+                ClearGlassTopBar(
+                    visible = clearScrolled,
+                    title = machine.name,
+                    haze = clearHaze,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    trailing = { SymbolButton(Symbols.Add, "新建会话", onClick = onCreate, enabled = online) },
+                )
+            }
+            if (ui == UiStyle.Ink) {
+                InkTopBar(
+                    title = if (!paired) "未配对" else machine?.name ?: "会话",
+                    online = online,
+                    showDot = paired && machine != null,
+                    rightAction = InkTopRight.Add,
+                    rightEnabled = if (paired) online else true,
+                    rightDesc = if (paired) "新建会话" else "添加目标机",
+                    onOpenDrawer = { onOpenDrawer?.invoke() ?: run { drawerOpen = true } },
+                    onPillClick = { rect ->
+                        if (!paired || machine == null) {
+                            onPairAt?.invoke(rect) ?: onPair()
+                        } else {
+                            overlay = Overlay.Status(rect)
+                        }
+                    },
+                    onRightClick = { rect ->
+                        if (!paired) onPairAt?.invoke(rect) ?: onPair()
+                        else onCreateAt?.invoke(rect) ?: onCreate()
+                    },
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+            }
+            SnackHost(snack, Modifier.align(Alignment.BottomCenter), bottom = 88.dp)
         }
-        SnackHost(snack, Modifier.align(Alignment.BottomCenter), bottom = 88.dp)
+    }
+
+    if (ui == UiStyle.Ink && onOpenDrawer == null) {
+        InkPushDrawerHost(
+            open = drawerOpen,
+            machine = machine,
+            dirs = allDirs,
+            totalSessions = totalSessions,
+            selectedDir = effectiveDirFilter,
+            onSelectDir = { dir ->
+                onSelectDirFilter(dir)
+                inkTab = if (dir != null) InkListTab.All else InkListTab.Active
+            },
+            onScanPairAt = { rect ->
+                drawerOpen = false
+                onPairAt?.invoke(rect) ?: onPair()
+            },
+            onClose = { drawerOpen = false },
+        ) {
+            screenBody()
+        }
+    } else {
+        screenBody()
+    }
+
+    if (machineSheetOpen) {
+        MachineSwitcherSheet(
+            machines = machines,
+            sessions = allSessions,
+            currentMachineId = machine?.id,
+            onDismiss = { machineSheetOpen = false },
+            onSelectMachine = onSelectMachine,
+            onPair = onPair,
+        )
     }
 
     when (val o = overlay) {
@@ -380,12 +868,51 @@ fun SessionsScreen(
             } else {
                 BranchSheet(
                     dir,
+                    anchor = o.anchor,
                     onDismiss = { overlay = null },
                     onFilter = { b -> overlay = null; onFilterBranch(group, dir, b) },
                     onSwitch = { b -> overlay = null; onSwitchBranch(dir, b) },
                 )
             }
         }
+        is Overlay.Status -> if (machine != null) {
+            val renameable = state.groups.orEmpty().filter { it.canRename }
+            InkStatusPanel(
+                machine = machine,
+                usage = state.usage,
+                profileCount = renameable.size,
+                relays = relays,
+                anchor = o.anchor,
+                onDismiss = { overlay = null },
+                onManageProfiles = if (renameable.isNotEmpty()) ({
+                    overlay = if (renameable.size == 1) Overlay.Rename(renameable.first()) else Overlay.PickProfile(o.anchor)
+                }) else null,
+                onOpenRelay = { overlay = Overlay.Relay(o.anchor) },
+            )
+        } else {
+            SideEffect { overlay = null }
+        }
+        is Overlay.PickProfile -> {
+            val renameable = state.groups.orEmpty().filter { it.canRename }
+            ClaudercSheet(onDismiss = { overlay = null }, anchor = o.anchor, fromTop = true) {
+                SheetHead("管理启动档位名", "给启动档位起个好认的名字，只保存在这台手机上")
+                renameable.forEach { g ->
+                    MenuItem(
+                        text = g.title,
+                        onClick = { overlay = Overlay.Rename(g) },
+                        mono = g.titleIsHost,
+                        supporting = g.note ?: "${g.sessions.size} 个会话",
+                    )
+                }
+                Spacer(Modifier.height(sp.sp2))
+            }
+        }
+        is Overlay.Relay -> RelayStatusSheet(
+            relays = relays,
+            onDismiss = { overlay = null },
+            anchor = o.anchor,
+            fromTop = true,
+        )
         null -> Unit
     }
 
@@ -427,10 +954,10 @@ private fun filterReveal(filter: String?): MutableFloatState {
  * except for the current branch, one a worktree holds and a deleted one.
  */
 @Composable
-private fun BranchSheet(dir: DirGroup, onDismiss: () -> Unit, onFilter: (String?) -> Unit, onSwitch: (String) -> Unit) {
+private fun BranchSheet(dir: DirGroup, anchor: Rect? = null, onDismiss: () -> Unit, onFilter: (String?) -> Unit, onSwitch: (String) -> Unit) {
     val sp = Clauderc.spacing
     fun count(n: Int) = if (n > 0) "$n 个会话" else "没有会话"
-    ClaudercSheet(onDismiss = onDismiss) {
+    ClaudercSheet(onDismiss = onDismiss, anchor = anchor) {
         SheetHead("${dir.title} 的分支", "点分支只看它上面的会话")
         MenuItem("全部分支", onClick = { onFilter(null) }, supporting = count(dir.sessions.size), checked = dir.branchFilter == null)
         val b = dir.branches
@@ -486,8 +1013,8 @@ private fun GroupHeader(group: SessionGroup, onRename: () -> Unit, onToggle: () 
     Row(
         // .gh: 贴纸 sits it closer to its card, 格栅 lines it up with the rule 16dp in.
         Modifier.fillMaxWidth().padding(
-            start = if (Clauderc.style == UiStyle.Grid) sp.sp4 else sp.page,
-            end = if (Clauderc.style == UiStyle.Grid) sp.sp1 else sp.sp2,
+            start = if (Clauderc.style == UiStyle.Plate) sp.sp4 else sp.page,
+            end = if (Clauderc.style == UiStyle.Plate) sp.sp1 else sp.sp2,
             top = if (Clauderc.look.cards) sp.sp5 else sp.sp6,
             bottom = if (Clauderc.look.cards) sp.sp2 else sp.sp1,
         ),
@@ -506,12 +1033,12 @@ private fun GroupHeader(group: SessionGroup, onRename: () -> Unit, onToggle: () 
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val grid = Clauderc.style == UiStyle.Grid
+            val plate = Clauderc.style == UiStyle.Plate
             Text(
                 group.title,
-                fontSize = if (grid) 12.sp else if (group.titleIsHost) Clauderc.fontSizes.mono else Clauderc.fontSizes.label,
-                fontFamily = if (group.titleIsHost || grid) MonoFamily else null,
-                fontWeight = if (Clauderc.style == UiStyle.Sticker) FontWeight.Bold else FontWeight.Medium,
+                fontSize = if (plate) 12.sp else if (group.titleIsHost) Clauderc.fontSizes.mono else Clauderc.fontSizes.label,
+                fontFamily = if (group.titleIsHost || plate) MonoFamily else null,
+                fontWeight = if (Clauderc.look.cards) FontWeight.SemiBold else FontWeight.Medium,
             )
             if (group.canRename) Icon(Symbols.Edit, contentDescription = null, tint = c.fg3, modifier = Modifier.size(16.dp))
         }
@@ -559,10 +1086,11 @@ private fun GroupHeader(group: SessionGroup, onRename: () -> Unit, onToggle: () 
  * narrowed to it.
  */
 @Composable
-private fun DirRow(dir: DirGroup, onToggle: () -> Unit, modifier: Modifier = Modifier, onBranches: () -> Unit = {}) {
+private fun DirRow(dir: DirGroup, onToggle: () -> Unit, modifier: Modifier = Modifier, onBranches: (Rect?) -> Unit = {}) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val turn by animateFloatAsState(if (dir.collapsed) 0f else 180f, Motion.turn(), label = "dirFold")
+    val branchAnchor = rememberAnchorBox()
     Row(
         modifier
             .fillMaxWidth()
@@ -580,9 +1108,10 @@ private fun DirRow(dir: DirGroup, onToggle: () -> Unit, modifier: Modifier = Mod
                 val on = dir.branchFilter != null
                 Row(
                     Modifier
+                        .captureAnchor(branchAnchor)
                         .padding(start = sp.sp2, end = sp.sp1)
                         .clip(RoundedCornerShape(Clauderc.radii.sm))
-                        .clickable(role = Role.Button, onClickLabel = "${dir.title} 的分支", onClick = onBranches)
+                        .clickable(role = Role.Button, onClickLabel = "${dir.title} 的分支") { onBranches(branchAnchor.rect) }
                         .padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(1.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -664,13 +1193,14 @@ private fun UsageBlock(usage: UsageResponse) {
     val ui = Clauderc.style
     val fill = when {
         stale -> c.fg3
-        ui == UiStyle.Sticker -> c.accent
-        ui == UiStyle.Grid -> c.fg
+        ui == UiStyle.Tile -> c.accent
+        ui == UiStyle.Plate -> c.fg
+        ui == UiStyle.Ink -> c.fg
         else -> c.fg2
     }
-    // 格栅 sets the whole block in monospace.
-    val mono = if (ui == UiStyle.Grid) MonoFamily else null
-    val labelSize = if (ui == UiStyle.Grid) 12.sp else Clauderc.fontSizes.label
+    // 印版 sets the whole block in monospace.
+    val mono = if (ui == UiStyle.Plate) MonoFamily else null
+    val labelSize = if (ui == UiStyle.Plate) 12.sp else Clauderc.fontSizes.label
     GroupBlock(Modifier.padding(bottom = sp.sp2), padding = sp.sp4) {
         Column(
             Modifier.padding(horizontal = Clauderc.look.blockGutter),
@@ -686,7 +1216,7 @@ private fun UsageBlock(usage: UsageResponse) {
                         modifier = Modifier.width(40.dp),
                         fontSize = labelSize,
                         fontFamily = mono,
-                        fontWeight = if (ui == UiStyle.Sticker) FontWeight.ExtraBold else FontWeight.Medium,
+                        fontWeight = if (ui == UiStyle.Tile || ui == UiStyle.Plate) FontWeight.Bold else FontWeight.Medium,
                         color = if (stale) c.fg3 else c.fg,
                         textAlign = TextAlign.End,
                         maxLines = 1,
@@ -700,8 +1230,8 @@ private fun UsageBlock(usage: UsageResponse) {
 }
 
 /**
- * One limit's bar (.u-bar). 清玻: a 3dp hairline track. 格栅: a 6dp square bar filled solid. 贴纸: a
- * 14dp ink-outlined capsule, filled flat and closed off with an ink stroke.
+ * One limit's bar (.u-bar). 清玻: a 3dp hairline track. 印版: framed 12dp bar with solid ink fill
+ * and diagonal hatch background. 素卡: 8dp rounded track filled in accent. 浮墨: 6dp rounded bar.
  */
 @Composable
 private fun UsageBar(share: Float, fill: Color, modifier: Modifier) {
@@ -710,17 +1240,12 @@ private fun UsageBar(share: Float, fill: Color, modifier: Modifier) {
         UiStyle.Clear -> Box(modifier.height(3.dp).clip(RoundedCornerShape(2.dp)).background(c.line)) {
             Box(Modifier.fillMaxWidth(share).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(fill))
         }
-        UiStyle.Grid -> Box(modifier.height(6.dp).background(c.surface)) {
-            Box(Modifier.fillMaxWidth(share).fillMaxHeight().background(fill))
+        UiStyle.Plate -> Box(modifier.height(12.dp).plateHatchedBar(share, fill, c.bg))
+        UiStyle.Tile -> Box(modifier.height(8.dp).clip(RoundedCornerShape(4.dp)).background(c.surface2)) {
+            Box(Modifier.fillMaxWidth(share).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(fill))
         }
-        UiStyle.Sticker -> Box(modifier.height(14.dp).sticker(c.bg, c.ink, 7.dp).padding(2.dp)) {
-            val ink = c.ink
-            Box(
-                Modifier.fillMaxWidth(share).fillMaxHeight().background(fill).drawWithContent {
-                    drawContent()
-                    if (share in 0.001f..0.999f) drawRect(ink, Offset(size.width, 0f), Size(2.dp.toPx(), size.height))
-                },
-            )
+        UiStyle.Ink -> Box(modifier.height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.surface2)) {
+            Box(Modifier.fillMaxWidth(share).fillMaxHeight().clip(RoundedCornerShape(3.dp)).background(fill))
         }
     }
 }
@@ -730,26 +1255,62 @@ fun runningAgents(s: Session): List<Subagent> =
     if (s.state == SessionState.Stopped) emptyList() else s.agents.orEmpty().filter { it.running && it.id != null }
 
 /**
- * A session's running subagents, indented under it: the spinner lines up with the session's title, then
- * the description and the type. The block grows in and shrinks out as subagents start and end.
+ * A session's running subagents, left-aligned cleanly under the parent session's status glyph with a
+ * dashed tree connector (matching demo.html .agents / .agent::before across all four styles).
  */
 @Composable
-private fun AgentRows(agents: List<Subagent>, enabled: Boolean, onOpen: (Subagent) -> Unit) {
+private fun AgentRows(
+    agents: List<Subagent>,
+    enabled: Boolean,
+    spot: GlyphSpot,
+    tree: TreeLine,
+    onOpen: (Subagent) -> Unit,
+    indent: Dp = DirIndent,
+) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
+    val plate = Clauderc.style == UiStyle.Plate
     // Kept while the block shrinks away, so the last rows leave with it.
     var shown by remember { mutableStateOf(agents) }
     if (agents.isNotEmpty()) shown = agents
+    val dashColor = if (plate) c.fg2 else c.fg3.copy(alpha = 0.55f)
+    val spinStart = Clauderc.look.rowStart + indent + GlyphWidth + sp.sp4
     Fold(visible = agents.isNotEmpty()) {
-        Column(Modifier.fillMaxWidth().animateContentSize(Motion.enter()).padding(bottom = 6.dp).testTag("agentRows")) {
-            shown.forEach { a ->
+        Column(Modifier.fillMaxWidth().animateContentSize(Motion.enter()).padding(bottom = 8.dp).testTag("agentRows")) {
+            shown.forEachIndexed { i, a ->
+                val last = i == shown.lastIndex
                 key(a.id) {
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .clickable(enabled = enabled, role = Role.Button, onClickLabel = "打开子代理") { onOpen(a) }
-                            .padding(start = Clauderc.look.rowStart + DirIndent + GlyphWidth + sp.sp4, end = sp.sp4, top = 7.dp, bottom = 7.dp),
-                        horizontalArrangement = Arrangement.spacedBy(sp.sp3),
+                            .drawBehind {
+                                val x = spot.x.toPx()
+                                val midY = size.height / 2f
+                                val r = if (plate) 0f else tree.corner.toPx()
+                                val armEnd = (spinStart - 4.dp).toPx()
+                                val dash = Stroke(
+                                    width = 1.5.dp.toPx(),
+                                    cap = StrokeCap.Butt,
+                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.5.dp.toPx(), 2.5.dp.toPx()), 0f),
+                                )
+                                drawPath(
+                                    Path().apply {
+                                        moveTo(x, if (i == 0) -4.dp.toPx() else 0f)
+                                        lineTo(x, midY - r)
+                                        if (r > 0f) quadraticTo(x, midY, x + r, midY)
+                                        lineTo(armEnd, midY)
+                                    },
+                                    dashColor,
+                                    style = dash,
+                                )
+                                if (!last) {
+                                    drawLine(dashColor, Offset(x, midY), Offset(x, size.height), strokeWidth = 1.5.dp.toPx(), pathEffect = dash.pathEffect)
+                                }
+                            }
+                            .padding(start = spinStart, end = sp.sp4, top = 7.dp, bottom = 7.dp)
+                            .testTag("agentRow:${a.id}"),
+                        horizontalArrangement = Arrangement.spacedBy(sp.sp2),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Spinner(size = 12.dp, color = c.fg3)
@@ -775,15 +1336,14 @@ private val ForkShift = 6.dp
 private data class GlyphSpot(val x: Dp, val y: Dp, val half: Dp)
 
 @Composable
-private fun glyphSpot(): GlyphSpot {
-    // 格栅 sets a 14 x 16dp terminal character; the others a 10dp symbol. Both sit 6dp under the row's 14dp top gap.
-    val (w, h) = if (Clauderc.style == UiStyle.Grid) 14.dp to 16.dp else GlyphWidth to GlyphWidth
-    return GlyphSpot(Clauderc.look.rowStart + DirIndent + w / 2, 14.dp + 6.dp + h / 2, w / 2)
+private fun glyphSpot(indent: Dp = DirIndent): GlyphSpot {
+    // 印版 sets a 14 x 16dp terminal character; the others a 10dp symbol. Both sit 6dp under the row's 14dp top gap.
+    val (w, h) = if (Clauderc.style == UiStyle.Plate) 14.dp to 16.dp else GlyphWidth to GlyphWidth
+    return GlyphSpot(Clauderc.look.rowStart + indent + w / 2, 14.dp + 6.dp + h / 2, w / 2)
 }
 
 /**
- * The fork tree's line (.dkids --tree): 清玻 a faint hairline with round elbows, 格栅 a solid line with
- * square elbows, 贴纸 a 2dp ink line.
+ * The fork tree's line: 清玻/素卡/浮墨 a soft line with round elbows, 印版 a solid ink line with square elbows.
  */
 private data class TreeLine(val color: Color, val width: Dp, val corner: Dp)
 
@@ -792,8 +1352,9 @@ private fun treeLine(): TreeLine {
     val c = Clauderc.colors
     return when (Clauderc.style) {
         UiStyle.Clear -> TreeLine(c.fg.copy(alpha = 0.26f), 1.5.dp, 6.dp)
-        UiStyle.Grid -> TreeLine(c.fg, 1.5.dp, 0.dp)
-        UiStyle.Sticker -> TreeLine(c.ink, 2.dp, 6.dp)
+        UiStyle.Plate -> TreeLine(c.fg, 1.5.dp, 0.dp)
+        UiStyle.Tile -> TreeLine(c.fg3.copy(alpha = 0.55f), 1.5.dp, 6.dp)
+        UiStyle.Ink -> TreeLine(c.fg3.copy(alpha = 0.55f), 1.5.dp, 6.dp)
     }
 }
 
@@ -865,7 +1426,7 @@ private fun SessionNodeRows(
                 s, enabled = enabled, onOpen = { onOpen(s) }, acts = acts, tight = agents.isNotEmpty(),
                 forks = forks.size, forksCollapsed = node.forksCollapsed, onToggleForks = onToggleForks, showBranch = showBranch, draft = drafts[s.id],
             )
-            AgentRows(agents, enabled = enabled, onOpen = { onOpenAgent(s, it) })
+            AgentRows(agents, enabled = enabled, spot = spot, tree = tree, onOpen = { onOpenAgent(s, it) })
         }
         // The line from just under the symbol to the bottom, grown down as far as [line] says.
         if (forks.isNotEmpty()) {
@@ -921,7 +1482,7 @@ private fun SessionNodeRows(
                     ) {
                         val agents = runningAgents(f)
                         SessionRow(f, enabled = enabled, onOpen = { onOpen(f) }, acts = acts, tight = agents.isNotEmpty(), showBranch = showBranch, draft = drafts[f.id])
-                        AgentRows(agents, enabled = enabled, onOpen = { onOpenAgent(f, it) })
+                        AgentRows(agents, enabled = enabled, spot = spot, tree = tree, onOpen = { onOpenAgent(f, it) })
                     }
                 }
             }
@@ -992,6 +1553,8 @@ private fun SessionRow(
     showBranch: Boolean = false,
     /** Text typed into the session and not sent: it takes the second line's place. */
     draft: String? = null,
+    indent: Dp = DirIndent,
+    dirPrefix: String? = null,
 ) {
     val sp = Clauderc.spacing
     val hub = acts.swipe
@@ -1042,7 +1605,7 @@ private fun SessionRow(
                         if (hub.open != null) hub.open = null else onOpen()
                     }
                     // Without the fold button the time keeps the page margin from the right edge.
-                    .padding(start = Clauderc.look.rowStart + DirIndent, end = if (forks > 0) 0.dp else sp.page - sp.sp2, top = 14.dp, bottom = if (tight) 4.dp else 14.dp),
+                    .padding(start = Clauderc.look.rowStart + indent, end = if (forks > 0) 0.dp else sp.page - sp.sp2, top = 14.dp, bottom = if (tight) 4.dp else 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(sp.sp4),
             ) {
                 // A change of state crossfades: the old symbol leaves in durS while the new one comes in over durM.
@@ -1054,7 +1617,7 @@ private fun SessionRow(
                 ) { StatusGlyph(it) }
                 Column(Modifier.weight(1f).clipToBounds()) {
                     Column(Modifier.graphicsLayer { translationX = slide.value }, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        SessionRowText(s, showBranch, draft)
+                        SessionRowText(s, showBranch, draft, dirPrefix)
                     }
                 }
             }
@@ -1088,7 +1651,7 @@ private fun SessionRow(
 
 /** A session row's title and time over its state line; the part of the row that slides. */
 @Composable
-private fun SessionRowText(s: Session, showBranch: Boolean, draft: String?) {
+private fun SessionRowText(s: Session, showBranch: Boolean, draft: String?, dirPrefix: String? = null) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     Row(horizontalArrangement = Arrangement.spacedBy(sp.sp3), verticalAlignment = Alignment.Bottom) {
@@ -1101,17 +1664,22 @@ private fun SessionRowText(s: Session, showBranch: Boolean, draft: String?) {
             overflow = TextOverflow.Ellipsis,
         )
         val since = TimeText.relative(s.lastActiveAt)
-        // 格栅 sets the time and the second line in small monospace.
-        val grid = Clauderc.style == UiStyle.Grid
-        Text(contextPercent(s.context)?.let { "上下文 $it% · $since" } ?: since, fontSize = if (grid) 11.5.sp else Clauderc.fontSizes.caption, fontFamily = if (grid) MonoFamily else null, color = c.fg3, maxLines = 1)
+        // 印版 sets the time and the second line in small monospace.
+        val plate = Clauderc.style == UiStyle.Plate
+        Text(contextPercent(s.context)?.let { "上下文 $it% · $since" } ?: since, fontSize = if (plate) 11.5.sp else Clauderc.fontSizes.caption, fontFamily = if (plate) MonoFamily else null, color = c.fg3, maxLines = 1)
     }
     // The directory is the row above, so the second line is the state and Claude Code's one-line progress, as in its agent view.
     // A worktree session leads with the worktree mark and its branch; others name their branch when [showBranch].
     // A draft takes the whole line: 「草稿：」 and its first line (.draft).
     val branch = s.branch?.takeIf { s.worktree != null || showBranch }
     val drafted = draft?.trim()?.takeIf { it.isNotEmpty() }?.lineSequence()?.first()
+    val plate = Clauderc.style == UiStyle.Plate
     Text(
         buildAnnotatedString {
+            if (!dirPrefix.isNullOrEmpty()) {
+                append(dirPrefix)
+                append(" · ")
+            }
             if (drafted != null) {
                 withStyle(SpanStyle(color = c.danger)) { append("草稿：") }
                 append(drafted)
@@ -1119,15 +1687,15 @@ private fun SessionRowText(s: Session, showBranch: Boolean, draft: String?) {
             }
             if (branch != null) {
                 if (s.worktree != null) appendInlineContent(WorktreeMark, "worktree")
-                withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = if (Clauderc.style == UiStyle.Grid) 11.5.sp else Clauderc.fontSizes.monoSm)) { append(branch) }
+                withStyle(SpanStyle(fontFamily = MonoFamily, fontSize = if (plate) 11.5.sp else Clauderc.fontSizes.monoSm)) { append(branch) }
                 append(" · ")
             }
             val word = sessionStateText(s)
             if (s.state == SessionState.Pending || needsReply(s)) withStyle(SpanStyle(color = c.accent)) { append(word) } else append(word)
             s.detail?.takeIf { it.isNotBlank() }?.let { append(" · ${it.trim()}") }
         },
-        fontSize = if (Clauderc.style == UiStyle.Grid) 11.5.sp else Clauderc.fontSizes.label,
-        fontFamily = if (Clauderc.style == UiStyle.Grid) MonoFamily else null,
+        fontSize = if (plate) 11.5.sp else Clauderc.fontSizes.label,
+        fontFamily = if (plate) MonoFamily else null,
         color = c.fg2,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
@@ -1135,18 +1703,10 @@ private fun SessionRowText(s: Session, showBranch: Boolean, draft: String?) {
     )
 }
 
-/**
- * The button a slid row brings in (.swipe-act): one danger-red symbol and no word under it, [text]
- * read out instead, drawn as each style draws its rewind button. 清玻 the bare 24dp symbol; 格栅 a 40dp
- * square in a 1.5dp red line; 贴纸 a 40dp card-white circle in a 2dp ink line, no shadow. A press shows
- * at once and lets go in durS: 清玻's symbol shrinks and turns left like a knob, 格栅 fills red under a
- * white symbol, 贴纸 fills red under a white symbol as it shrinks and tilts left.
- */
 @Composable
 private fun SwipeAction(text: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = Clauderc.colors
     val press = remember { MutableInteractionSource() }
-    // The turn springs back; the colours fade back evenly.
     val turn by snapPressed(press, Clauderc.motion.easeSpring)
     val fill by snapPressed(press, LinearEasing)
     val symbol = @Composable { size: Dp, tint: Color -> Icon(icon.styled, contentDescription = null, tint = tint, modifier = Modifier.size(size)) }
@@ -1159,12 +1719,16 @@ private fun SwipeAction(text: String, icon: ImageVector, onClick: () -> Unit, mo
     ) {
         when (Clauderc.style) {
             UiStyle.Clear -> Box(Modifier.graphicsLayer { turned(turn, 0.82f, -24f) }) { symbol(24.dp, c.danger) }
-            UiStyle.Grid -> Box(
+            UiStyle.Plate -> Box(
                 Modifier.size(40.dp).background(c.danger.copy(alpha = fill)).border(1.5.dp, c.danger),
                 contentAlignment = Alignment.Center,
             ) { symbol(20.dp, lerp(c.danger, Color.White, fill)) }
-            UiStyle.Sticker -> Box(
-                Modifier.graphicsLayer { turned(turn, 0.9f, -10f) }.size(40.dp).sticker(lerp(c.card, c.danger, fill), c.ink, 20.dp),
+            UiStyle.Tile -> Box(
+                Modifier.graphicsLayer { turned(turn, 0.92f, 0f) }.size(40.dp).tileSurface(lerp(c.card, c.danger, fill), 20.dp),
+                contentAlignment = Alignment.Center,
+            ) { symbol(20.dp, lerp(c.danger, Color.White, fill)) }
+            UiStyle.Ink -> Box(
+                Modifier.graphicsLayer { turned(turn, 0.90f, 0f) }.size(40.dp).inkSurface(lerp(c.float, c.danger, fill), c.edge, 20.dp),
                 contentAlignment = Alignment.Center,
             ) { symbol(20.dp, lerp(c.danger, Color.White, fill)) }
         }

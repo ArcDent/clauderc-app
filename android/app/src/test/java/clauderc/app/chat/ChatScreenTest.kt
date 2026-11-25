@@ -135,8 +135,8 @@ class ChatScreenTest {
         commands = listOf(Command("model", "切换模型"), Command("memory", "编辑记忆文件"), Command("compact", "压缩对话上下文")),
     )
 
-    private fun show(state: ChatUiState, actions: ChatActions = ChatActions()) {
-        compose.setContent { ClaudercTheme(darkTheme = false) { ChatScreen(state, actions) } }
+    private fun show(state: ChatUiState, actions: ChatActions = ChatActions(), style: UiStyle = UiStyle.Ink) {
+        compose.setContent { ClaudercTheme(darkTheme = false, style = style) { ChatScreen(state, actions) } }
     }
 
     private fun clipboardText() = ApplicationProvider.getApplicationContext<android.app.Application>()
@@ -255,9 +255,9 @@ class ChatScreenTest {
     }
 
     @Config(shadows = [ShadowMagnifier::class])
-    @Test fun stickersSelectionOnTheUsersBubbleShowsOnItsAccent() {
+    @Test fun tilesSelectionOnTheUsersBubbleShowsOnItsAccent() {
         val toolbar = FakeToolbar()
-        val colors = showSelecting(baseState().copy(items = listOf(ChatItem(1, ItemKind.USER, text = "跑一遍 go vet 再提交")), hasMore = false), toolbar, UiStyle.Sticker)
+        val colors = showSelecting(baseState().copy(items = listOf(ChatItem(1, ItemKind.USER, text = "跑一遍 go vet 再提交")), hasMore = false), toolbar, UiStyle.Tile)
         val bubble = compose.onNodeWithText("跑一遍 go vet 再提交")
         bubble.performTouchInput { longClick(Offset(width * 0.3f, height / 2f)) }
         awaitToolbar("the user's message selects") { toolbar.shown != null }
@@ -273,41 +273,12 @@ class ChatScreenTest {
         assertTrue("selected text shows in the selection colour: $hits pixels", hits > 50)
     }
 
-    /** Round 12: 贴纸's bubbles keep their 2dp ink outline but no longer sit on a hard ink shadow. */
-    @Test fun stickersBubblesHaveNoShadow() {
-        var colors: ClaudercColors? = null
-        val items = listOf(ChatItem(1, ItemKind.USER, text = "跑一遍 go vet 再提交"), ChatItem(2, ItemKind.ASSISTANT, text = "好的，我先跑一遍。"))
-        compose.setContent {
-            ClaudercTheme(darkTheme = false, style = UiStyle.Sticker) {
-                colors = Clauderc.colors
-                ChatScreen(baseState().copy(items = items, hasMore = false), ChatActions())
-            }
-        }
-        compose.waitForIdle()
-        val ink = colors!!.ink
-        val image = compose.onRoot().captureToImage().toPixelMap()
-        val d = compose.density.density
-        for (text in items.map { it.text!! }) {
-            // Down the middle from under the text: the padding, the outline, then the page; a shadow would make the ink run longer.
-            val b = compose.onNodeWithText(text).getBoundsInRoot()
-            val x = ((b.left + b.right) / 2).value * d
-            var run = 0
-            var longest = 0
-            for (y in (b.bottom.value * d).toInt() + 1 until ((b.bottom.value + 20) * d).toInt()) {
-                val p = image[x.toInt(), y]
-                run = if ((abs(p.red - ink.red) + abs(p.green - ink.green) + abs(p.blue - ink.blue)) / 3 < 0.1f) run + 1 else 0
-                longest = maxOf(longest, run)
-            }
-            assertTrue("「$text」: only the outline is ink, ${longest / d}dp", longest / d in 1f..3.5f)
-        }
-    }
-
-    /** Round 12: 格栅's code block is ringed in a 1dp line of the text colour, so its grey tells from the page. */
-    @Test fun gridsCodeBlockHasAThinLineInTheTextColour() {
+    /** 印版's code block is ringed in a 1dp line of the text colour, so its tint tells from the paper. */
+    @Test fun platesCodeBlockHasAThinLineInTheTextColour() {
         var colors: ClaudercColors? = null
         val reply = ChatItem(1, ItemKind.ASSISTANT, text = "看这段：\n\n```go\nfunc backoff(n int) time.Duration {\n\treturn time.Second << n\n}\n```")
         compose.setContent {
-            ClaudercTheme(darkTheme = false, style = UiStyle.Grid) {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Plate) {
                 colors = Clauderc.colors
                 ChatScreen(baseState().copy(items = listOf(reply), hasMore = false), ChatActions())
             }
@@ -345,7 +316,7 @@ class ChatScreenTest {
         show(baseState().copy(
             session = session("s-long", "chat-link-actions-latex", SessionState.Idle, "default", context = clauderc.app.protocol.SessionContext(84_000, 200_000)),
             model = "deepseek-v4.1-flash[1M]", permissionMode = "auto",
-        ))
+        ), style = UiStyle.Clear)
         fun layout(text: String): androidx.compose.ui.text.TextLayoutResult {
             val results = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
             compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action!!.invoke(results)
@@ -800,15 +771,60 @@ class ChatScreenTest {
 
     @Test fun headerShowsModelAndModeAndSwitches() {
         val modes = mutableListOf<String>()
-        show(baseState(), ChatActions(onSetMode = { modes += it }))
+        show(baseState(), ChatActions(onSetMode = { modes += it }), style = UiStyle.Clear)
         compose.onNodeWithText("Opus 5.5").assertIsDisplayed()
         compose.onNodeWithText("默认询问").performClick()
         compose.onNodeWithText("自动接受编辑").performClick()
         assertEquals(listOf("acceptEdits"), modes)
     }
 
+    @Test fun inkChatHasThreePieceTopBarUnifiedControlPanelAndBottomIsland() {
+        val modes = mutableListOf<String>()
+        val models = mutableListOf<String>()
+        val openedGit = mutableListOf<String>()
+        val state = baseState().copy(
+            session = session("s-need", "clauderc 协议", SessionState.Working, "default", cwd = "/Users/me/github/clauderc-app").copy(branch = "dev"),
+            state = SessionState.Working,
+            models = listOf(
+                clauderc.app.protocol.ModelOption("claude-opus-5-5", "Opus 5.5", current = true),
+                clauderc.app.protocol.ModelOption("claude-sonnet-5-5", "Sonnet 5.5", current = false),
+            ),
+            tasks = listOf(clauderc.app.protocol.ChatTask("1", "检查协议测试", status = clauderc.app.protocol.TaskStatus.IN_PROGRESS)),
+        )
+        show(
+            state,
+            ChatActions(
+                onSetMode = { modes += it },
+                onSetModel = { models += it.id },
+                onOpenGit = { openedGit += it },
+            ),
+            style = UiStyle.Ink,
+        )
+        compose.waitForIdle()
+        // 3-piece floating top bar: back orb + title·branch pill + terminal orb (no separate git button).
+        compose.onNodeWithContentDescription("返回").assertIsDisplayed()
+        compose.onNodeWithContentDescription("打开终端").assertIsDisplayed()
+        compose.onNodeWithContentDescription("git").assertDoesNotExist()
+        // Unified 30dp bottom island holds tasks + working bar + composer together.
+        compose.onNodeWithTag("inkChatIsland").assertIsDisplayed()
+        compose.onNodeWithTag("taskBar").assertIsDisplayed()
+        compose.onNodeWithTag("composer").assertIsDisplayed()
+
+        // Tapping center pill morphs down the unified chat control panel.
+        compose.onNodeWithTag("inkChatCtlPill").assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("inkChatCtlPanel").assertIsDisplayed()
+        compose.onNodeWithText("Sonnet 5.5").performClick()
+        compose.onNodeWithText("自动接受编辑").performClick()
+        assertEquals(listOf("claude-sonnet-5-5"), models)
+        assertEquals(listOf("acceptEdits"), modes)
+        compose.onNodeWithText("查看 git 仓库").assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("/Users/me/github/clauderc-app"), openedGit)
+    }
+
     @Test fun offlinePageIsReadOnlyButStillScrolls() {
-        show(baseState().copy(online = false, offlineText = "已离线 · 最后在线 14:36"))
+        show(baseState().copy(online = false, offlineText = "已离线 · 最后在线 14:36"), style = UiStyle.Clear)
         compose.onNodeWithText("已离线 · 最后在线 14:36").assertIsDisplayed()
         compose.onNodeWithTag("composer").assertIsNotEnabled()
         compose.onNodeWithText("离线，不能发送").assertIsDisplayed()
@@ -1385,7 +1401,7 @@ class ChatScreenTest {
         val state = baseState().copy(hasMore = false)
         val tester = androidx.compose.ui.test.junit4.StateRestorationTester(compose)
         tester.setContent {
-            ClaudercTheme(darkTheme = false) {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Clear) {
                 ChatScreen(state, ChatActions())
             }
         }
@@ -1487,5 +1503,92 @@ class ChatScreenTest {
         val (saved, _, _) = writes.single()
         assertTrue("saved local original bytes", saved.contentEquals(originalBytes))
         live.close()
+    }
+
+    @Test fun answeringPendingShowsNextPendingBannerAndJumps() {
+        var state by mutableStateOf(
+            baseState().copy(
+                pending = Pending("t-1", PendingKind.PERMISSION, "Bash", buildJsonObject { put("command", "go test ./...") }),
+            ),
+        )
+        val next = clauderc.app.machines.PendingEntry(
+            machineId = "m-2",
+            machineName = "家里的 iMac",
+            session = session("s-next", "重构路由层", SessionState.Pending, "default"),
+        )
+        val jumped = mutableListOf<String>()
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Ink) {
+                ChatScreen(
+                    state = state,
+                    actions = ChatActions(
+                        onAllow = { state = state.copy(pending = null) },
+                        onOpenNextPending = { jumped += "${it.machineId}:${it.session.id}" },
+                    ),
+                    nextPending = next,
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("nextPendingBanner").assertDoesNotExist()
+        compose.onNodeWithText("允许").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("nextPendingBanner").assertIsDisplayed()
+        compose.onNodeWithText("重构路由层").assertIsDisplayed()
+        compose.onNodeWithTag("nextPendingBanner").performClick()
+        assertEquals(listOf("m-2:s-next"), jumped)
+    }
+
+    @Test fun platePendingPanelUsesDangerDenyAndSolidAllow() {
+        val pending = Pending("t-1", PendingKind.PERMISSION, "Bash", buildJsonObject { put("command", "go vet ./...") })
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Plate) {
+                ChatScreen(baseState().copy(pending = pending), ChatActions())
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("拒绝").assertIsDisplayed()
+        compose.onNodeWithText("允许").assertIsDisplayed()
+    }
+
+    @Test fun plateChatShowsCtxRuleAndOpensControlSlipPanel() {
+        val switchedMode = mutableListOf<String>()
+        var openedTerm = 0
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Plate) {
+                ChatScreen(
+                    baseState().copy(
+                        models = listOf(clauderc.app.protocol.ModelOption("sonnet", "Sonnet 4.6", current = true)),
+                        permissionMode = "default",
+                    ),
+                    ChatActions(
+                        onSetMode = { switchedMode += it },
+                        onOpenTerm = { openedTerm++ },
+                    ),
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("plateCtxRule").assertIsDisplayed()
+        compose.onNodeWithTag("plateAttachBtn").assertIsDisplayed()
+        compose.onNodeWithTag("plateChatCtl").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("plateChatCtlSlip").assertIsDisplayed()
+        compose.onNodeWithText("计划模式").performClick()
+        assertEquals(listOf("plan"), switchedMode)
+        compose.onNodeWithText("打开终端视图").performClick()
+        compose.waitUntil(2_000) { openedTerm == 1 }
+        assertEquals(1, openedTerm)
+    }
+
+    @Test fun tileChatShowsGroupedRightPillAndWhiteBottomTray() {
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Tile) {
+                ChatScreen(baseState(), ChatActions())
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("tileChatPillGroup").assertIsDisplayed()
+        compose.onNodeWithTag("tileChatTray").assertIsDisplayed()
     }
 }

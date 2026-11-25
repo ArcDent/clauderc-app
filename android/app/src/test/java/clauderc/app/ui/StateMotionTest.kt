@@ -100,7 +100,11 @@ class StateMotionTest {
         var list by mutableStateOf(SessionList(listOf(session("s1", "修复重连", SessionState.Working, "default")), sampleProfiles))
         compose.setContent {
             ClaudercTheme(darkTheme = false) {
-                SessionsScreen(SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(list, emptyMap())), {}, {}, {}, { _, _ -> }, {}, {})
+                SessionsScreen(
+                    SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(list, emptyMap())),
+                    {}, {}, {}, { _, _ -> }, {}, {},
+                    initialInkTab = clauderc.app.sessions.InkListTab.All,
+                )
             }
         }
         compose.waitForIdle()

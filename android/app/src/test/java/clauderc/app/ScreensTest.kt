@@ -50,9 +50,15 @@ import clauderc.app.chat.ImageViewer
 import clauderc.app.chat.Viewing
 import clauderc.app.data.AccentChoice
 import clauderc.app.data.Appearance
+import clauderc.app.data.PlateNavStyle
 import clauderc.app.data.ThemeMode
 import clauderc.app.data.UiStyle
+import clauderc.app.machines.ClearPendingStrip
+import clauderc.app.machines.InkHubSheet
+import clauderc.app.machines.PendingEntry
+import clauderc.app.git.CommitMorphPanel
 import clauderc.app.git.CommitScreen
+import clauderc.app.git.DiffMorphPanel
 import clauderc.app.git.DiffScreen
 import clauderc.app.git.GitActions
 import clauderc.app.git.GitScreen
@@ -108,11 +114,8 @@ import clauderc.app.testing.machine
 import clauderc.app.testing.sampleSessions
 import clauderc.app.testing.session
 import clauderc.app.ui.components.GlassNavBar
-import clauderc.app.ui.components.LOADING_DELAY_MILLIS
-import clauderc.app.ui.components.LoadingArt
-import clauderc.app.ui.components.LoadingCover
 import clauderc.app.ui.components.NavTab
-import clauderc.app.ui.components.sticker
+import clauderc.app.ui.components.tileSurface
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercTheme
 import clauderc.app.ui.theme.Symbols
@@ -140,7 +143,8 @@ class ScreensTest {
 
     private var content by mutableStateOf<(@Composable () -> Unit)?>(null)
     private var dark by mutableStateOf(false)
-    private var style by mutableStateOf(UiStyle.Clear)
+    private var style by mutableStateOf(UiStyle.Ink)
+    private var plateNav by mutableStateOf(PlateNavStyle.Float)
     private var started = false
 
     /**
@@ -148,28 +152,55 @@ class ScreensTest {
      * shot's state. [open], when given, then runs (a tap that opens a sheet, say) and the shot lays the
      * windows of sheets and dialogs over the page.
      */
-    private fun shot(name: String, isDark: Boolean = false, nav: Int? = null, look: UiStyle = UiStyle.Clear, after: Long = 1_000, fresh: Boolean = false, open: (() -> Unit)? = null, body: @Composable () -> Unit) {
+    private fun shot(
+        name: String,
+        isDark: Boolean = false,
+        nav: Int? = null,
+        look: UiStyle = UiStyle.Clear,
+        navPlate: PlateNavStyle = PlateNavStyle.Float,
+        after: Long = 1_000,
+        fresh: Boolean = false,
+        open: (() -> Unit)? = null,
+        body: @Composable () -> Unit,
+    ) {
         dark = isDark
         style = look
+        plateNav = navPlate
+        val samplePending = listOf(
+            PendingEntry("m-1", "工作室 Mac mini", session("s-need", "clauderc 协议", SessionState.Pending, "default")),
+            PendingEntry("m-1", "工作室 Mac mini", session("s-need-2", "周报整理", SessionState.Pending, "default")),
+        )
         content = {
             Box(Modifier.fillMaxSize().page()) {
                 if (fresh) key(name) { body() } else body()
                 if (nav != null) {
-                    GlassNavBar(
-                        listOf(
-                            NavTab("目标机", Symbols.Computer, Symbols.ComputerFilled),
-                            NavTab("会话", Symbols.Forum, Symbols.ForumFilled, dot = true),
-                            NavTab("git", Symbols.AccountTree, Symbols.AccountTreeFilled),
-                            NavTab("设置", Symbols.Settings, Symbols.SettingsFilled),
-                        ),
-                        selected = nav, onSelect = {}, hazeState = null, modifier = Modifier.align(Alignment.BottomCenter),
-                    )
+                    androidx.compose.foundation.layout.Column(
+                        Modifier.align(Alignment.BottomCenter),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (look == UiStyle.Clear) {
+                            ClearPendingStrip(samplePending, currentMachineId = "m-1", haze = null, onOpenNext = {})
+                        }
+                        GlassNavBar(
+                            listOf(
+                                NavTab("会话", Symbols.Forum, Symbols.ForumFilled, dot = true),
+                                NavTab("git", Symbols.AccountTree, Symbols.AccountTreeFilled),
+                                NavTab("设置", Symbols.Settings, Symbols.SettingsFilled),
+                            ),
+                            selected = nav,
+                            onSelect = {},
+                            hazeState = null,
+                            pendingCount = 2,
+                            onPendingOrb = if (look == UiStyle.Ink) ({}) else null,
+                        )
+                    }
                 }
             }
         }
         if (!started) {
             started = true
-            compose.setContent { ClaudercTheme(darkTheme = dark, style = style) { Box(Modifier.fillMaxSize().testTag("screen")) { content?.invoke() } } }
+            compose.setContent { ClaudercTheme(darkTheme = dark, style = style, plateNav = plateNav) { Box(Modifier.fillMaxSize().testTag("screen")) { content?.invoke() } } }
         }
         compose.waitForIdle()
         compose.mainClock.advanceTimeBy(after)
@@ -240,12 +271,12 @@ class ScreensTest {
         shot("03-machines", nav = 0) { MachinesScreen(machines, {}, {}) }
         shot("03-machines-dark", isDark = true, nav = 0) { MachinesScreen(machines, {}, {}) }
         val sessions = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(sampleSessions, mapOf("api.anthropic.com" to "官方")), usage = sampleUsage())
-        shot("04-sessions", nav = 1) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
+        shot("04-sessions", nav = 0) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
         val expired = sessions.copy(usage = sampleUsage().copy(stale = UsageStale.Expired, fetchedAt = Instant.now().minusSeconds(5_400)))
-        shot("04-sessions-usage-expired", nav = 1) { SessionsScreen(expired, {}, {}, {}, { _, _ -> }, {}, {}) }
-        shot("04-sessions-dark", isDark = true, nav = 1) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
+        shot("04-sessions-usage-expired", nav = 0) { SessionsScreen(expired, {}, {}, {}, { _, _ -> }, {}, {}) }
+        shot("04-sessions-dark", isDark = true, nav = 0) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
         val folded = sessions.copy(groups = sessions.groups!!.map { it.copy(collapsed = it.profile.id == "api.anthropic.com") })
-        shot("04-sessions-folded", nav = 1) { SessionsScreen(folded, {}, {}, {}, { _, _ -> }, {}, {}) }
+        shot("04-sessions-folded", nav = 0) { SessionsScreen(folded, {}, {}, {}, { _, _ -> }, {}, {}) }
 
         val items = listOf(
             ChatItem(1, ItemKind.USER, text = "给 internal/protocol 加上消息信封的编解码，版本号不是 1 时返回错误。"),
@@ -281,8 +312,8 @@ class ScreensTest {
         val tools = chat.copy(items = toolItems())
         shot("05c-chat-tools") { ChatScreen(tools, ChatActions()) }
         shot("05c-chat-tools-dark", isDark = true) { ChatScreen(tools, ChatActions()) }
-        shot("05c-chat-tools-sticker", look = UiStyle.Sticker) { ChatScreen(tools, ChatActions()) }
-        shot("05c-chat-tools-sticker-dark", isDark = true, look = UiStyle.Sticker) { ChatScreen(tools, ChatActions()) }
+        shot("05c-chat-tools-tile", look = UiStyle.Tile) { ChatScreen(tools, ChatActions()) }
+        shot("05c-chat-tools-tile-dark", isDark = true, look = UiStyle.Tile) { ChatScreen(tools, ChatActions()) }
         // Pictures as in the demo's 「README 截图」 session: a read with its thumbnail, a WebP without one, clauderc show.
         val pictures = chat.copy(items = imageItems())
         // Decoded up front: in the app a thumbnail decodes off the main thread a frame or two after it shows.
@@ -293,7 +324,7 @@ class ScreensTest {
         }
         shot("05d-chat-images") { ChatScreen(pictures, ChatActions()) }
         shot("05d-chat-images-dark", isDark = true) { ChatScreen(pictures, ChatActions()) }
-        shot("05d-chat-images-sticker", look = UiStyle.Sticker) { ChatScreen(pictures, ChatActions()) }
+        shot("05d-chat-images-tile", look = UiStyle.Tile) { ChatScreen(pictures, ChatActions()) }
         val shotImage = pictures.items.first { it.tool?.toolUseId == "t1" }.tool!!.result!!.images!!.single()
         val shotWhole = java.util.Base64.getDecoder().decode(shotImage.thumb!!)
         shot("05e-viewer") { Box { ChatScreen(pictures, ChatActions()); ImageViewer(Viewing(shotImage, null), shotWhole, false) {} } }
@@ -315,9 +346,9 @@ class ScreensTest {
             Commit("d2e8f41", listOf("c1b0d77"), "周遥", T0.minusSeconds(90_000), "试验 SSE 通道", listOf(Ref("spike-sse", RefKind.Branch)), 0, emptyList()),
         )
         val git = GitUiState(dir = "/Users/me/code/clauderc-app", status = status.copy(branch = "main", upstream = "origin/main"), commits = commits)
-        shot("09-git-log", nav = 2) { GitScreen(git, GitActions()) }
-        shot("09-git-log-dark", isDark = true, nav = 2) { GitScreen(git, GitActions()) }
-        shot("10-git-status", nav = 2) { GitScreen(git.copy(tab = GitTab.Status, status = status, busySession = "clauderc 协议"), GitActions()) }
+        shot("09-git-log", nav = 1) { GitScreen(git, GitActions()) }
+        shot("09-git-log-dark", isDark = true, nav = 1) { GitScreen(git, GitActions()) }
+        shot("10-git-status", nav = 1) { GitScreen(git.copy(tab = GitTab.Status, status = status, busySession = "clauderc 协议"), GitActions()) }
     }
 
     /** Round 2 C as in the demo's 「修复重连」 and 「README 截图」 sessions: subagents and the terminal view. */
@@ -331,7 +362,7 @@ class ScreensTest {
         val withAgents = sampleSessions.copy(sessions = sampleSessions.sessions.map { if (it.id == "s-work") it.copy(agents = running) else it })
         val sessions = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(withAgents, mapOf("api.anthropic.com" to "官方")))
         for ((tail, isDark, s) in styleVariants) {
-            shot("11-sessions-agents$tail", isDark, nav = 1, look = s) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("11-sessions-agents$tail", isDark, nav = 0, look = s) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
         }
 
         fun agentCall(seq: Long, a: clauderc.app.protocol.Subagent) = ChatItem(
@@ -443,14 +474,15 @@ class ScreensTest {
         val folded = withDefault { it.copy(foldedForks = setOf("s1")) }
         val asking = list.copy(switchAsk = clauderc.app.sessions.BranchSwitch(relaySvc, "relay-svc", "main", "修复重连"))
         for ((tail, isDark, s) in styleVariants) {
-            shot("16-sessions-forks$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}) }
-            shot("16-sessions-filtered$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(filtered, {}, {}, {}, { _, _ -> }, {}, {}) }
-            shot("16-sessions-fork-folded$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(folded, {}, {}, {}, { _, _ -> }, {}, {}) }
+            val allTab = clauderc.app.sessions.InkListTab.All
+            shot("16-sessions-forks$tail", isDark, nav = 0, look = s, fresh = true) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}, initialInkTab = allTab) }
+            shot("16-sessions-filtered$tail", isDark, nav = 0, look = s, fresh = true) { SessionsScreen(filtered, {}, {}, {}, { _, _ -> }, {}, {}, initialInkTab = allTab) }
+            shot("16-sessions-fork-folded$tail", isDark, nav = 0, look = s, fresh = true) { SessionsScreen(folded, {}, {}, {}, { _, _ -> }, {}, {}, initialInkTab = allTab) }
             shot(
-                "16-branch-sheet$tail", isDark, nav = 1, look = s, fresh = true,
+                "16-branch-sheet$tail", isDark, nav = 0, look = s, fresh = true,
                 open = { compose.onNode(androidx.compose.ui.test.hasText("dev") and androidx.compose.ui.test.hasClickAction()).performClick() },
-            ) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}) }
-            shot("16-switch-busy$tail", isDark, nav = 1, look = s, fresh = true, open = {}) { SessionsScreen(asking, {}, {}, {}, { _, _ -> }, {}, {}) }
+            ) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}, initialInkTab = allTab) }
+            shot("16-switch-busy$tail", isDark, nav = 0, look = s, fresh = true, open = {}) { SessionsScreen(asking, {}, {}, {}, { _, _ -> }, {}, {}, initialInkTab = allTab) }
         }
     }
 
@@ -485,22 +517,32 @@ class ScreensTest {
             org.robolectric.shadows.ShadowLooper.idleMainLooper(50, java.util.concurrent.TimeUnit.MILLISECONDS)
             compose.mainClock.advanceTimeBy(50)
         }
-        fun git() {
-            compose.onNode(androidx.compose.ui.test.hasContentDescription("git")).performClick()
+        fun git(s: UiStyle) {
+            if (s == UiStyle.Ink) compose.onNodeWithTag("inkChatCtlPill").performClick()
+            else compose.onNode(androidx.compose.ui.test.hasContentDescription("git")).performClick()
             settle()
         }
+        val allTab = clauderc.app.sessions.InkListTab.All
         for ((tail, isDark, s) in styleVariants) {
             shot("22-chat-limit$tail", isDark, look = s, fresh = true) { ChatScreen(chat, ChatActions()) }
             shot("22-chat-limit-on$tail", isDark, look = s, fresh = true) { ChatScreen(on, ChatActions()) }
-            shot("22-git-menu$tail", isDark, look = s, fresh = true, open = { git() }) { ChatScreen(chat.copy(limit = null), ChatActions()) }
-            shot("22-fork-dialog$tail", isDark, look = s, fresh = true, open = { git(); compose.onNode(androidx.compose.ui.test.hasText("Fork")).performClick() }) { ChatScreen(chat.copy(limit = null), ChatActions()) }
-            shot("22-worktree-dialog$tail", isDark, look = s, fresh = true, open = { git(); compose.onNode(androidx.compose.ui.test.hasText("Worktree")).performClick() }) { ChatScreen(chat.copy(limit = null), ChatActions()) }
+            shot("22-git-menu$tail", isDark, look = s, fresh = true, open = { git(s) }) { ChatScreen(chat.copy(limit = null), ChatActions()) }
+            shot("22-fork-dialog$tail", isDark, look = s, fresh = true, open = {
+                git(s)
+                compose.onNode(androidx.compose.ui.test.hasText(if (s == UiStyle.Ink) "Fork 新会话" else "Fork")).performClick()
+                settle()
+            }) { ChatScreen(chat.copy(limit = null), ChatActions()) }
+            shot("22-worktree-dialog$tail", isDark, look = s, fresh = true, open = {
+                git(s)
+                compose.onNode(androidx.compose.ui.test.hasText(if (s == UiStyle.Ink) "新建 Worktree 会话" else "Worktree")).performClick()
+                settle()
+            }) { ChatScreen(chat.copy(limit = null), ChatActions()) }
             shot(
-                "22-branch-gone$tail", isDark, nav = 1, look = s, fresh = true,
+                "22-branch-gone$tail", isDark, nav = 0, look = s, fresh = true,
                 open = { compose.onNode(androidx.compose.ui.test.hasText("fix-reconnect") and androidx.compose.ui.test.hasClickAction()).performClick() },
-            ) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}) }
-            shot("22-swipe-open$tail", isDark, nav = 1, look = s, fresh = true, open = { compose.onNodeWithTag("sessionRow:s2").performTouchInput { swipeLeft() } }) {
-                SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {})
+            ) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}, initialInkTab = allTab) }
+            shot("22-swipe-open$tail", isDark, nav = 0, look = s, fresh = true, open = { compose.onNodeWithTag("sessionRow:s2").performTouchInput { swipeLeft() } }) {
+                SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}, initialInkTab = allTab)
             }
         }
     }
@@ -528,7 +570,7 @@ class ScreensTest {
             untrusted = dir,
         )
         for ((tail, isDark, s) in styleVariants) {
-            shot("17-sessions-draft$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("17-sessions-draft$tail", isDark, nav = 0, look = s, fresh = true) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}) }
             shot("17-chat-draft$tail", isDark, look = s, fresh = true) { ChatScreen(chat, ChatActions()) }
             shot("18-trust-sheet$tail", isDark, look = s, fresh = true, open = {}) { CreateSessionScreen(create, {}, {}, {}, {}, {}, {}, {}) }
             shot("18-trust-busy$tail", isDark, look = s, fresh = true, open = {}) { CreateSessionScreen(create.copy(trusting = true), {}, {}, {}, {}, {}, {}, {}) }
@@ -727,51 +769,9 @@ class ScreensTest {
             "/Users/me/homework/cry-liquid", "/Users/me/notes",
         )
         for ((tail, isDark, s) in styleVariants) {
-            shot("21-recent-dirs$tail", isDark, nav = 2, look = s, fresh = true, open = { compose.onAllNodesWithText("选择目录")[0].performClick() }) {
+            shot("21-recent-dirs$tail", isDark, nav = 1, look = s, fresh = true, open = { compose.onAllNodesWithText("选择目录")[0].performClick() }) {
                 GitScreen(GitUiState(dirs = dirs), GitActions())
             }
-        }
-    }
-
-    /** Round 5 item 12: 设置's 「动画」 group with 「总是播放加载动画」 off and on, scrolled into view. */
-    @Test fun animationSwitch() {
-        compose.mainClock.autoAdvance = false
-        for ((tail, isDark, s) in styleVariants) for (on in listOf(false, true)) {
-            val look = Appearance(s, ThemeMode.Light, AccentChoice.Blue)
-            shot(
-                "20-settings-animation-${if (on) "on" else "off"}$tail", isDark, nav = 3, look = s, fresh = true,
-                // Swiped to the end, clear of the nav bar. The scroll animates: let the clock run for it, or it never ends with the clock held.
-                open = {
-                    compose.mainClock.autoAdvance = true
-                    repeat(2) { compose.onNodeWithTag("screen").performTouchInput { swipeUp() } }
-                    compose.mainClock.autoAdvance = false
-                },
-            ) {
-                SettingsScreen(look, Color(0xFF007AFF), wallpaperAvailable = true, onStyle = { _, _ -> }, onMode = { _, _ -> }, onAccent = { _, _ -> }, alwaysLoading = on)
-            }
-        }
-    }
-
-    /**
-     * The six loading arts in each style, paused 250, 700, 1200 and 1800ms after they come up: the
-     * demo's paused frames. The cover comes up after LOADING_DELAY_MILLIS and its art starts about
-     * three frames later.
-     */
-    @Test fun loadingFrames() {
-        compose.mainClock.autoAdvance = false
-        val readme = session("s-readme", "README 截图", SessionState.Idle, "default")
-        val places: List<Triple<String, Int?, @Composable () -> Unit>> = listOf(
-            Triple("boot", null) { LoadingCover(true, LoadingArt.Link, Modifier.fillMaxSize(), splash = true, label = "正在连接 relay.example.com") {} },
-            Triple("chat", null) { ChatScreen(ChatUiState(session = readme, loading = true), ChatActions()) },
-            Triple("sessions", 1) { SessionsScreen(SessionsUiState(machine("m-1", "工作室 Mac mini")), {}, {}, {}, { _, _ -> }, {}, {}) },
-            Triple("git", 2) { GitScreen(GitUiState(dir = "/Users/me/code/clauderc-app", loading = true), GitActions()) },
-            Triple("term", null) { clauderc.app.chat.TerminalScreen(clauderc.app.chat.TermUiState(session = readme), onBack = {}, onKey = {}) },
-            Triple("agent", null) {
-                clauderc.app.chat.AgentScreen(ChatUiState(session = readme, loading = true), clauderc.app.chat.AgentHeader("排查断线重连的退避逻辑", "Explore"), ChatActions())
-            },
-        )
-        for (look in UiStyle.entries) for ((place, nav, body) in places) for (t in listOf(250L, 700L, 1200L, 1800L)) {
-            shot("15-load-${look.name.lowercase()}-$place-$t", nav = nav, look = look, after = LOADING_DELAY_MILLIS + 48 + t, fresh = true, body = body)
         }
     }
 
@@ -882,40 +882,32 @@ class ScreensTest {
 
         for (isDark in listOf(false, true)) {
             val tail = if (isDark) "-dark" else ""
-            val s = UiStyle.Sticker
-            shot("readme-sessions$tail", isDark, nav = 1, look = s, fresh = true) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
+            val s = UiStyle.Ink
+            shot("readme-sessions$tail", isDark, nav = 0, look = s, fresh = true) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
             shot("readme-permission$tail", isDark, look = s, fresh = true) { ChatScreen(checkout, ChatActions()) }
             shot("readme-agents$tail", isDark, look = s, fresh = true) { ChatScreen(timeout, ChatActions()) }
-            shot("readme-git$tail", isDark, nav = 2, look = s, fresh = true) { GitScreen(git, GitActions()) }
+            shot("readme-git$tail", isDark, nav = 1, look = s, fresh = true) { GitScreen(git, GitActions()) }
             cover(tail, isDark)
         }
     }
 
-    /**
-     * readme-cover: the four README shots as 贴纸 stickers, each set a little higher or lower, on the app's
-     * own paper (page()) with sticker()'s ink outline, so the cover follows the style as it changes. It is
-     * drawn one pixel to a dp, larger than the window, so the page is drawn straight from the view.
-     * design/screenshots/cover.png is a copy of it.
-     */
     private fun cover(tail: String, isDark: Boolean) {
         val phones = listOf("sessions" to 96, "permission" to 44, "agents" to 136, "git" to 70).map { (name, top) ->
             val shot = android.graphics.BitmapFactory.decodeFile(File(out, "readme-$name$tail.png").path)
-            // Two smaller steps down to 360 wide: one bilinear step from 1170 drops strokes of the text.
             val half = Bitmap.createScaledBitmap(shot, 720, shot.height * 720 / shot.width, true)
             Bitmap.createScaledBitmap(half, 360, half.height / 2, true).asImageBitmap() to top
         }
         var view: android.view.View? = null
         dark = isDark
-        style = UiStyle.Sticker
+        style = UiStyle.Ink
         content = {
             view = LocalView.current
             CompositionLocalProvider(LocalDensity provides Density(1f)) {
                 Box(Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).requiredSize(1800.dp, 820.dp).page()) {
                     phones.forEachIndexed { i, (phone, top) ->
-                        // The ink fills the sticker too, so it shows past the screen's rounder corners.
                         Box(
                             Modifier.offset((85 + i * 420).dp, (top - 5).dp).size(370.dp, (phone.height + 10).dp)
-                                .sticker(Clauderc.colors.ink, Clauderc.colors.ink, 46.dp, 5.dp).padding(5.dp)
+                                .tileSurface(Clauderc.colors.card, 46.dp).padding(5.dp)
                                 .drawBehind { drawRoundRect(ShaderBrush(ImageShader(phone)), cornerRadius = CornerRadius(40f)) },
                         )
                     }
@@ -930,12 +922,13 @@ class ScreensTest {
         File(out, "readme-cover$tail.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    /** The minimal shots again in dark, 格栅 and 贴纸. */
+    /** Variants across the four styles. */
     private val styleVariants = listOf(
         Triple("", false, UiStyle.Clear),
         Triple("-dark", true, UiStyle.Clear),
-        Triple("-grid", false, UiStyle.Grid),
-        Triple("-sticker", false, UiStyle.Sticker),
+        Triple("-plate", false, UiStyle.Plate),
+        Triple("-tile", false, UiStyle.Tile),
+        Triple("-ink", true, UiStyle.Ink),
     )
 
     /** Each style's pages in light and dark, the same ones the demo shows (design/ui-mockup/demo.html). */
@@ -987,24 +980,124 @@ class ScreensTest {
                 CommitFile("design/ui-mockup/preview.png", binary = true),
             ),
         )
+        val machineList = listOf(
+            machine("m-1", "工作室 Mac mini"),
+            machine("m-2", "MacBook Pro"),
+            machine("m-3", "dev-linux", online = false, lastSeen = T0.minusSeconds(36_000)),
+        )
+        val relays = listOf(RelayLink("wss://relay.example.com", "relay.example.com", ConnectionState.Connected))
+        val samplePending = listOf(
+            PendingEntry("m-1", "工作室 Mac mini", sampleSessions.sessions.first { it.state == SessionState.Pending }),
+            PendingEntry("m-2", "MacBook Pro", session("s-m2", "补协议单测", SessionState.Pending, "default")),
+        )
         val patch = "@@ -1,14 +1,32 @@\n package protocol\n \n import (\n-\t\"testing\"\n+\t\"errors\"\n+\t\"testing\"\n )\n \n-func TestEnvelope(t *testing.T) {\n+func TestEnvelopeRoundTrip(t *testing.T) {\n"
         for (s in UiStyle.entries) for (isDark in listOf(false, true)) {
-            val look = Appearance(s, ThemeMode.Light, AccentChoice.Blue)
+            val look = Appearance(s, if (isDark) ThemeMode.Dark else ThemeMode.Light, AccentChoice.Default)
             val tail = if (isDark) "-dark" else ""
             val name = s.name.lowercase()
-            shot("$name-01-machines$tail", isDark, nav = 0, look = s) { MachinesScreen(machines, {}, {}) }
-            shot("$name-02-sessions$tail", isDark, nav = 1, look = s) { SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}) }
+            shot("$name-02-sessions$tail", isDark, nav = 0, look = s) {
+                SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}, machines = machineList, pendingEntries = samplePending)
+            }
+            if (s == UiStyle.Plate) {
+                shot("$name-02-sessions-dock$tail", isDark, nav = 0, look = s, navPlate = PlateNavStyle.Dock) {
+                    SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}, machines = machineList, pendingEntries = samplePending)
+                }
+            }
+            if (s == UiStyle.Ink && isDark) {
+                shot("$name-02b-drawer-dark", isDark = true, nav = 0, look = s, fresh = true, open = {
+                    compose.onNodeWithTag("inkDrawerButton").performClick()
+                }) {
+                    SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}, machines = machineList, pendingEntries = samplePending)
+                }
+                shot("$name-02c-hub-morph-dark", isDark = true, nav = 0, look = s, fresh = true, open = {}) {
+                    SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}, machines = machineList, pendingEntries = samplePending)
+                    InkHubSheet(
+                        pending = samplePending,
+                        machines = machineList,
+                        sessions = mapOf("m-1" to sampleSessions),
+                        currentMachineId = "m-1",
+                        onDismiss = {},
+                        onOpenPending = {},
+                        onSelectMachine = {},
+                        onPair = {},
+                    )
+                }
+                shot("$name-07b-commit-morph-dark", isDark = true, nav = 1, look = s, fresh = true, open = {}) {
+                    GitScreen(git, GitActions(), pendingCount = 2)
+                    CommitMorphPanel(
+                        dir = "/Users/me/code/clauderc-app",
+                        hash = "a1f3c92",
+                        canGoBack = true,
+                        state = Loadable(show),
+                        anchor = null,
+                        onBackParent = {},
+                        onClose = {},
+                        onOpenParent = {},
+                        onOpenFileAt = { _, _ -> },
+                    )
+                }
+                shot("$name-08b-diff-morph-dark", isDark = true, nav = 1, look = s, fresh = true, open = {}) {
+                    GitScreen(git.copy(tab = GitTab.Status), GitActions(), pendingCount = 2)
+                    DiffMorphPanel(
+                        path = "internal/protocol/envelope.go",
+                        subtitle = "未暂存",
+                        state = Loadable(GitDiffResponse("envelope.go", patch = patch)),
+                        anchor = null,
+                        staged = false,
+                        onToggleStage = {},
+                        onClose = {},
+                    )
+                }
+            }
+            if (s == UiStyle.Plate && !isDark) {
+                shot("$name-02b-slip", isDark = false, nav = 0, look = s, fresh = true, open = {
+                    compose.onNodeWithTag("plateMachineTrigger").performClick()
+                }) {
+                    SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}, machines = machineList, pendingEntries = samplePending)
+                }
+                shot("$name-03b-ctl-slip", isDark = false, look = s, fresh = true, open = {
+                    compose.onNodeWithTag("plateChatCtl").performClick()
+                }) {
+                    ChatScreen(chat.copy(models = listOf(clauderc.app.protocol.ModelOption("opus", "Opus 4.6", current = true), clauderc.app.protocol.ModelOption("sonnet", "Sonnet 4.6", current = false))), ChatActions())
+                }
+            }
+            if (s == UiStyle.Clear && !isDark) {
+                shot("$name-02b-drop", isDark = false, nav = 0, look = s, fresh = true, open = {
+                    compose.onNodeWithTag("clearMachineTrigger").performClick()
+                }) {
+                    SessionsScreen(sessions, {}, {}, {}, { _, _ -> }, {}, {}, machines = machineList, pendingEntries = samplePending)
+                }
+            }
+            if (s == UiStyle.Tile && !isDark) {
+                shot("$name-05b-sheet", isDark = false, nav = 1, look = s, fresh = true, open = {
+                    compose.onNodeWithTag("tileGitWhere").performClick()
+                }) {
+                    GitScreen(git.copy(dirs = listOf("/Users/me/code/clauderc-app", "/Users/me/code/relay-svc", "/Users/me/notes")), GitActions(), pendingCount = 2)
+                }
+            }
             shot("$name-03-chat$tail", isDark, look = s) { ChatScreen(chat, ChatActions()) }
             shot("$name-04-create$tail", isDark, look = s) { CreateSessionScreen(create, {}, {}, {}, {}, {}, {}, {}) }
             shot("$name-04b-create-custom$tail", isDark, look = s) { CreateSessionScreen(createCustom, {}, {}, {}, {}, {}, {}, {}) }
             shot("$name-04c-create-note$tail", isDark, look = s) { CreateSessionScreen(createNote, {}, {}, {}, {}, {}, {}, {}) }
-            shot("$name-05-git$tail", isDark, nav = 2, look = s) { GitScreen(git, GitActions()) }
-            shot("$name-06-status$tail", isDark, nav = 2, look = s) { GitScreen(git.copy(tab = GitTab.Status, busySession = "clauderc 协议"), GitActions()) }
+            shot("$name-05-git$tail", isDark, nav = 1, look = s) { GitScreen(git, GitActions(), pendingCount = 2) }
+            shot("$name-06-status$tail", isDark, nav = 1, look = s) { GitScreen(git.copy(tab = GitTab.Status, busySession = "clauderc 协议"), GitActions(), pendingCount = 2) }
             shot("$name-07-commit$tail", isDark, look = s) { CommitScreen("a1f3c92", Loadable(show), onBack = {}, onOpenFile = {}) }
             shot("$name-08-diff$tail", isDark, look = s) { DiffScreen("envelope.go", "a1f3c92", Loadable(GitDiffResponse("envelope.go", patch = patch)), onBack = {}) }
             shot("$name-09-pair$tail", isDark, look = s) { PairScreen(PairUiState.Scanning, {}, {}, scanner = { _, _ -> }) }
-            shot("$name-10-settings$tail", isDark, nav = 3, look = s) {
-                SettingsScreen(look, Color(0xFF007AFF), wallpaperAvailable = true, onStyle = { _, _ -> }, onMode = { _, _ -> }, onAccent = { _, _ -> })
+            shot("$name-10-settings$tail", isDark, nav = 2, look = s) {
+                SettingsScreen(
+                    look,
+                    null,
+                    wallpaperAvailable = true,
+                    onStyle = { _, _ -> },
+                    onMode = { _, _ -> },
+                    onAccent = { _, _ -> },
+                    relays = relays,
+                    pendingCount = 2,
+                    versionName = "1.4.0",
+                    machine = machineList.first(),
+                    machines = machineList,
+                )
             }
         }
     }

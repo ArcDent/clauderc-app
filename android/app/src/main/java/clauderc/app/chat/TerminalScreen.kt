@@ -1,8 +1,9 @@
 package clauderc.app.chat
 
-import clauderc.app.ui.components.LoadingArt
-import clauderc.app.ui.components.LoadingCover
-import clauderc.app.ui.components.StickerCorner
+import clauderc.app.ui.components.CardCorner
+import clauderc.app.ui.components.inkSurface
+import clauderc.app.ui.components.plateBox
+import clauderc.app.ui.components.tileSurface
 import clauderc.app.ui.theme.page
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -70,15 +71,14 @@ import clauderc.app.ui.components.SnackState
 import clauderc.app.ui.components.Spinner
 import clauderc.app.ui.components.SymbolButton
 import clauderc.app.data.UiStyle
-import clauderc.app.ui.components.sticker
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Lift
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.PressIndication
+import clauderc.app.ui.theme.PressKind
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
 import clauderc.app.ui.theme.snapPressed
-import clauderc.app.ui.theme.StickerPress
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -123,35 +123,39 @@ fun TerminalScreen(state: TermUiState, onBack: () -> Unit, onKey: (String) -> Un
                     }
                 },
             )
-            // Opening, monospace lines type out over the screen and the keys until the first screen arrives.
-            LoadingCover(state.loading && state.screen == null, LoadingArt.Type, Modifier.weight(1f), title = state.session?.let(::display).orEmpty()) {
-                Column(Modifier.fillMaxSize()) {
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .then(
-                                // 贴纸 puts the screen on an ink-outlined card (.term), 12dp above the keys.
-                                if (card) Modifier.padding(start = sp.sp4, end = sp.sp4, top = sp.sp1, bottom = sp.sp3).sticker(c.panel, c.ink, StickerCorner)
-                                else Modifier,
-                            ),
-                    ) {
-                        val screen = state.screen
-                        if (screen != null) TermText(screen, Modifier.fillMaxSize())
+            Column(Modifier.weight(1f).fillMaxWidth()) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .then(
+                            when (Clauderc.style) {
+                                UiStyle.Tile -> Modifier.padding(start = sp.sp4, end = sp.sp4, top = sp.sp1, bottom = sp.sp3).tileSurface(c.card, CardCorner)
+                                UiStyle.Ink -> Modifier.padding(start = sp.sp4, end = sp.sp4, top = sp.sp1, bottom = sp.sp3).inkSurface(c.card, c.edge, CardCorner)
+                                UiStyle.Plate -> Modifier.padding(start = 18.dp, end = 18.dp, top = sp.sp2, bottom = sp.sp3).plateBox(c.bg, c.fg, 1.5.dp)
+                                UiStyle.Clear -> Modifier
+                            },
+                        ),
+                ) {
+                    val screen = state.screen
+                    if (screen != null) {
+                        TermText(screen, Modifier.fillMaxSize())
+                    } else if (state.loading) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Spinner(color = c.fg3) }
                     }
-                    Lift(visible = state.ended) {
-                        Row(
-                            // Drawn whole as its room opens, over the screen above: it paints the page behind it.
-                            Modifier.fillMaxWidth().background(c.bg).padding(start = sp.sp4, end = sp.sp4, bottom = sp.sp2).testTag("termEnded"),
-                            horizontalArrangement = Arrangement.spacedBy(sp.sp2),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Symbols.PowerSettingsNew, contentDescription = null, tint = c.fg3, modifier = Modifier.size(16.dp))
-                            Text(state.error ?: "会话已退出", fontSize = Clauderc.fontSizes.caption, color = c.fg3)
-                        }
-                    }
-                    KeyBar(enabled = state.online && !state.ended && state.screen != null, onKey = onKey)
                 }
+                Lift(visible = state.ended) {
+                    Row(
+                        // Drawn whole as its room opens, over the screen above: it paints the page behind it.
+                        Modifier.fillMaxWidth().background(c.bg).padding(start = sp.sp4, end = sp.sp4, bottom = sp.sp2).testTag("termEnded"),
+                        horizontalArrangement = Arrangement.spacedBy(sp.sp2),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Symbols.PowerSettingsNew, contentDescription = null, tint = c.fg3, modifier = Modifier.size(16.dp))
+                        Text(state.error ?: "会话已退出", fontSize = Clauderc.fontSizes.caption, color = c.fg3)
+                    }
+                }
+                KeyBar(enabled = state.online && !state.ended && state.screen != null, onKey = onKey)
             }
         }
         SnackHost(snack, Modifier.align(Alignment.BottomCenter), bottom = 120.dp)
@@ -335,23 +339,22 @@ private fun androidx.compose.foundation.layout.RowScope.KeyCap(k: BarKey, height
     val c = Clauderc.colors
     val ui = Clauderc.style
     val press = remember { MutableInteractionSource() }
-    val sticker = ui == UiStyle.Sticker
-    // 贴纸 hits a key like a typewriter's: the moment it is pressed it sinks 2dp and turns ink with letters
-    // in the paper colour (the text colour in dark); let go, it springs back up and fades back in durS.
+    val plate = ui == UiStyle.Plate
+    // 印版 hits a key like a typewriter's: sinks 2dp and turns solid ink on press.
     val sink by snapPressed(press, Clauderc.motion.easeSpring)
     val hit by snapPressed(press, LinearEasing)
-    val face = if (sticker) lerp(c.fg, if (c.isDark) c.fg else c.sheet, hit) else c.fg
-    // 贴纸: a white key with a thin ink outline; 格栅: square corners.
+    val face = if (plate) lerp(c.fg, c.bg, hit) else c.fg
     val cap = when (ui) {
-        UiStyle.Sticker -> Modifier.sticker(lerp(c.panel, c.ink, hit), c.ink, 12.dp, border = 1.5.dp)
-        UiStyle.Grid -> Modifier.clip(RoundedCornerShape(2.dp)).background(c.surface)
+        UiStyle.Plate -> Modifier.plateBox(lerp(c.bg, c.fg, hit), c.fg, 1.5.dp)
+        UiStyle.Ink -> Modifier.inkSurface(c.float, c.edge, 10.dp)
+        UiStyle.Tile -> Modifier.tileSurface(c.card, 10.dp)
         UiStyle.Clear -> Modifier.clip(RoundedCornerShape(Clauderc.radii.sm)).background(c.surface)
     }
     Box(
         Modifier
             .weight(1f)
-            .pressShrink(press, StickerPress.Still)
-            .then(if (sticker) Modifier.graphicsLayer { translationY = 2.dp.toPx() * sink } else Modifier)
+            .pressShrink(press, PressKind.Still)
+            .then(if (plate) Modifier.graphicsLayer { translationY = 2.dp.toPx() * sink } else Modifier)
             .height(height)
             .then(cap)
             .clickable(press, PressIndication(c.fg2), enabled = enabled, role = Role.Button) { onKey(k.key) }
@@ -360,6 +363,6 @@ private fun androidx.compose.foundation.layout.RowScope.KeyCap(k: BarKey, height
         contentAlignment = Alignment.Center,
     ) {
         if (k.icon != null) Icon(k.icon, contentDescription = null, tint = face, modifier = Modifier.size(20.dp))
-        else Text(k.label, fontFamily = MonoFamily, fontSize = fontSize, fontWeight = if (sticker) FontWeight.SemiBold else null, color = face)
+        else Text(k.label, fontFamily = MonoFamily, fontSize = fontSize, fontWeight = if (plate) FontWeight.Bold else null, color = face)
     }
 }

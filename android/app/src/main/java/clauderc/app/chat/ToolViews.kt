@@ -54,6 +54,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import clauderc.app.ui.components.Spinner
+import clauderc.app.ui.components.inkSurface
+import clauderc.app.ui.components.tileSurface
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercColors
 import clauderc.app.ui.theme.MonoFamily
@@ -321,24 +323,20 @@ fun PatchStatText(stat: PatchStat) {
 @Composable
 internal fun Modifier.toolDetail(): Modifier {
     val c = Clauderc.colors
-    return if (Clauderc.style == UiStyle.Sticker) {
-        clip(RoundedCornerShape(14.dp)).background(c.panel).border(1.5.dp, c.ink, RoundedCornerShape(14.dp))
-    } else {
-        clip(RoundedCornerShape(Clauderc.radii.sm)).background(c.surface)
+    return when (Clauderc.style) {
+        UiStyle.Plate -> background(c.surface).border(1.5.dp, c.fg)
+        UiStyle.Ink -> inkSurface(c.card, c.edge, 14.dp)
+        UiStyle.Tile -> tileSurface(c.card, 14.dp)
+        UiStyle.Clear -> clip(RoundedCornerShape(Clauderc.radii.sm)).background(c.surface)
     }
 }
 
-/**
- * A result box at most [ToolBoxMax] tall that scrolls inside (.tbox), with a 4dp thumb on its right
- * edge while there is more: 清玻 a faint rounded one, 格栅 a solid square one, 贴纸 an ink one.
- */
 @Composable
 internal fun Modifier.toolBox(state: ScrollState = rememberScrollState()): Modifier {
     val c = Clauderc.colors
     val (color, round) = when (Clauderc.style) {
-        UiStyle.Clear -> c.fg.copy(alpha = 0.22f) to true
-        UiStyle.Grid -> c.fg to false
-        UiStyle.Sticker -> c.ink to true
+        UiStyle.Plate -> c.fg to false
+        UiStyle.Clear, UiStyle.Tile, UiStyle.Ink -> c.fg.copy(alpha = 0.22f) to true
     }
     return heightIn(max = ToolBoxMax)
         .scrollThumb(state, color, if (round) 2.dp else 0.dp)

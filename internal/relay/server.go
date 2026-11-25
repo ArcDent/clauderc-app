@@ -67,8 +67,12 @@ type Server struct {
 	// admitting holds a *sync.Mutex per machine id for admitAgent.
 	admitting sync.Map
 	// statusMu orders machine online and offline transitions, so each
-	// one's store write and broadcast finish before the next begins.
+	// one's store write and broadcast finish before the next begins, and
+	// machines.list replies among them.
 	statusMu sync.Mutex
+	// listedHook, set only by tests, runs between the machines.list
+	// snapshot and the queuing of its reply.
+	listedHook atomic.Pointer[func()]
 
 	// Pairing codes live only in memory (design D4).
 	pairMu    sync.Mutex

@@ -74,7 +74,15 @@ func (s *Server) fromApp(app *appConn, data []byte) {
 		return
 	}
 	if env.Method == protocol.MethodMachinesList {
+		// Under statusMu, like machine.status events: a machine going
+		// online or offline meanwhile has its event queued after this
+		// reply, never before a reply that still lists the old state.
+		s.statusMu.Lock()
+		defer s.statusMu.Unlock()
 		body, _ := json.Marshal(protocol.MachinesListResponse{Machines: s.Machines()})
+		if hook := s.listedHook.Load(); hook != nil {
+			(*hook)()
+		}
 		app.peer.sendEnvelope(protocol.Envelope{
 			V: protocol.Version, Kind: protocol.KindResponse, ID: env.ID, Method: env.Method, Body: body,
 		})

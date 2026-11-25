@@ -2,27 +2,31 @@ package clauderc.app.data
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 /**
- * The three looks of the app, named as in 设置: 「清玻」, white with glass bars floating over the content;
- * 「格栅」, a Swiss grid with monospace and square corners; 「贴纸」, dotted paper with ink-outlined stickers.
+ * The four looks of the app (design/ui-mockup/demo.html):
+ * - 「浮墨」: near-black floating pills and orbs with high-contrast monochrome actions (default).
+ * - 「素卡」: warm grey paper with white rounded bento cards and a floating pill nav bar.
+ * - 「清玻」: white or pure black paper with frosted glass bars and sheets over content.
+ * - 「印版」: high-contrast letterpress print on cotton paper with 8 selectable inks and square corners.
  */
 enum class UiStyle(val label: String) {
+    Ink("浮墨"),
+    Tile("素卡"),
     Clear("清玻"),
-    Grid("格栅"),
-    Sticker("贴纸"),
+    Plate("印版"),
     ;
 
     companion object {
-        /** The stored name, including the two styles before 清玻 / 格栅 / 贴纸: 极简 became 清玻 and 卡片 became 贴纸. */
+        /** Reads stored names including legacy styles before 浮墨 / 素卡 / 清玻 / 印版. */
         fun fromStored(name: String?): UiStyle? = when (name) {
             "Minimal" -> Clear
-            "Card" -> Sticker
+            "Grid" -> Plate
+            "Card", "Sticker" -> Tile
             else -> entries.firstOrNull { it.name == name }
         }
     }
@@ -31,8 +35,9 @@ enum class UiStyle(val label: String) {
 /** 跟随系统 / 浅色 / 深色. */
 enum class ThemeMode { System, Light, Dark }
 
-/** 贴纸's accent: the wallpaper's colour (Android 12 and later) or one of eight presets. */
+/** Accent choice for 浮墨 / 素卡 / 清玻: style default, wallpaper dynamic colour (Android 12+), or one of eight presets. */
 enum class AccentChoice(val rgb: Long?) {
+    Default(null),
     Wallpaper(null),
     Blue(0x007AFF),
     Purple(0xCB30E0),
@@ -44,17 +49,39 @@ enum class AccentChoice(val rgb: Long?) {
     Gray(0x8E8E93),
 }
 
+/** 印版's eight ink colours (design/ui-mockup/demo.html INKS), defaulting to high-contrast carbon black. */
+enum class PlateInk(val label: String, val lightInk: Long, val darkInk: Long, val darkPaper: Long) {
+    Black("墨黑", 0x0B0B0D, 0xF5F4EE, 0x0A0A0C),
+    Ultra("群青", 0x163096, 0xCDD8FF, 0x0A0D18),
+    Red("朱红", 0x9A1419, 0xFFBFBF, 0x140B0C),
+    Green("松绿", 0x0D4D32, 0xB0EBD0, 0x09130E),
+    Violet("靛紫", 0x461C8F, 0xDAC6FF, 0x0F0B17),
+    Ochre("赭石", 0x853108, 0xFFC6A3, 0x140E09),
+    Rose("茜红", 0x8F1246, 0xFFB8D3, 0x150A0F),
+    Olive("橄榄", 0x5E4200, 0xF5DC87, 0x121008),
+}
+
+/** 印版's bottom navigation style: floating square frame with sliding ink block, or full-width docked bar. */
+enum class PlateNavStyle(val label: String) {
+    Float("方形悬浮"),
+    Dock("贴底通栏"),
+}
+
 data class Appearance(
-    val style: UiStyle = UiStyle.Clear,
+    val style: UiStyle = UiStyle.Ink,
     val mode: ThemeMode = ThemeMode.System,
-    val accent: AccentChoice = AccentChoice.Blue,
+    val accent: AccentChoice = AccentChoice.Default,
+    val plateInk: PlateInk = PlateInk.Black,
+    val plateNav: PlateNavStyle = PlateNavStyle.Float,
 )
 
-/** What the user picked in 设置 for the look of the app and its 动画, kept on this phone. */
+/** What the user picked in 设置 for the look of the app, kept on this phone. */
 class ThemeStore(private val store: DataStore<Preferences>) {
     private val styleKey = stringPreferencesKey("appearance|style")
     private val modeKey = stringPreferencesKey("appearance|mode")
     private val accentKey = stringPreferencesKey("appearance|accent")
+    private val plateInkKey = stringPreferencesKey("appearance|plateInk")
+    private val plateNavKey = stringPreferencesKey("appearance|plateNav")
 
     val appearance: Flow<Appearance> = store.data.map { prefs ->
         val default = Appearance()
@@ -62,6 +89,8 @@ class ThemeStore(private val store: DataStore<Preferences>) {
             style = UiStyle.fromStored(prefs[styleKey]) ?: default.style,
             mode = ThemeMode.entries.firstOrNull { it.name == prefs[modeKey] } ?: default.mode,
             accent = AccentChoice.entries.firstOrNull { it.name == prefs[accentKey] } ?: default.accent,
+            plateInk = PlateInk.entries.firstOrNull { it.name == prefs[plateInkKey] } ?: default.plateInk,
+            plateNav = PlateNavStyle.entries.firstOrNull { it.name == prefs[plateNavKey] } ?: default.plateNav,
         )
     }
 
@@ -71,10 +100,7 @@ class ThemeStore(private val store: DataStore<Preferences>) {
 
     suspend fun setAccent(accent: AccentChoice) = store.edit { it[accentKey] = accent.name }
 
-    private val alwaysLoadingKey = booleanPreferencesKey("animation|alwaysLoading")
+    suspend fun setPlateInk(ink: PlateInk) = store.edit { it[plateInkKey] = ink.name }
 
-    /** 「总是播放加载动画」: each place's first load after the app starts shows its art at once; off by default. */
-    val alwaysLoading: Flow<Boolean> = store.data.map { it[alwaysLoadingKey] ?: false }
-
-    suspend fun setAlwaysLoading(on: Boolean) = store.edit { it[alwaysLoadingKey] = on }
+    suspend fun setPlateNav(nav: PlateNavStyle) = store.edit { it[plateNavKey] = nav.name }
 }

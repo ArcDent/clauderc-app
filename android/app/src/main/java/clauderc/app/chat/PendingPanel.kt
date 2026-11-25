@@ -1,6 +1,8 @@
 package clauderc.app.chat
 
-import clauderc.app.ui.components.sticker
+import clauderc.app.ui.components.inkSurface
+import clauderc.app.ui.components.plateBox
+import clauderc.app.ui.components.tileSurface
 import clauderc.app.ui.components.glassPane
 import clauderc.app.ui.components.LocalGlassSource
 import clauderc.app.data.UiStyle
@@ -10,6 +12,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,9 +36,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
@@ -68,17 +74,39 @@ fun PendingPanel(
     onAllow: () -> Unit,
     onDeny: () -> Unit,
     onAnswer: (List<Answer>) -> Unit,
+    inIsland: Boolean = false,
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val ui = Clauderc.style
-    val corner = if (ui == UiStyle.Sticker) 30.dp else Clauderc.radii.lg
-    val shape = RoundedCornerShape(topStart = corner, topEnd = corner)
-    // 清玻: glass over the messages. 贴纸: an ink outline on the top and sides.
-    val surface = when (ui) {
+    val corner = when (ui) {
+        UiStyle.Plate -> 0.dp
+        UiStyle.Ink -> 30.dp
+        UiStyle.Tile -> 26.dp
+        UiStyle.Clear -> Clauderc.radii.lg
+    }
+    val shape = if (ui == UiStyle.Plate) RectangleShape else RoundedCornerShape(topStart = corner, topEnd = corner)
+    val surface = if (inIsland) Modifier else when (ui) {
         UiStyle.Clear -> Modifier.shadow(10.dp, shape, ambientColor = c.scrim, spotColor = c.scrim).clip(shape).glassPane(LocalGlassSource.current, edgeBottom = false)
-        UiStyle.Sticker -> Modifier.sticker(c.sheet, c.ink, corner, bottom = false)
-        UiStyle.Grid -> Modifier.shadow(10.dp, shape, ambientColor = c.scrim, spotColor = c.scrim).clip(shape).background(c.sheet)
+        UiStyle.Plate -> Modifier
+            .padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
+            .drawBehind {
+                // Four corner crop marks around the letterpress confirmation card (demo.html).
+                val t = 8.dp.toPx()
+                val o = 5.dp.toPx()
+                val w = 1.5.dp.toPx()
+                drawLine(c.fg, Offset(-o, -o), Offset(-o + t, -o), w)
+                drawLine(c.fg, Offset(-o, -o), Offset(-o, -o + t), w)
+                drawLine(c.fg, Offset(size.width + o - t, -o), Offset(size.width + o, -o), w)
+                drawLine(c.fg, Offset(size.width + o, -o), Offset(size.width + o, -o + t), w)
+                drawLine(c.fg, Offset(-o, size.height + o), Offset(-o + t, size.height + o), w)
+                drawLine(c.fg, Offset(-o, size.height + o - t), Offset(-o, size.height + o), w)
+                drawLine(c.fg, Offset(size.width + o - t, size.height + o), Offset(size.width + o, size.height + o), w)
+                drawLine(c.fg, Offset(size.width + o, size.height + o - t), Offset(size.width + o, size.height + o), w)
+            }
+            .plateBox(c.sheet, c.fg, 2.dp)
+        UiStyle.Ink -> Modifier.shadow(12.dp, shape, ambientColor = c.scrim, spotColor = c.scrim).inkSurface(c.sheet, c.edge, corner, bottom = false)
+        UiStyle.Tile -> Modifier.shadow(10.dp, shape, ambientColor = c.scrim, spotColor = c.scrim).tileSurface(c.sheet, corner, bottom = false)
     }
     Column(
         Modifier
@@ -86,7 +114,12 @@ fun PendingPanel(
             .heightIn(max = 560.dp)
             .then(surface)
             .verticalScroll(rememberScrollState())
-            .padding(start = sp.page, end = sp.page, top = sp.sp6, bottom = sp.sp5)
+            .padding(
+                start = if (inIsland) 18.dp else sp.page,
+                end = if (inIsland) 18.dp else sp.page,
+                top = if (inIsland) 16.dp else sp.sp6,
+                bottom = if (inIsland) 14.dp else sp.sp5,
+            )
             .testTag("pendingPanel"),
         verticalArrangement = Arrangement.spacedBy(sp.sp3),
     ) {
@@ -115,12 +148,21 @@ private fun PermissionContent(pending: Pending, enabled: Boolean, onAllow: () ->
     val (title, code) = permissionPrompt(tool, pending.input)
     NeedLabel("等你允许")
     Text(title, fontSize = Clauderc.fontSizes.title, lineHeight = 1.4.em)
+    val ui = Clauderc.style
+    val codeShape = if (ui == UiStyle.Plate) RectangleShape else RoundedCornerShape(Clauderc.radii.sm)
     Text(
         code,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(Clauderc.radii.sm))
+            .clip(codeShape)
             .background(c.surface)
+            .then(
+                when (ui) {
+                    UiStyle.Plate -> Modifier.border(1.dp, c.fg, codeShape)
+                    UiStyle.Ink -> Modifier.border(1.dp, c.edge, codeShape)
+                    else -> Modifier
+                },
+            )
             .padding(horizontal = sp.sp4, vertical = sp.sp3),
         fontFamily = MonoFamily,
         fontSize = Clauderc.fontSizes.mono,
@@ -128,7 +170,13 @@ private fun PermissionContent(pending: Pending, enabled: Boolean, onAllow: () ->
     )
     Text(tool, fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.caption, color = c.fg3)
     Row(Modifier.fillMaxWidth().padding(top = sp.sp2), horizontalArrangement = Arrangement.spacedBy(sp.sp3)) {
-        PillButton("拒绝", onClick = onDeny, style = PillStyle.Outline, enabled = enabled, modifier = Modifier.weight(1f))
+        PillButton(
+            "拒绝",
+            onClick = onDeny,
+            style = if (Clauderc.style == UiStyle.Plate) PillStyle.Danger else PillStyle.Outline,
+            enabled = enabled,
+            modifier = Modifier.weight(1f),
+        )
         PillButton("允许", onClick = onAllow, style = PillStyle.Accent, enabled = enabled, modifier = Modifier.weight(1f))
     }
 }

@@ -14,36 +14,33 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.Clauderc
 
 /** True inside a group's card, where tonal fills use the surface colour instead of the card's own. */
 val LocalInGroup = staticCompositionLocalOf { false }
 
-/** 贴纸's cards: the --k-r corner. */
-val StickerCorner = 22.dp
-
-/** 格栅's heavy rule over a list. */
-val GridRule = 1.5.dp
-
 /**
- * One item of a list the style groups together (.list). 贴纸: an ink-outlined card 16dp in from the
- * page edges, rounded and outlined at the top of the [first] item and the bottom of the [last].
- * 格栅: 16dp in, under a heavy rule. Both draw a hairline between items
- * unless [divider] is off. 清玻 leaves the item as it is.
+ * One item of a grouped list (.list):
+ * - 素卡: borderless white rounded card 16dp in from the page edges, hairline between rows.
+ * - 浮墨: dark/light floating rounded card with 1dp hairline edge 16dp in.
+ * - 印版: 18dp in under a 2dp heavy ink rule, hairlines between rows.
+ * - 清玻: flat on the page.
  */
 @Composable
 fun Modifier.groupItem(first: Boolean, last: Boolean, divider: Boolean = true): Modifier {
-    val look = Clauderc.look
+    val ui = Clauderc.style
     val c = Clauderc.colors
-    return when {
-        look.cards -> this
+    return when (ui) {
+        UiStyle.Tile -> this
             .padding(horizontal = Clauderc.spacing.sp4)
-            .sticker(c.panel, c.ink, StickerCorner, top = first, bottom = last)
+            .tileSurface(c.card, CardCorner, top = first, bottom = last)
             .then(if (first || !divider) Modifier else Modifier.topLine(c.line, 1.dp))
-        look.ruled -> this
-            .padding(horizontal = Clauderc.spacing.sp4)
-            .then(if (first) Modifier.topLine(c.fg, GridRule) else if (divider) Modifier.topLine(c.line, 1.dp) else Modifier)
-        else -> this
+        UiStyle.Ink -> this
+        UiStyle.Plate -> this
+            .padding(horizontal = 18.dp)
+            .then(if (first) Modifier.topLine(c.fg, PlateRule) else if (divider) Modifier.topLine(c.line, 1.dp) else Modifier)
+        UiStyle.Clear -> this
     }
 }
 
@@ -56,31 +53,34 @@ fun Modifier.groupDivider(show: Boolean = true): Modifier {
 }
 
 /**
- * A block the style sets apart. 贴纸 puts it on an ink-outlined card 16dp in from the page edges,
- * with [padding] inside. 格栅 sets it 16dp in, under a heavy rule when it is a list ([ruled]). 清玻
- * draws [content] straight on the page. Content keeps [ClaudercLook.blockGutter] from the sides.
+ * A block the style sets apart:
+ * - 素卡: white rounded card 16dp in.
+ * - 浮墨: hairline-edged card 16dp in.
+ * - 印版: 18dp in under a heavy rule when [ruled].
+ * - 清玻: drawn straight on the page.
  */
 @Composable
 fun GroupBlock(modifier: Modifier = Modifier, padding: Dp = 0.dp, ruled: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
-    val look = Clauderc.look
-    when {
-        look.cards -> Column(
+    val ui = Clauderc.style
+    val c = Clauderc.colors
+    when (ui) {
+        UiStyle.Tile -> Column(
             modifier
                 .padding(horizontal = Clauderc.spacing.sp4)
                 .fillMaxWidth()
-                .sticker(Clauderc.colors.panel, Clauderc.colors.ink, StickerCorner)
+                .tileSurface(c.card, CardCorner)
                 .padding(padding),
         ) {
             CompositionLocalProvider(LocalInGroup provides true) { content() }
         }
-        look.ruled -> Column(
+        UiStyle.Ink, UiStyle.Clear -> Column(modifier.fillMaxWidth(), content = content)
+        UiStyle.Plate -> Column(
             modifier
-                .padding(horizontal = Clauderc.spacing.sp4)
+                .padding(horizontal = 18.dp)
                 .fillMaxWidth()
-                .then(if (ruled) Modifier.topLine(Clauderc.colors.fg, GridRule) else Modifier),
+                .then(if (ruled) Modifier.topLine(c.fg, PlateRule) else Modifier),
             content = content,
         )
-        else -> Column(modifier.fillMaxWidth(), content = content)
     }
 }
 

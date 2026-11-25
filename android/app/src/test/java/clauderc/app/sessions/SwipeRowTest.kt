@@ -69,6 +69,7 @@ class SwipeRowTest {
                     onRename = { _, _ -> },
                     onStop = { stopped += it.id },
                     onRemove = { removed += it.id },
+                    initialInkTab = InkListTab.All,
                 )
             }
         }
@@ -149,7 +150,7 @@ class SwipeRowTest {
         compose.setContent {
             ClaudercTheme(darkTheme = false, style = style) {
                 colors = Clauderc.colors
-                SessionsScreen(SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(sampleSessions, emptyMap())), {}, {}, {}, { _, _ -> }, {}, {})
+                SessionsScreen(SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(sampleSessions, emptyMap())), {}, {}, {}, { _, _ -> }, {}, {}, initialInkTab = InkListTab.All)
             }
         }
         slide("s-work")
@@ -217,9 +218,9 @@ class SwipeRowTest {
         s.assertBackAtRest()
     }
 
-    /** 格栅: a 40dp square in a 1.5dp red line round a red symbol; pressed it fills red under a white symbol. */
-    @Test fun gridsStopButtonIsASquareInARedLine() {
-        val s = stopShots(UiStyle.Grid)
+    /** 印版: a 40dp square in a 1.5dp red line round a red symbol; pressed it fills red under a white symbol. */
+    @Test fun platesStopButtonIsASquareInARedLine() {
+        val s = stopShots(UiStyle.Plate)
         val c = s.c
         assertNear("the red line", c.danger, s.rest.at(s.cx - s.dp(19.25f), s.cy))
         assertNear("nothing fills it", c.bg, s.rest.at(s.cx - s.dp(15f), s.cy), 0.02f)
@@ -230,16 +231,13 @@ class SwipeRowTest {
         s.assertBackAtRest()
     }
 
-    /** 贴纸: a card-white circle in a 2dp ink line round a red symbol, no shadow; pressed it fills red and tilts smaller. */
-    @Test fun stickersStopButtonIsACardCircleInInk() {
-        val s = stopShots(UiStyle.Sticker)
+    /** 素卡: a white circle round a red symbol; pressed it fills red under a white symbol. */
+    @Test fun tilesStopButtonIsACardCircle() {
+        val s = stopShots(UiStyle.Tile)
         val c = s.c
-        assertNear("the ink line", c.ink, s.rest.at(s.cx - s.dp(19f), s.cy))
         assertNear("the card inside", c.card, s.rest.at(s.cx - s.dp(15f), s.cy))
-        assertTrue("no shadow under it", distance(s.rest.at(s.cx, s.cy + s.dp(21.5f)), c.ink) > 0.3f)
         assertNear("the symbol is red", c.danger, s.strongest(s.rest, 10f, c.card))
         assertNear("pressed, it fills red at once", c.danger, s.held.at(s.cx - s.dp(12f), s.cy))
-        assertNear("pressed, the ink line comes in with the 90% size", c.ink, s.held.at(s.cx - s.dp(17.1f), s.cy))
         assertNear("pressed, the symbol is white", Color.White, s.strongest(s.held, 9f, c.danger), 0.1f)
         s.assertBackAtRest()
     }
@@ -249,7 +247,7 @@ class SwipeRowTest {
         compose.setContent {
             ClaudercTheme(darkTheme = false) {
                 val groups = groupSessions(branchSessions, emptyMap()).map { it.copy(foldedForks = folded) }
-                SessionsScreen(SessionsUiState(machine("m-1", "工作室 Mac mini"), groups), {}, {}, {}, { _, _ -> }, {}, {})
+                SessionsScreen(SessionsUiState(machine("m-1", "工作室 Mac mini"), groups), {}, {}, {}, { _, _ -> }, {}, {}, initialInkTab = InkListTab.All)
             }
         }
         fun line() = compose.onNodeWithTag("treeLine:s1", useUnmergedTree = true).fetchSemanticsNode().size.height
@@ -306,7 +304,7 @@ class SwipeRowTest {
             compose.setContent {
                 val s by vm.state.collectAsState()
                 ClaudercTheme(darkTheme = false) {
-                    SessionsScreen(s, vm::refresh, {}, {}, { _, _ -> }, vm::stop, vm::remove)
+                    SessionsScreen(s, vm::refresh, {}, {}, { _, _ -> }, vm::stop, vm::remove, initialInkTab = InkListTab.All)
                 }
             }
             compose.waitUntil(5_000) { compose.onAllNodes(hasText("landing 页")).fetchSemanticsNodes().isNotEmpty() }

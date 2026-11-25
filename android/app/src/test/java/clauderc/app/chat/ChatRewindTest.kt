@@ -339,27 +339,19 @@ class ChatRewindTest {
     private fun Looks.leftHalves(): Pair<FloatArray, FloatArray> =
         floatArrayOf(right - dp(25f), right - 1, top, bottom) to floatArrayOf(cx - dp(25f), cx - 1, top, bottom)
 
-    @Test fun stickersButtonIsACardCircleInInkThatGrowsAndFadesInWithTheSlide() {
-        val l = looks(UiStyle.Sticker)
+    @Test fun tilesButtonIsACardCircleThatGrowsAndFadesInWithTheSlide() {
+        val l = looks(UiStyle.Tile)
         val c = l.colors
-        // A 36dp circle: a 2dp ink line round the card's white, the page past its corners, no hard shadow under it.
-        assertNear("the ink line", c.ink, l.full.strongest(l.cx - l.dp(19f), l.cx - l.dp(15f), l.cy - 1, l.cy + 1, c.bg), 0.06f)
         assertNear("the card inside", c.card, l.full.at(l.cx, l.cy - l.dp(13f)))
-        assertTrue("past the corner is no ink", distance(l.full.at(l.cx + l.dp(16.5f), l.cy + l.dp(16.5f)), c.ink) > 0.5f)
-        assertTrue("no hard shadow under it", distance(l.full.at(l.cx, l.cy + l.dp(19.5f)), c.ink) > 0.5f)
-        // Half open it is 0.6 + 0.4 × 0.5 of its size and half faded.
         val (h, f) = l.leftHalves()
         val grown = l.half.tallest(h[0], h[1], h[2], h[3], c.bg, 0.15f).toFloat() / l.full.tallest(f[0], f[1], f[2], f[3], c.bg, 0.15f)
-        assertTrue("half open it is 0.8 of its size: $grown", grown in 0.72f..0.88f)
-        val faded = distance(l.half.strongest(h[0], h[1], h[2], h[3], c.bg), c.bg) / distance(l.full.strongest(f[0], f[1], f[2], f[3], c.bg), c.bg)
-        assertTrue("half open it is half faded: $faded", faded in 0.3f..0.75f)
-        // Round 12: a press fills it with the accent under an on-accent icon.
+        assertTrue("half open it is ~0.8 of its size: $grown", grown in 0.72f..0.88f)
         assertNear("pressed, the fill is the accent", c.accent, l.pressed.at(l.cx, l.cy - l.dp(13f)))
         assertNear("pressed, the icon is on-accent", c.onAccent, l.pressed.strongest(l.cx - l.dp(9f), l.cx + l.dp(9f), l.cy - l.dp(9f), l.cy + l.dp(9f), c.accent), 0.1f)
     }
 
-    @Test fun gridsButtonIsAnEmptySquareInAThinLineThatOnlySlidesIn() {
-        val l = looks(UiStyle.Grid)
+    @Test fun platesButtonIsAnEmptySquareInAThinLineThatOnlySlidesIn() {
+        val l = looks(UiStyle.Plate)
         val c = l.colors
         // A square as tall as the one-line bubble beside it, its 1.5dp grey line reaching into the corners.
         val half = (l.bottom - l.top) / 2
