@@ -329,6 +329,31 @@ func turns(texts []string) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
+// Stepping up through a long list waits for each row to show without
+// paying redrawQuiet on every intermediate step, settling once at the
+// target row before pressing Enter.
+func TestRewindManyTurnsFast(t *testing.T) {
+	t.Parallel()
+	const turnsCount = 30
+	texts := make([]string, turnsCount)
+	for i := range texts {
+		texts[i] = fmt.Sprintf("第 %d 轮消息", i+1)
+	}
+	f := newFixture(t, setup{attachEnv: []string{fakeattach.RewindEnv(texts, rewindOptions)}})
+	if err := os.WriteFile(f.transcript, []byte(turns(texts)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	f.ok(t, "c1", protocol.MethodChatRewind, protocol.ChatRewindRequest{SessionID: shortID, UUID: "u0", Restore: protocol.RewindBoth})
+	elapsed := time.Since(start)
+	if got, want := f.keyLog(), openRewind+strings.Repeat(up, turnsCount)+"\r\r"+clearLine; got != want {
+		t.Errorf("keys %q, want %q", got, want)
+	}
+	if elapsed >= 8*time.Second {
+		t.Errorf("30-turn rewind took %v, want well under 12s", elapsed)
+	}
+}
+
 // A rewind still short of its last Enter when its time is up leaves the
 // panel with Esc.
 func TestRewindTimeLimit(t *testing.T) {

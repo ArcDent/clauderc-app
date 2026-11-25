@@ -273,7 +273,7 @@ private fun CreateSessionFields(
                 Column(field.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(sp.sp2)) {
                     FieldLabel("工作目录")
                     UnderlineField(state.dir, onDir, mono = true, error = CreateField.Dir in state.badFields, placeholder = "/path/to/project")
-                    Column(Modifier.padding(top = sp.sp2).testTag("dirs")) {
+                    Column(Modifier.testTag("dirs")) {
                         val head = state.recent.take(5)
                         head.forEach { DirRow(it, it == state.dir.trim(), onPickDir) }
                         // 「全部 N 个」 grows the rest in with the lift rule instead of popping them in.
@@ -299,7 +299,7 @@ private fun CreateSessionFields(
                             ChoiceRow(p.title, p.sub, p.id == state.preset, titleMono = p.titleIsHost, subMono = false) { onPreset(p.id) }
                         }
                         AnimatedVisibility(state.custom, enter = Motion.growIn, exit = Motion.growOut) {
-                            Column(Modifier.padding(start = 40.dp)) {
+                            Column(Modifier.padding(start = 40.dp, end = sp.sp2, bottom = sp.sp1)) {
                                 SubField("接口地址") {
                                     UnderlineField(
                                         state.baseUrl, onUrl, mono = true, error = CreateField.Url in state.badFields, placeholder = "https://",
@@ -369,7 +369,7 @@ private fun ModelsField(state: CreateUiState, field: Modifier, onToggle: () -> U
             Icon(Symbols.ExpandMore.styled, contentDescription = null, tint = c.fg3, modifier = Modifier.rotate(turn))
         }
         AnimatedVisibility(state.modelsOpen, enter = Motion.growIn, exit = Motion.growOut) {
-            Column(Modifier.padding(top = sp.sp2)) {
+            Column(Modifier.padding(top = sp.sp2, bottom = sp.sp1), verticalArrangement = Arrangement.spacedBy(sp.sp2)) {
                 TIERS.forEach { (tier, label, env) ->
                     Row(horizontalArrangement = Arrangement.spacedBy(sp.sp4), verticalAlignment = Alignment.CenterVertically) {
                         Text(label, Modifier.width(52.dp), fontSize = Clauderc.fontSizes.label, color = c.fg2, fontFamily = if (plate) MonoFamily else null)

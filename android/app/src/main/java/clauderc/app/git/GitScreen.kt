@@ -1,9 +1,11 @@
 package clauderc.app.git
 
 import clauderc.app.ui.components.CardCorner
+import clauderc.app.ui.components.FieldLabel
 import clauderc.app.ui.components.LocalMorphClose
 import clauderc.app.ui.components.PlateClipShape
 import clauderc.app.ui.components.PlateSweep
+import clauderc.app.ui.components.UnderlineField
 import clauderc.app.ui.components.inkSurface
 import clauderc.app.ui.components.plateBox
 import clauderc.app.ui.components.plateHardShadow
@@ -31,7 +33,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -60,9 +61,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
@@ -1470,26 +1468,6 @@ private fun CommitSheetBody(
         UiStyle.Clear -> sp.page
         UiStyle.Ink, UiStyle.Tile -> 20.dp
     }
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
-    val fieldShape = when (ui) {
-        UiStyle.Plate -> RectangleShape
-        UiStyle.Ink -> RoundedCornerShape(16.dp)
-        UiStyle.Tile -> RoundedCornerShape(14.dp)
-        UiStyle.Clear -> RoundedCornerShape(12.dp)
-    }
-    val fieldBg = when (ui) {
-        UiStyle.Plate -> c.bg
-        UiStyle.Ink -> c.surface2
-        UiStyle.Tile, UiStyle.Clear -> c.surface
-    }
-    val fieldBorder = when {
-        ui == UiStyle.Plate -> c.fg
-        focused -> if (ui == UiStyle.Ink) c.inverse else c.accent
-        ui == UiStyle.Ink -> c.edge
-        else -> c.line
-    }
-
     SheetHead("提交改动")
     Column(
         Modifier
@@ -1507,43 +1485,17 @@ private fun CommitSheetBody(
             lineHeight = 1.6.em,
         )
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-                "提交说明",
-                fontSize = 12.sp,
-                fontWeight = if (ui == UiStyle.Plate) FontWeight.ExtraBold else FontWeight.SemiBold,
-                color = c.fg2,
-            )
-            BasicTextField(
+            FieldLabel("提交说明")
+            UnderlineField(
                 value = state.message,
                 onValueChange = onMessage,
+                modifier = Modifier.testTag("commitMessageInput"),
+                placeholder = "输入提交说明…",
                 enabled = !state.running,
-                interactionSource = interaction,
+                singleLine = false,
                 minLines = 2,
                 maxLines = 5,
-                cursorBrush = SolidColor(if (ui == UiStyle.Plate) c.fg else c.accent),
-                textStyle = TextStyle(
-                    color = c.fg,
-                    fontSize = 14.5.sp,
-                    fontWeight = if (ui == UiStyle.Plate) FontWeight.SemiBold else FontWeight.Normal,
-                    lineHeight = 1.5.em,
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 76.dp)
-                    .then(if (ui == UiStyle.Plate && focused) Modifier.plateHardShadow(c.fg, 3.dp) else Modifier)
-                    .clip(fieldShape)
-                    .background(fieldBg)
-                    .border(1.5.dp, fieldBorder, fieldShape)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                    .testTag("commitMessageInput"),
-                decorationBox = { inner ->
-                    Box {
-                        if (state.message.isEmpty()) {
-                            Text("输入提交说明…", color = c.fg3, fontSize = 14.5.sp, lineHeight = 1.5.em)
-                        }
-                        inner()
-                    }
-                },
+                fontSize = 14.5.sp,
             )
         }
         Row(

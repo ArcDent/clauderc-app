@@ -152,6 +152,7 @@ import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.TextTone
 import clauderc.app.ui.components.UnderlineField
+import clauderc.app.ui.components.LocalMorphClose
 import clauderc.app.ui.components.captureAnchor
 import clauderc.app.ui.components.groupDivider
 import clauderc.app.ui.components.rememberAnchorBox
@@ -858,7 +859,7 @@ fun SessionsScreen(
             group = o.group,
             machineName = machine?.name.orEmpty(),
             onDismiss = { overlay = null },
-            onSave = { name -> overlay = null; onRename(o.group.profile.id, name) },
+            onSave = { name -> onRename(o.group.profile.id, name) },
         )
         is Overlay.Branches -> {
             val group = state.groups?.firstOrNull { it.profile.id == o.profileId }
@@ -1769,10 +1770,15 @@ private fun RenameDialog(group: SessionGroup, machineName: String, onDismiss: ()
             )
         },
         buttons = {
-            TextAction("恢复默认", onClick = { onSave(null) }, tone = TextTone.Quiet)
+            val close = LocalMorphClose.current
+            fun save(name: String?) {
+                val apply = { onSave(name) }
+                if (close != null) close(apply) else { onDismiss(); apply() }
+            }
+            TextAction("恢复默认", onClick = { save(null) }, tone = TextTone.Quiet)
             Spacer(Modifier.weight(1f))
-            TextAction("取消", onClick = onDismiss)
-            TextAction("保存", onClick = { onSave(text) })
+            TextAction("取消", onClick = { close?.invoke(null) ?: onDismiss() })
+            TextAction("保存", onClick = { save(text) })
         },
     )
 }

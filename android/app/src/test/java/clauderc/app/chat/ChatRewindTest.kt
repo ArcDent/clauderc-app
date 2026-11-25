@@ -26,7 +26,14 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.unit.DpRect
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
+import clauderc.app.ChatRoute
+import clauderc.app.ClaudercNavHost
+import clauderc.app.TermRoute
 import clauderc.app.data.Fleet
+import clauderc.app.navigateWhenResumed
 import clauderc.app.data.UiStyle
 import clauderc.app.protocol.ChatItem
 import clauderc.app.protocol.ChatOpenResponse
@@ -58,8 +65,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -151,7 +160,11 @@ class ChatRewindTest {
         // The turn changed conn.go, so all three ways back are offered.
         compose.onNodeWithText("conn.go +1 −1 改回去").assertIsDisplayed()
         compose.onNodeWithText("只回代码").performClick()
+        compose.mainClock.autoAdvance = false
         compose.onNodeWithText("回溯").performClick()
+        compose.onNodeWithText("回溯到这条消息之前").assertIsDisplayed()
+        assertTrue(asked.isEmpty())
+        compose.mainClock.autoAdvance = true
         compose.waitForIdle()
         assertEquals(listOf("u-2" to RewindRestore.CODE), asked.map { it.first.uuid to it.second })
         compose.onNodeWithText("回溯到这条消息之前").assertDoesNotExist()
@@ -416,8 +429,9 @@ class ChatRewindTest {
 
     @Test fun aRewindSendsTheMessagesUuidAndPutsTheMessageBack() = runTest(dispatcher) {
         val vm = viewModel()
-        var failed = false
-        vm.rewind(target, RewindRestore.BOTH) { failed = true }
+        val failed = mutableListOf<String>()
+        val collect = backgroundScope.launch { vm.rewindFailed.collect { failed += it } }
+        vm.rewind(target, RewindRestore.BOTH)
         val sent = relay.sent(Method.CHAT_REWIND).single()
         assertEquals(ChatRewindRequest("s-need", "u-2", RewindRestore.BOTH), sent.decode(ChatRewindRequest.serializer()))
         assertEquals(120_000L, sent.timeoutMillis)
@@ -425,13 +439,14 @@ class ChatRewindTest {
         assertFalse(s.rewinding)
         assertEquals("把退避上限改成 60 秒", s.restore?.text)
         assertTrue(s.restore!!.replace)
-        assertFalse(failed)
+        assertTrue(failed.isEmpty())
+        collect.cancel()
     }
 
     @Test fun restoringOnlyTheCodeLeavesTheComposerAndSaysSo() = runTest(dispatcher) {
         val vm = viewModel()
         val before = vm.state.value.restore
-        vm.rewind(target, RewindRestore.CODE) {}
+        vm.rewind(target, RewindRestore.CODE)
         assertEquals(before, vm.state.value.restore)
         assertEquals("代码已回到这条消息之前", vm.messages.first())
     }
@@ -444,9 +459,8 @@ class ChatRewindTest {
         )) {
             relay.fail(Method.CHAT_REWIND, ErrorCode.REWIND_FAILED, why)
             val vm = viewModel()
-            var failed = false
-            vm.rewind(target, RewindRestore.BOTH) { failed = true }
-            assertTrue("the terminal view opens", failed)
+            vm.rewind(target, RewindRestore.BOTH)
+            assertEquals("没能回溯：$why", vm.rewindFailed.first())
             assertFalse(vm.state.value.rewinding)
             assertNull(vm.state.value.restore?.takeIf { it.replace })
             assertEquals("没能回溯：$why", vm.messages.first())
@@ -456,11 +470,13 @@ class ChatRewindTest {
     @Test fun aRewindThatHappenedShowsWhatWentWrongAfter() = runTest(dispatcher) {
         relay.respond(Method.CHAT_REWIND, ChatRewindResponse.serializer(), ChatRewindResponse("已经回溯，但没能清空电脑上的输入框，原消息还留在那里"))
         val vm = viewModel()
-        var failed = false
-        vm.rewind(target, RewindRestore.BOTH) { failed = true }
-        assertFalse(failed)
+        val failed = mutableListOf<String>()
+        val collect = backgroundScope.launch { vm.rewindFailed.collect { failed += it } }
+        vm.rewind(target, RewindRestore.BOTH)
+        assertTrue(failed.isEmpty())
         assertEquals("把退避上限改成 60 秒", vm.state.value.restore?.text)
         assertEquals("已经回溯，但没能清空电脑上的输入框，原消息还留在那里", vm.messages.first())
+        collect.cancel()
     }
 
     @Test fun rewindingStillSavesTheMessageAsDraftAfterLeaving() = runTest(dispatcher) {
@@ -481,7 +497,7 @@ class ChatRewindTest {
                 override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
                     ChatViewModel("m-1", "s-need", relay, Fleet(relay, scope), scope, compress = { it }, background = dispatcher, drafts = drafts, onNotice = { noticed.complete(it) }) as T
             })[ChatViewModel::class.java]
-            vm.rewind(target, RewindRestore.BOTH) {}
+            vm.rewind(target, RewindRestore.BOTH)
             // User leaves the chat page while rewind is still running.
             store.clear()
             gate.complete(Unit)
@@ -492,14 +508,14 @@ class ChatRewindTest {
         }
     }
 
-    @Test fun aFailedRewindShowsItsReasonOnTheTerminalPage() {
+    @Test fun aFailedRewindShowsItsReasonOnTheTerminalPage() = runTest(dispatcher) {
         val why = "电脑上的输入框里有还没发出去的字，清空以后再回溯"
         relay.fail(Method.CHAT_REWIND, ErrorCode.REWIND_FAILED, why)
         relay.respond(Method.TERM_OPEN, clauderc.app.protocol.TermScreen.serializer(), clauderc.app.protocol.TermScreen("s-need", listOf("❯ ")))
         val fleet = Fleet(relay, scope)
         val chatVm = ChatViewModel("m-1", "s-need", relay, fleet, scope, compress = { it }, background = dispatcher)
-        var reason: String? = null
-        chatVm.rewind(target, RewindRestore.BOTH) { reason = it }
+        chatVm.rewind(target, RewindRestore.BOTH)
+        val reason = chatVm.rewindFailed.first()
         assertEquals("没能回溯：$why", reason)
 
         val termVm = TermViewModel("m-1", "s-need", relay, fleet, scope, background = dispatcher, initialNotice = reason)
@@ -511,5 +527,53 @@ class ChatRewindTest {
         }
         compose.waitForIdle()
         compose.onNodeWithText("没能回溯：$why").assertIsDisplayed()
+    }
+
+    @Test fun failedRewindOnBackgroundAppScopeNavigatesToTerminalOnMainThread() {
+        val why = "回溯 90 秒还没做完，已按 Esc 退出"
+        val bgRelay = FakeRelay()
+        bgRelay.respond(Method.MACHINES_LIST, MachinesListResponse.serializer(), MachinesListResponse(listOf(machine("m-1", "mac-mini"))))
+        bgRelay.respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), sampleSessions)
+        bgRelay.respond(Method.CHAT_OPEN, ChatOpenResponse.serializer(), ChatOpenResponse(items = items, state = SessionState.Idle))
+        bgRelay.fail(Method.CHAT_REWIND, ErrorCode.REWIND_FAILED, why)
+        bgRelay.respond(Method.TERM_OPEN, clauderc.app.protocol.TermScreen.serializer(), clauderc.app.protocol.TermScreen("s-need", listOf("❯ ")))
+
+        val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val fleet = Fleet(bgRelay, bgScope)
+            val chatVm = ChatViewModel("m-1", "s-need", bgRelay, fleet, bgScope, compress = { it }, background = Dispatchers.Default)
+            var navigatedOnMain = false
+            var termNotice: String? = null
+            compose.setContent {
+                ClaudercTheme(darkTheme = false) {
+                    val nav = rememberNavController()
+                    ClaudercNavHost(nav, startDestination = ChatRoute("m-1", "s-need")) {
+                        composable<ChatRoute> { entry ->
+                            val s by chatVm.state.collectAsState()
+                            androidx.compose.runtime.LaunchedEffect(chatVm) {
+                                chatVm.rewindFailed.collect { reason ->
+                                    navigatedOnMain = android.os.Looper.getMainLooper().isCurrentThread
+                                    nav.navigateWhenResumed(entry, TermRoute("m-1", "s-need", notice = reason))
+                                }
+                            }
+                            ChatScreen(s, ChatActions(onRewind = chatVm::rewind))
+                        }
+                        composable<TermRoute> { entry ->
+                            val r = entry.toRoute<TermRoute>()
+                            termNotice = r.notice
+                            androidx.compose.material3.Text(r.notice.orEmpty())
+                        }
+                    }
+                }
+            }
+            compose.waitUntil(5_000) { chatVm.state.value.items.isNotEmpty() }
+            compose.runOnUiThread { chatVm.rewind(target, RewindRestore.BOTH) }
+            compose.waitUntil(5_000) { termNotice != null }
+            assertTrue("rewindFailed must navigate on the main thread", navigatedOnMain)
+            assertEquals("没能回溯：$why", termNotice)
+            compose.onNodeWithText("没能回溯：$why").assertIsDisplayed()
+        } finally {
+            bgScope.cancel()
+        }
     }
 }

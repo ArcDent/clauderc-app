@@ -407,6 +407,10 @@ class ChatViewModel(
     /** Emits the id of a session started in a new worktree from here, once the agent has started it. */
     val created: Flow<String> = _created.receiveAsFlow()
 
+    private val _rewindFailed = Channel<String>(Channel.BUFFERED)
+    /** Emits the failure reason when chat.rewind ends with REWIND_FAILED so the UI can open the terminal on the main thread. */
+    val rewindFailed: Flow<String> = _rewindFailed.receiveAsFlow()
+
     /** The wait before a text typed while the auto-send is on goes to the agent. */
     private var resuming: Job? = null
 
@@ -1110,10 +1114,10 @@ class ChatViewModel(
      * Rewinds the session to before the user's message [item] through Claude Code's /rewind panel,
      * taking back what [restore] names. Taking the conversation back puts the message into the composer
      * in place of what is there; the agent takes the messages away itself. The snackbar shows what the
-     * agent says went wrong after a rewind, and why one failed, when [onFailed] also opens the terminal
-     * view to look or do it by hand.
+     * agent says went wrong after a rewind, and why one failed, while [rewindFailed] tells the page to
+     * open the terminal view on the main thread to look or do it by hand.
      */
-    fun rewind(item: ChatItem, restore: String, onFailed: (String) -> Unit) {
+    fun rewind(item: ChatItem, restore: String) {
         val uuid = item.uuid ?: return
         if (_state.value.rewinding || !_state.value.online) return
         _state.update { it.copy(rewinding = true) }
@@ -1141,13 +1145,14 @@ class ChatViewModel(
                     if (cleared) onNotice(note) else _messages.send(note)
                 }
             } catch (e: Exception) {
+                if (e is CancellationException && e !is TimeoutCancellationException) throw e
                 val reason = "没能回溯：${e.message}"
                 _state.update { it.copy(rewinding = false) }
                 if (cleared) {
                     onNotice(reason)
                 } else {
                     _messages.send(reason)
-                    if (e is RemoteException && e.code == ErrorCode.REWIND_FAILED) onFailed(reason)
+                    if (e is RemoteException && e.code == ErrorCode.REWIND_FAILED) _rewindFailed.send(reason)
                 }
             }
         }

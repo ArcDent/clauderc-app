@@ -241,7 +241,7 @@ class DraftTest {
             }
         }
         compose.waitUntil(5_000) { has("改好了。") }
-        compose.runOnUiThread { vm.rewind(message, RewindRestore.CONVERSATION) {} }
+        compose.runOnUiThread { vm.rewind(message, RewindRestore.CONVERSATION) }
         compose.waitUntil(5_000) { runCatching { composerText() == "把退避上限改成 60 秒" }.getOrDefault(false) }
         compose.onNodeWithTag("composer").performTextReplacement("把退避上限改成 30 秒")
         settle()

@@ -1,13 +1,24 @@
 package clauderc.app.chat
 
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.chat.MdBlock.Code
 import clauderc.app.chat.MdBlock.Heading
 import clauderc.app.chat.MdBlock.ItemList
 import clauderc.app.chat.MdBlock.Paragraph
 import clauderc.app.chat.MdBlock.Quote
 import clauderc.app.chat.MdBlock.Table
+import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.ClaudercTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.annotation.GraphicsMode
 
 class MarkdownBlocksTest {
     private fun text(s: String) = MdRun(RunKind.TEXT, s)
@@ -109,5 +120,46 @@ class MarkdownBlocksTest {
             listOf(Code("", "x := 1"), para(text("<details>原样</details>"))),
             mdBlocks("    x := 1\n\n---\n\n<details>原样</details>"),
         )
+    }
+}
+
+@RunWith(AndroidJUnit4::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+class MarkdownBlocksTestRender {
+    @get:Rule val compose = createComposeRule()
+
+    private fun show(vararg blocks: MdBlock) {
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                ReplyBlocks(blocks.toList(), Int.MAX_VALUE, Clauderc.colors.fg)
+            }
+        }
+    }
+
+    @Test fun shortCodeKeepsItsLinesAndTabSpacing() {
+        show(Code("go", "first\n\tsecond\n"))
+        compose.onNodeWithText("first\n    second\n").assertIsDisplayed()
+    }
+
+    @Test fun longCodeCountsOmittedCharactersAfterExpandingTabs() {
+        val long = "x".repeat(19_999) + "\t"
+        show(Code("sh", long + "\nshort"))
+        compose.onNodeWithText("${"x".repeat(800)}…（已省略 19203 字符）\nshort").assertIsDisplayed()
+    }
+
+    @Test fun wideTableCapsTheSumOfColumnWidths() {
+        val long = listOf(MdRun(RunKind.TEXT, "w".repeat(20_000)))
+        val short = listOf(MdRun(RunKind.TEXT, "短列"))
+        show(Table(listOf(short, long, long), listOf(listOf(emptyList(), long, long))))
+        compose.onNodeWithTag("table").assertIsDisplayed()
+        val width = compose.onNodeWithTag("tableContent").fetchSemanticsNode().size.width
+        assertTrue("capped width was $width", width in 23_999..24_000)
+        compose.onNodeWithText("短列").assertIsDisplayed()
+    }
+
+    @Test fun tableWithNoColumnsDoesNotDraw() {
+        show(Table(emptyList(), listOf(emptyList())), Paragraph(listOf(MdRun(RunKind.TEXT, "接着显示"))))
+        compose.onNodeWithTag("table").assertDoesNotExist()
+        compose.onNodeWithText("接着显示").assertIsDisplayed()
     }
 }

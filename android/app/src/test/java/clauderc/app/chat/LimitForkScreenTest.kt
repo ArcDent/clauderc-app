@@ -73,7 +73,11 @@ class LimitForkScreenTest {
         compose.waitForIdle()
         compose.onNodeWithText("Fork 这个会话").assertIsDisplayed()
         compose.onNodeWithTag("forkInstruction").performTextInput("试试另一种写法")
+        compose.mainClock.autoAdvance = false
         compose.onNodeWithText("Fork").performClick()
+        compose.onNodeWithText("Fork 这个会话").assertIsDisplayed()
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
         assertEquals(listOf("试试另一种写法"), forks)
         compose.onNodeWithText("Fork 这个会话").assertDoesNotExist()
         compose.onNode(hasText("已发出 /fork", substring = true)).assertIsDisplayed()
@@ -100,19 +104,35 @@ class LimitForkScreenTest {
 
     @Test fun theDialogClosesOnceTheSessionIsCreated() {
         var state by mutableStateOf(base)
-        compose.setContent { ClaudercTheme(darkTheme = false, style = clauderc.app.data.UiStyle.Clear) { ChatScreen(state, ChatActions()) } }
+        var created by mutableStateOf<String?>(null)
+        val opened = mutableListOf<String>()
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = clauderc.app.data.UiStyle.Clear) {
+                ChatScreen(state, ChatActions(), createdWorktree = created, onWorktreeClosed = { opened += it })
+            }
+        }
         openMenu()
         compose.onNodeWithText("Worktree").performClick()
         compose.waitForIdle()
         state = state.copy(creatingWorktree = true)
         compose.onNodeWithText("正在新建").assertIsDisplayed()
+        compose.onNodeWithTag("clearScrim").assertIsNotEnabled()
         state = state.copy(creatingWorktree = false, worktreeError = "fatal: a branch named 'worktree-x' already exists")
         compose.onNodeWithText("fatal: a branch named 'worktree-x' already exists").assertIsDisplayed()
         state = state.copy(creatingWorktree = true, worktreeError = null)
         compose.waitForIdle()
-        state = state.copy(creatingWorktree = false)
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread {
+            state = state.copy(creatingWorktree = false)
+            created = "new-worktree-session"
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("在新 worktree 里开会话").assertIsDisplayed()
+        assertTrue(opened.isEmpty())
+        compose.mainClock.autoAdvance = true
         compose.waitForIdle()
         compose.onNodeWithText("在新 worktree 里开会话").assertDoesNotExist()
+        assertEquals(listOf("new-worktree-session"), opened)
     }
 
     @Test fun offlineTheMenuCannotOpen() {

@@ -262,6 +262,18 @@ private fun Modifier.bleed(by: Dp) = layout { measurable, constraints ->
     layout((p.width - 2 * px).coerceAtLeast(0), p.height) { p.place(-px, 0) }
 }
 
+private const val MaxCodeLineChars = 800
+private const val MaxTableWidthPx = 24_000
+
+private fun visibleCode(code: String, shown: Int): String =
+    code.take(shown).lineSequence().joinToString("\n") { line ->
+        val expanded = line.replace("\t", "    ")
+        val count = expanded.codePointCount(0, expanded.length)
+        if (count <= MaxCodeLineChars) expanded else {
+            expanded.substring(0, expanded.offsetByCodePoints(0, MaxCodeLineChars)) + "…（已省略 ${count - MaxCodeLineChars} 字符）"
+        }
+    }
+
 /**
  * A code block (.cb): a 30dp head with the language, then the code in mono, unwrapped, scrolling
  * sideways inside the box. 清玻 a 14dp box of the page's colour 6dp past the text on each side,
@@ -287,7 +299,7 @@ private fun CodeBox(b: MdBlock.Code, shown: Int, modifier: Modifier) {
             }
         }
         Text(
-            b.code.take(shown).replace("\t", "    "),
+            remember(b.code, shown) { visibleCode(b.code, shown) },
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("code").padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
             color = c.fg,
             style = TextStyle(fontFamily = MonoFamily, fontSize = 12.5.sp, lineHeight = 1.6.em),
@@ -435,6 +447,7 @@ private fun TableBox(b: MdBlock.Table, modifier: Modifier) {
     val look = Clauderc.style
     val rows = listOf(b.head) + b.rows
     val columns = rows.maxOf { it.size }
+    if (columns == 0) return
     val bodyStyle = TextStyle(fontSize = if (look == UiStyle.Plate) 12.sp else 13.5.sp, lineHeight = 1.5.em, fontFamily = if (look == UiStyle.Plate) MonoFamily else null)
     val headStyle = bodyStyle.copy(
         fontSize = Clauderc.fontSizes.caption,
@@ -460,7 +473,7 @@ private fun TableBox(b: MdBlock.Table, modifier: Modifier) {
                     }
                 }
             },
-            modifier = frame.drawBehind {
+            modifier = frame.testTag("tableContent").drawBehind {
                 val t = tops.at
                 if (t.size < 2) return@drawBehind
                 when (look) {
@@ -474,6 +487,15 @@ private fun TableBox(b: MdBlock.Table, modifier: Modifier) {
             // Each column as wide as its widest cell; a row as tall as it takes for its cells to share a baseline.
             val widths = IntArray(columns)
             cells.forEachIndexed { i, m -> widths[i % columns] = maxOf(widths[i % columns], m.maxIntrinsicWidth(Constraints.Infinity)) }
+            if (widths.sumOf { it.toLong() } > MaxTableWidthPx) {
+                // Keep narrow columns intact; the wide ones share the remaining space.
+                var remaining = MaxTableWidthPx
+                val cap = widths.sortedArray().withIndex().firstNotNullOf { (i, width) ->
+                    val share = remaining / (columns - i)
+                    if (width > share) share else { remaining -= width; null }
+                }
+                for (i in widths.indices) widths[i] = minOf(widths[i], cap)
+            }
             val placed = cells.mapIndexed { i, m -> m.measure(Constraints.fixedWidth(widths[i % columns])) }
             fun baseline(p: Placeable) = p[FirstBaseline].takeIf { it != AlignmentLine.Unspecified } ?: p.height
             val at = IntArray(rows.size + 1)

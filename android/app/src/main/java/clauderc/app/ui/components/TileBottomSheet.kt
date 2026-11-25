@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -54,6 +55,7 @@ import kotlinx.coroutines.launch
 fun TileBottomSheet(
     onDismiss: () -> Unit,
     tag: String = "tileSheet",
+    dismissEnabled: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val c = Clauderc.colors
@@ -84,7 +86,7 @@ fun TileBottomSheet(
     }
 
     Dialog(
-        onDismissRequest = { requestClose(null) },
+        onDismissRequest = { if (dismissEnabled) requestClose(null) },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         val view = LocalView.current
@@ -100,7 +102,7 @@ fun TileBottomSheet(
                     .fillMaxSize()
                     .graphicsLayer { alpha = scrimAlpha.value }
                     .background(c.scrim)
-                    .clickable(remember { MutableInteractionSource() }, indication = null) { requestClose(null) }
+                    .clickable(remember { MutableInteractionSource() }, indication = null, enabled = dismissEnabled) { requestClose(null) }
                     .testTag("tileScrim"),
             )
 
@@ -108,6 +110,7 @@ fun TileBottomSheet(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
+                    .imePadding()
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp, vertical = 8.dp)
                     .graphicsLayer {

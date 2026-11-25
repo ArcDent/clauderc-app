@@ -63,6 +63,7 @@ import clauderc.app.protocol.ChatItem
 import clauderc.app.protocol.ItemKind
 import clauderc.app.protocol.RewindRestore
 import clauderc.app.ui.components.ClaudercSheet
+import clauderc.app.ui.components.LocalMorphClose
 import clauderc.app.ui.components.MenuItem
 import clauderc.app.ui.components.SheetHead
 import clauderc.app.ui.components.TextAction
@@ -272,6 +273,7 @@ internal fun RewindSheet(item: ChatItem, files: List<String>, onDismiss: () -> U
         UiStyle.Tile, UiStyle.Ink -> c.accent to 3.dp
     }
     ClaudercSheet(onDismiss = onDismiss) {
+        val close = LocalMorphClose.current
         SheetHead(
             "回溯到这条消息之前",
             (if (files.isEmpty()) "这条消息之后没改过文件，只回对话。" else "选一种回去的方式。") + "对话回去后，这条消息填回输入框。",
@@ -303,8 +305,12 @@ internal fun RewindSheet(item: ChatItem, files: List<String>, onDismiss: () -> U
             )
         }
         Row(Modifier.fillMaxWidth().padding(start = sp.sp3, end = sp.sp3, top = sp.sp3), horizontalArrangement = Arrangement.End) {
-            TextAction("取消", onClick = onDismiss, tone = TextTone.Quiet)
-            TextAction("回溯", onClick = { onRewind(mode) })
+            TextAction("取消", onClick = { close?.invoke(null) ?: onDismiss() }, tone = TextTone.Quiet)
+            TextAction("回溯", onClick = {
+                val selected = mode
+                val rewind = { onRewind(selected) }
+                if (close != null) close(rewind) else { onDismiss(); rewind() }
+            })
         }
     }
 }
