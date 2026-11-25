@@ -65,6 +65,7 @@ object Motion {
     val inkEaseIn: Easing = CubicBezierEasing(0.55f, 0f, 0.85f, 0.35f)
     const val INK_MORPH_OPEN_MS = 460
     const val INK_MORPH_CLOSE_MS = 280
+    const val INK_MORPH_RESIZE_MS = 360
 
     /** 印版's crisp letterpress easing & slip/pulse timings (demo.html --ease-press). */
     val plateEasePress: Easing = CubicBezierEasing(0.18f, 0.92f, 0.26f, 1f)

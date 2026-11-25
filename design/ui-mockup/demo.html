@@ -357,7 +357,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 :root[data-look="tile"] .file:active { background: var(--c-well); }
 :root[data-look="tile"] .file + .file::before { content: ""; position: absolute; left: 46px; right: 0; top: 0; border-top: 1px solid var(--c-line); }
 :root[data-look="tile"] .file .x { width: 18px; font-family: var(--mono); font-weight: 600; font-size: 13px; text-align: center; flex: none; }
-:root[data-look="tile"] .x-A { color: var(--c-add); } :root[data-look="tile"] .x-M { color: var(--c-acc); } :root[data-look="tile"] .x-D { color: var(--c-del); } :root[data-look="tile"] .x-B { color: var(--c-fg3); }
+:root[data-look="tile"] .x-A { color: var(--c-add); } :root[data-look="tile"] .x-M { color: var(--c-acc); } :root[data-look="tile"] .x-D { color: var(--c-del); } :root[data-look="tile"] .x-R, :root[data-look="tile"] .x-U, :root[data-look="tile"] .x-B { color: var(--c-fg3); }
 :root[data-look="tile"] .file .n { flex: 1; min-width: 0; }
 :root[data-look="tile"] .file .n b { display: block; font-weight: 500; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 :root[data-look="tile"] .file .n span:not(.ms) { display: block; font-family: var(--mono); font-size: 12px; color: var(--c-fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -649,7 +649,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 :root[data-look="ink"] .pq .glyph { margin-top: 0; }
 :root[data-look="ink"] .pq .t, :root[data-look="ink"] .pm .t { flex: 1; min-width: 0; }
 :root[data-look="ink"] .pq b, :root[data-look="ink"] .pm b { display: block; font-weight: 500; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-:root[data-look="ink"] .pq span, :root[data-look="ink"] .pm span { display: block; font-size: 13px; color: var(--c-fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root[data-look="ink"] .pq .t span, :root[data-look="ink"] .pm .t span { display: block; font-size: 13px; color: var(--c-fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 :root[data-look="ink"] .pq .ms, :root[data-look="ink"] .pm .chev { color: var(--c-fg3); font-size: 20px; }
 :root[data-look="ink"] .pm > .ms:first-child { font-size: 24px; color: var(--c-fg2); }
 :root[data-look="ink"] .pm .ok { color: var(--c-fg); }
@@ -776,7 +776,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 :root[data-look="ink"] .file { display: flex; align-items: center; gap: 12px; padding: 12px 20px 12px 24px; cursor: pointer; }
 :root[data-look="ink"] .file:active { background: var(--c-s1); }
 :root[data-look="ink"] .file .x { width: 18px; font-family: var(--mono); font-weight: 500; font-size: 13px; text-align: center; flex: none; }
-:root[data-look="ink"] .x-A { color: var(--c-add); } :root[data-look="ink"] .x-M { color: var(--c-fg); } :root[data-look="ink"] .x-D { color: var(--c-del); } :root[data-look="ink"] .x-B { color: var(--c-fg3); }
+:root[data-look="ink"] .x-A { color: var(--c-add); } :root[data-look="ink"] .x-M { color: var(--c-fg); } :root[data-look="ink"] .x-D { color: var(--c-del); } :root[data-look="ink"] .x-R, :root[data-look="ink"] .x-U, :root[data-look="ink"] .x-B { color: var(--c-fg3); }
 :root[data-look="ink"] .file .n { flex: 1; min-width: 0; }
 :root[data-look="ink"] .file .n b { display: block; font-weight: 500; font-size: 15.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 :root[data-look="ink"] .file .n span:not(.ms) { display: block; font-family: var(--mono); font-size: 12px; color: var(--c-fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1142,7 +1142,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 :root[data-look="clear"] .file { display: flex; align-items: center; gap: 12px; padding: 11px 20px 11px 24px; cursor: pointer; }
 :root[data-look="clear"] .file:active { background: var(--c-surface); }
 :root[data-look="clear"] .file .x { width: 16px; font-family: var(--mono); font-weight: 500; font-size: 13px; text-align: center; flex: none; }
-:root[data-look="clear"] .x-A { color: var(--c-add); } :root[data-look="clear"] .x-M { color: var(--c-fg); } :root[data-look="clear"] .x-D { color: var(--c-del); } :root[data-look="clear"] .x-B { color: var(--c-fg3); }
+:root[data-look="clear"] .x-A { color: var(--c-add); } :root[data-look="clear"] .x-M { color: var(--c-acc); } :root[data-look="clear"] .x-D { color: var(--c-del); } :root[data-look="clear"] .x-R, :root[data-look="clear"] .x-U, :root[data-look="clear"] .x-B { color: var(--c-fg3); }
 :root[data-look="clear"] .file .n { flex: 1; min-width: 0; }
 :root[data-look="clear"] .file .n b { display: block; font-weight: 400; font-size: 15.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 :root[data-look="clear"] .file .n span:not(.ms) { display: block; font-family: var(--mono); font-size: 12px; color: var(--c-fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1889,6 +1889,58 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 :root[data-look="plate"] .ro-bar { border-top: 2px solid var(--c-fg); font-weight: 700; }
 :root[data-look="plate"] .ro-bar .dot { border-radius: 0; }
 :root[data-look="ink"] .fsec button { color: var(--c-acc); }
+.file .utag { font-size: 11px; color: var(--c-fg3); margin-right: 4px; flex: none; }
+
+/* git 底栏紧凑提交胶囊条（浮在底栏上方，点击按当前样式专属弹层动效展开提交说明表单） */
+.git-cbar { position: absolute; left: 16px; right: 16px; bottom: 96px; z-index: 16; display: flex; align-items: center; gap: 10px;
+  padding: 6px 6px 6px 16px; min-height: 52px; border-radius: 26px; cursor: pointer;
+  background: var(--u-card); border: 1px solid var(--u-div);
+  transition: transform var(--d-m, 260ms) var(--ease, ease), opacity var(--d-s, 180ms) ease, bottom var(--d-m, 260ms) var(--ease, ease), box-shadow var(--d-s, 180ms) ease; }
+.git-cbar.pushed { bottom: 20px; }
+.git-cbar.off { opacity: 0; transform: translateY(20px) scale(0.96); pointer-events: none; }
+.git-cbar:active { transform: scale(0.985); }
+.git-cbar-ic { color: var(--c-fg3); font-size: 18px; flex: none; transition: color var(--d-s, 180ms); }
+.git-cbar.ready .git-cbar-ic, .git-cbar.has-draft .git-cbar-ic { color: var(--c-fg2); }
+.git-cbar-txt { flex: 1; min-width: 0; text-align: left; }
+.git-cbar-txt b { display: block; font-size: 15px; font-weight: 500; color: var(--c-fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+.git-cbar.ready .git-cbar-txt b { color: var(--c-fg2); }
+.git-cbar.has-draft .git-cbar-txt b { color: var(--c-fg); }
+.git-cbtn { width: 40px; height: 40px; padding: 0; border-radius: 50%; background: var(--u-well); color: var(--c-fg3);
+  display: grid; place-items: center; flex: none;
+  transition: background var(--d-m, 260ms), color var(--d-s, 180ms), transform var(--d-s, 160ms) var(--ease, ease), box-shadow var(--d-s, 160ms) var(--ease, ease); }
+.git-cbtn .ms { font-size: 20px; }
+.git-cbar.ready .git-cbtn { background: var(--u-pri); color: var(--u-on-pri); }
+.git-cbar:active .git-cbtn { transform: scale(0.92); }
+.git-cbar.shake { animation: rc-cbar-shake 280ms ease; }
+@keyframes rc-cbar-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+.page[data-tab="git"].pane-files .scroll { padding-bottom: 174px; }
+:root[data-look="clear"] .page[data-tab="git"].pane-files .scroll { padding-bottom: 228px; }
+:root[data-look="ink"] .git-cbar { bottom: 96px; border: 0; border-radius: 28px; background: var(--c-float); box-shadow: var(--c-shadow); }
+:root[data-look="ink"] .git-cbar.pushed { bottom: 20px; }
+:root[data-look="ink"] .git-cbtn { background: var(--c-s3); color: var(--c-fg3); }
+:root[data-look="ink"] .git-cbar.ready .git-cbtn { background: var(--c-inv); color: var(--c-on-inv); }
+:root[data-look="tile"] .git-cbar { bottom: 94px; border: 0; border-radius: 28px; background: var(--c-card);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.14), 0 0 0 1px var(--c-line); }
+:root[data-look="tile"][data-theme="dark"] .git-cbar { box-shadow: 0 10px 26px -8px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--c-line); }
+:root[data-look="tile"] .git-cbar.pushed { bottom: 20px; }
+:root[data-look="tile"] .git-cbar.ready .git-cbtn { background: var(--c-acc); color: var(--c-on-acc); }
+:root[data-look="clear"] .git-cbar { bottom: 96px; border: 0; border-radius: 28px; background: transparent; }
+:root[data-look="clear"] .git-cbar.above-pstrip { bottom: 152px; }
+:root[data-look="clear"] .git-cbar.pushed { bottom: 24px; }
+:root[data-look="clear"] .git-cbtn { background: var(--c-surface); color: var(--c-fg3); }
+:root[data-look="clear"] .git-cbar.ready .git-cbtn { background: var(--c-acc); color: var(--c-on-acc); }
+:root[data-look="plate"] .git-cbar { left: 18px; right: 18px; bottom: 88px; border-radius: 0; padding: 6px 8px 6px 12px;
+  background: var(--c-bg); border: 1.5px solid var(--c-fg); box-shadow: 3px 3px 0 0 var(--c-fg); }
+:root[data-look="plate"][data-plate-nav="dock"] .git-cbar { bottom: 94px; }
+:root[data-look="plate"] .git-cbar.pushed { bottom: 20px; }
+:root[data-look="plate"] .git-cbar:active { transform: translate(1.5px, 1.5px); box-shadow: 1.5px 1.5px 0 0 var(--c-fg); }
+:root[data-look="plate"] .git-cbar-txt b { font-weight: 800; }
+:root[data-look="plate"] .git-cbtn { width: 36px; height: 36px; border-radius: 0; padding: 0;
+  border: 1.5px solid var(--c-line); background: var(--c-bg); color: var(--c-fg3); }
+:root[data-look="plate"] .git-cbtn .ms { font-size: 19px; }
+:root[data-look="plate"] .git-cbar.ready .git-cbtn { border-color: var(--c-fg); background: var(--c-fg); color: var(--c-bg);
+  box-shadow: 2px 2px 0 0 var(--c-bg), 3.5px 3.5px 0 0 var(--c-fg); }
+:root[data-look="plate"] .git-cbar.ready:active .git-cbtn { transform: translate(1.5px, 1.5px); box-shadow: none; }
 
 /* 通用次级页面容器 */
 .sub-scroll { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 106px 0 44px; }
@@ -2006,16 +2058,15 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .f-btn { flex: 1; height: 44px; border-radius: var(--u-rbtn); background: var(--u-well); color: var(--c-fg); font-size: 14.5px; font-weight: 600; display: grid; place-items: center; }
 .f-btn.pri { background: var(--u-pri); color: var(--u-on-pri); }
 .f-btn.danger { background: var(--u-del); color: #fff; }
+.f-btn:disabled { opacity: 0.42; pointer-events: none; box-shadow: none !important; }
 .f-btn:active { transform: scale(0.97); }
+.f-ta { height: auto; min-height: 76px; padding: 10px 12px; line-height: 1.5; resize: none; }
 :root[data-look="plate"] .f-acts { gap: 12px; padding: 0 4px 4px 0; }
 :root[data-look="plate"] .f-btn { border: 1.5px solid var(--c-fg); background-color: var(--c-bg); color: var(--c-fg); font-weight: 800;
   background-image: linear-gradient(var(--c-fg), var(--c-fg)); background-position: left; background-size: 0 100%; background-repeat: no-repeat;
   transition: background-size var(--d-m) var(--ease-press), color var(--d-xs), transform var(--d-xs) var(--ease-press), box-shadow var(--d-xs) var(--ease-press), background-color var(--d-xs); }
 :root[data-look="plate"] .f-btn:hover:not(.pri):not(.danger) { background-color: var(--c-tint); }
 :root[data-look="plate"] .f-btn:active { background-size: 100% 100%; color: var(--c-bg); transform: translate(1.5px, 1.5px); }
-:root[data-look="plate"] .f-btn[data-dact="discard"] { border-color: var(--c-danger); color: var(--c-danger); background-image: linear-gradient(var(--c-danger), var(--c-danger)); background-position: right; }
-:root[data-look="plate"] .f-btn[data-dact="discard"]:hover { background-color: color-mix(in srgb, var(--c-danger) 9%, var(--c-bg)); }
-:root[data-look="plate"] .f-btn[data-dact="discard"]:active { background-size: 100% 100%; color: var(--c-on-danger); transform: translate(1.5px, 1.5px); }
 :root[data-look="plate"] .f-btn.pri { background-color: var(--c-fg); background-image: none; color: var(--c-bg);
   box-shadow: 2.5px 2.5px 0 0 var(--c-bg), 4px 4px 0 0 var(--c-fg); }
 :root[data-look="plate"] .f-btn.pri:hover { transform: translate(-0.5px, -0.5px); box-shadow: 3px 3px 0 0 var(--c-bg), 4.5px 4.5px 0 0 var(--c-fg); }
@@ -2082,6 +2133,11 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .cm-mp-btn .ms { font-size: 18px; }
 .cm-mp-sec { padding: 4px 20px 10px; }
 .cm-mp-files { margin: 0 12px 10px; background: var(--c-s1); border-radius: 20px; overflow: hidden; border: 1px solid var(--c-edge); }
+.mp-load { display: flex; align-items: center; justify-content: center; padding: 28px 20px 32px; color: var(--c-fg3); }
+.mp-spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--c-s3); border-top-color: var(--c-fg2); animation: rc-spin calc(820ms * var(--slow, 1)) linear infinite; flex: none; }
+.mp-reveal { opacity: 0; transform: translateY(8px); transition: opacity calc(240ms * var(--slow, 1)) var(--ease, ease) calc(45ms * var(--slow, 1)), transform calc(300ms * var(--slow, 1)) var(--ease, ease) calc(45ms * var(--slow, 1)); }
+.mp-reveal.in { opacity: 1; transform: none; }
+.mp-scroll-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 
 /* 聊天附件芯片、斜杠补全条、图片消息、空状态 */
 .attach-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; }
@@ -2404,7 +2460,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
           { x: "A", name: "chat_send.json", dir: "internal/protocol/testdata", add: 18, del: 0, staged: true, diff: sampleDiffs["chat_send.json"] },
           { x: "M", name: "envelope_test.go", dir: "internal/protocol", add: 112, del: 3, staged: false, diff: sampleDiffs["envelope_test.go"] },
           { x: "M", name: "AGENTS.md", dir: "", add: 4, del: 1, staged: false, diff: sampleDiffs["AGENTS.md"] },
-          { x: "B", name: "preview.png", dir: "design/ui-mockup", binary: true, staged: false }
+          { x: "?", name: "preview.png", dir: "design/ui-mockup", binary: true, staged: false }
         ]
       },
       "relay-svc": {
@@ -3036,7 +3092,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   var ACC_DEFAULT = { tile: "#007AFF", ink: "#D97757", clear: "#2A45E0" };
   var S = { look: "tile", machine: "m1", tab: "sessions", themePref: "light", theme: "light",
     accs: { tile: "#007AFF", ink: "#D97757", clear: "#2A45E0" }, acc: "#007AFF", ink: "black",
-    one: false, folded: {}, gitPane: "log", gitDir: "clauderc-app", list: "active", dir: null,
+    one: false, folded: {}, gitPane: "log", gitDir: "clauderc-app", commitDrafts: {}, list: "active", dir: null,
     alwaysAnim: false, relayUrl: "wss://relay.example.com", relayConnected: true, paired: true, plateNav: "float" };
   var api = null, LOOKS = {};
   var A = {
@@ -3485,23 +3541,20 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
       var staged = [], unstaged = [];
       list.forEach(function (f, i) { (f.staged ? staged : unstaged).push({ f: f, i: i }); });
       var ops = '<div class="git-ops">' +
-        '<button class="git-op" data-gitop="pull">' + ic("south") + "拉取" + (r.behind ? " " + r.behind : "") + "</button>" +
-        '<button class="git-op" data-gitop="push">' + ic("north") + "推送" + (r.ahead ? " " + r.ahead : "") + "</button>" +
-        '<button class="git-op pri" data-gitop="commit">' + ic("check") + "提交" + (staged.length ? " (" + staged.length + ")" : "") + "</button></div>";
+        '<button class="git-op" data-gitop="pull">' + ic("download") + "拉取" + (r.behind ? " " + r.behind : "") + "</button>" +
+        '<button class="git-op" data-gitop="push">' + ic("upload") + "推送" + (r.ahead ? " " + r.ahead : "") + "</button></div>";
       if (!list.length) {
         return ops + '<div class="empty-box" style="padding:36px 24px">' + ic("check_circle") + "<b>工作区干净</b><p>当前分支没有未提交的改动</p></div>";
       }
       function renderRow(item) {
         var f = item.f, idx = item.i;
+        var xCls = f.x === "?" ? "U" : f.x;
         var badge = look === "plate"
-          ? '<i class="box' + (f.x === "A" ? " solid" : "") + '">' + f.x + "</i>"
-          : '<span class="x x-' + f.x + '">' + f.x + "</span>";
-        var pmCls = look === "clear" ? "pmv mono" : look === "plate" ? "pmv" : "pm";
-        var stats = f.binary
-          ? '<span style="color:var(--c-fg3)">二进制</span>'
-          : '<span class="a">+' + f.add + "</span>" + (f.del ? '<span class="d">−' + f.del + "</span>" : "");
+          ? '<i class="box' + (f.x === "A" ? " solid" : "") + '">' + esc(f.x) + "</i>"
+          : '<span class="x x-' + xCls + '">' + esc(f.x) + "</span>";
+        var utag = f.x === "?" ? '<span class="utag">未跟踪</span>' : "";
         var stBtn = '<button class="file-act" data-stage="' + idx + '" title="' + (f.staged ? "取消暂存" : "暂存") + '">' + ic(f.staged ? "remove" : "add") + "</button>";
-        return '<div class="file" data-diff="' + idx + '">' + badge + '<div class="n"><b>' + esc(f.name) + "</b><span>" + esc(f.dir || "根目录") + '</span></div><span class="' + pmCls + '">' + stats + "</span>" + stBtn + "</div>";
+        return '<div class="file" data-diff="' + idx + '">' + badge + '<div class="n"><b>' + esc(f.name) + "</b><span>" + esc(f.dir || "根目录") + "</span></div>" + utag + stBtn + "</div>";
       }
       var out = ops;
       if (staged.length) {
@@ -3511,6 +3564,26 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
         out += '<div class="fsec"><span>未暂存 · ' + unstaged.length + '</span><button data-stage-all="1">全部暂存</button></div>' + unstaged.map(renderRow).join("");
       }
       return out;
+    };
+
+    A.commitBarHTML = function (dir, look, pushed, abovePstrip) {
+      var r = A.repoFor(dir);
+      if (!r.isGit || !(r.files && r.files.length)) return "";
+      var staged = (r.files || []).filter(function (f) { return f.staged; }).length;
+      var draft = ((S.commitDrafts && S.commitDrafts[dir]) || "").trim();
+      var ready = staged > 0;
+      var cls = "git-cbar" +
+        (look === "clear" ? " glass" : "") +
+        (pushed ? " pushed" : "") +
+        (abovePstrip ? " above-pstrip" : "") +
+        (S.gitPane !== "files" ? " off" : "") +
+        (ready ? " ready" : "") +
+        (draft ? " has-draft" : "");
+      var primaryText = draft ? draft : (ready ? "写提交说明…" : "先暂存要提交的文件");
+      return '<div class="' + cls + '" data-gitop="commit" role="button" tabindex="0">' +
+        ic("edit", "git-cbar-ic") +
+        '<div class="git-cbar-txt"><b>' + esc(primaryText) + "</b></div>" +
+        '<span class="git-cbtn" aria-label="提交">' + ic("check") + "</span></div>";
     };
 
     A.gitEmptyHTML = function (dir) {
@@ -3588,8 +3661,13 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
           setTimeout(function () { reRender(); ctx.refreshAll(false); ctx.toast("已推送 " + n + " 个提交到 " + upName); }, K.dur(380));
         } else if (k === "commit") {
           var stagedCount = r.files.filter(function (x) { return x.staged; }).length;
-          if (!stagedCount) { ctx.toast("先点右侧 + 暂存要提交的文件"); return true; }
-          A.openCommitDialog(ctx, dir, op, function () { reRender(); if (switchToLog) switchToLog(); });
+          if (!stagedCount) {
+            op.classList.remove("shake"); void op.offsetWidth; op.classList.add("shake");
+            setTimeout(function () { op.classList.remove("shake"); }, 300);
+            ctx.toast("先点右侧 + 暂存要提交的文件");
+            return true;
+          }
+          A.openCommitDialog(ctx, dir, op, function () { reRender(); if (switchToLog) switchToLog(); }, reRender);
         }
         return true;
       }
@@ -3618,25 +3696,41 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
       var c0 = r.commits.filter(function (x) { return x.h === hash; })[0];
       if (!c0) { ctx.toast("找不到提交 " + hash); return; }
 
-      // 浮墨：点时间线提交从该行原地长出悬浮详情面板，支持面板内跳转父提交与打开文件 Diff
+      // 浮墨：点时间线提交从该行原地长出紧凑加载悬浮卡，数据到位后平滑撑高并淡入内容，支持面板内跳转父提交与打开文件 Diff
       if (ctx.look === "ink") {
-        var trail = [c0];
-        function renderMorphBody(c) {
-          var pt = buildCommitParts(c);
+        var trail = [c0], loadSeq = 0;
+        function renderMorphHead(c) {
           return '<div class="cm-mp-head">' +
             (trail.length > 1 ? '<button type="button" class="cm-mp-btn" data-cmact="prev" title="上一条提交">' + ic("arrow_back") + "</button>" : "") +
-            '<span class="cm-mp-t">' + esc(c.h) + " · " + esc(dir) + '</span>' +
-            '<button type="button" class="cm-mp-btn" data-cmact="close" title="关闭">' + ic("close") + "</button></div>" +
+            '<span class="cm-mp-t">' + esc(c.h) + " · " + esc(dir) + "</span>" +
+            '<button type="button" class="cm-mp-btn" data-cmact="close" title="关闭">' + ic("close") + "</button></div>";
+        }
+        function renderMorphLoading(c) {
+          return renderMorphHead(c) + '<div class="mp-load"><span class="mp-spin"></span></div>';
+        }
+        function renderMorphLoaded(c) {
+          var pt = buildCommitParts(c);
+          return renderMorphHead(c) +
+            '<div class="morph-scroll mp-reveal">' +
             '<div class="cm-mp-sec"><h2 class="cm-subj">' + esc(c.s) + "</h2>" + (c.body ? '<p class="cm-body">' + esc(c.body) + "</p>" : "") + pt.refsHtml + "</div>" +
             '<div class="pn-line"></div><div class="cm-mp-sec">' +
             '<div class="meta-row"><span class="mk">作者</span><span class="mv">' + esc(c.a) + "</span></div>" +
             '<div class="meta-row"><span class="mk">时间</span><span class="mv">' + esc(c.timeFull || c.t) + "</span></div>" + pt.parentsHtml + "</div>" +
             '<div class="pn-sec"><span>' + (c.files || []).length + ' 个改动文件</span><span class="mono" style="margin-left:auto"><span style="color:var(--u-add)">+' + pt.totalAdd + "</span>" + (pt.totalDel ? ' <span style="color:var(--u-del)">−' + pt.totalDel + "</span>" : "") + "</span></div>" +
-            '<div class="cm-mp-files">' + pt.filesHtml + "</div>";
+            '<div class="cm-mp-files">' + pt.filesHtml + "</div></div>";
         }
-        var m = ctx.openModal("", '<div class="cm-mp-root">' + renderMorphBody(c0) + "</div>", fromEl);
+        var m = ctx.openModal("", renderMorphLoading(c0), fromEl, { tall: true });
         m.dataset.sub = "commit";
         m.dataset.commitHash = c0.h;
+        function showCommitAsync(c, delayMs) {
+          var seq = ++loadSeq;
+          setTimeout(function () {
+            if (!m.isConnected || seq !== loadSeq) return;
+            m.dataset.commitHash = c.h;
+            if (m.swapLoaded) m.swapLoaded(renderMorphLoaded(c));
+          }, K.dur(delayMs));
+        }
+        showCommitAsync(c0, 520);
         m.addEventListener("click", function (e) {
           var b = e.target.closest("[data-cmact],[data-parent],[data-cfile]"); if (!b) return;
           if (b.dataset.cmact === "close") { m.close(); return; }
@@ -3645,8 +3739,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
               trail.pop();
               var prevC = trail[trail.length - 1];
               m.dataset.commitHash = prevC.h;
-              m.querySelector(".cm-mp-root").innerHTML = renderMorphBody(prevC);
-              m.querySelector(".morph-body").scrollTop = 0;
+              if (m.swapLoaded) m.swapLoaded(renderMorphLoaded(prevC));
             }
             return;
           }
@@ -3655,8 +3748,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
             if (!nextC) { ctx.toast("找不到父提交 " + b.dataset.parent); return; }
             trail.push(nextC);
             m.dataset.commitHash = nextC.h;
-            m.querySelector(".cm-mp-root").innerHTML = renderMorphBody(nextC);
-            m.querySelector(".morph-body").scrollTop = 0;
+            if (m.swapLoaded) m.swapLoaded(renderMorphLoading(nextC));
+            showCommitAsync(nextC, 260);
             return;
           }
           if (b.dataset.cfile != null) {
@@ -3710,28 +3803,29 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
             if (subEl) subEl.textContent = (fileObj.staged ? "已暂存" : "未暂存") + " · " + (fileObj.dir || "根目录");
             if (wt.onChanged) wt.onChanged();
             ctx.toast(fileObj.staged ? "已暂存 " + name : "已取消暂存 " + name);
-          } else if (a === "discard" && wt) {
-            var r = A.repoFor(wt.dir), ix = r.files.indexOf(fileObj);
-            if (ix >= 0) r.files.splice(ix, 1);
-            if (wt.onChanged) wt.onChanged();
-            closeFn();
-            ctx.toast("已放弃 " + name + " 的改动");
           }
         });
       }
 
-      // 浮墨：工作区文件、提交详情里的改动文件、聊天工具编辑记录均原地 morph 浮现差异面板
+      // 浮墨：先以紧凑加载条原地 morph 展开，数据就位后平滑撑高并淡入差异内容
       if (ctx.look === "ink") {
-        var footHtml = wt ? '<div class="morph-foot"><button type="button" class="f-btn" data-dact="discard">放弃改动</button><button type="button" class="f-btn pri" data-dact="toggle-stage">' + (fileObj.staged ? "取消暂存" : "暂存此文件") + "</button></div>" : "";
-        var morphHtml = '<div class="cm-mp-head"><div class="cm-mp-title"><b>' + esc(name) + '</b><span data-diff-sub>' + esc(sub) + "</span></div>" + stats + '<button type="button" class="cm-mp-btn" data-act="back" title="关闭">' + ic("close") + "</button></div>" +
-          '<div class="morph-scroll">' + body + "</div>" + footHtml;
-        var m = ctx.openModal("", morphHtml, fromEl, { box: wt ? { left: 4, right: 4, bottom: 14 } : { left: 4, right: 4, top: 56 }, fromTop: !wt, tall: true });
+        var footHtml = wt ? '<div class="morph-foot"><button type="button" class="f-btn pri" data-dact="toggle-stage">' + (fileObj.staged ? "取消暂存" : "暂存此文件") + "</button></div>" : "";
+        var headLoading = '<div class="cm-mp-head"><div class="cm-mp-title"><b>' + esc(name) + '</b><span data-diff-sub>' + esc(sub) + '</span></div><button type="button" class="cm-mp-btn" data-act="back" title="关闭">' + ic("close") + "</button></div>";
+        var headLoaded = '<div class="cm-mp-head"><div class="cm-mp-title"><b>' + esc(name) + '</b><span data-diff-sub>' + esc(sub) + "</span></div>" + stats + '<button type="button" class="cm-mp-btn" data-act="back" title="关闭">' + ic("close") + "</button></div>";
+        var m = ctx.openModal("", headLoading + '<div class="mp-load"><span class="mp-spin"></span></div>' + footHtml, fromEl, { box: wt ? { left: 4, right: 4, bottom: 14 } : { left: 4, right: 4, top: 56 }, fromTop: !wt, tall: true });
         m.dataset.sub = "diff";
         bindDiffActions(m, function () { m.close(); });
+        setTimeout(function () {
+          if (!m.isConnected) return;
+          var curSub = wt ? ((fileObj.staged ? "已暂存" : "未暂存") + " · " + (fileObj.dir || "根目录")) : sub;
+          var curHead = '<div class="cm-mp-head"><div class="cm-mp-title"><b>' + esc(name) + '</b><span data-diff-sub>' + esc(curSub) + "</span></div>" + stats + '<button type="button" class="cm-mp-btn" data-act="back" title="关闭">' + ic("close") + "</button></div>";
+          var curFoot = wt ? '<div class="morph-foot"><button type="button" class="f-btn pri" data-dact="toggle-stage">' + (fileObj.staged ? "取消暂存" : "暂存此文件") + "</button></div>" : "";
+          if (m.swapLoaded) m.swapLoaded(curHead + '<div class="morph-scroll mp-reveal">' + body + "</div>" + curFoot);
+        }, K.dur(520));
         return;
       }
 
-      var foot = wt ? '<div class="diff-foot"><button type="button" class="f-btn" data-dact="discard">放弃改动</button><button type="button" class="f-btn pri" data-dact="toggle-stage">' + (fileObj.staged ? "取消暂存" : "暂存此文件") + "</button></div>" : "";
+      var foot = wt ? '<div class="diff-foot"><button type="button" class="f-btn pri" data-dact="toggle-stage">' + (fileObj.staged ? "取消暂存" : "暂存此文件") + "</button></div>" : "";
       var el = h('<div class="page sub" data-sub="diff">' + A.subBar(ctx.look, name, sub, stats) + '<div class="sub-scroll" style="' + (wt ? "padding-bottom:88px" : "") + '">' + body + "</div>" + foot + "</div>");
       bindDiffActions(el, function () { ctx.stack.pop(); });
       ctx.stack.push(el);
@@ -4199,19 +4293,36 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
       });
     };
 
-    A.openCommitDialog = function (ctx, dir, fromEl, onCommitted) {
+    A.openCommitDialog = function (ctx, dir, fromEl, onCommitted, onDraftChanged) {
       var r = A.repoFor(dir);
       var staged = r.files.filter(function (f) { return f.staged; });
-      var body = '<div class="f-wrap"><p class="f-note">将提交已暂存的 ' + staged.length + " 个文件到分支 <b class=\"mono\">" + esc(r.branch) + "</b></p>" +
-        '<label class="f-lbl">提交说明</label><input class="f-inp" id="cm-msg" placeholder="例如：完善协议信封编解码测试" autocomplete="off">' +
-        '<div class="f-acts"><button type="button" class="f-btn" data-mact="cancel">取消</button><button type="button" class="f-btn pri" data-mact="commit">提交</button></div></div>';
+      var draft = (S.commitDrafts && S.commitDrafts[dir]) || "";
+      var body = '<div class="f-wrap"><p class="f-note">将提交已暂存的 ' + staged.length + ' 个文件到分支 <b class="mono">' + esc(r.branch) + "</b></p>" +
+        '<label class="f-lbl">提交说明</label><textarea class="f-inp f-ta" id="cm-msg" rows="2" placeholder="输入提交说明…" autocomplete="off">' + esc(draft) + "</textarea>" +
+        '<div class="f-acts"><button type="button" class="f-btn" data-mact="cancel">取消</button><button type="button" class="f-btn pri" id="cm-go" data-mact="commit"' + (draft.trim() ? "" : " disabled") + ">提交</button></div></div>";
       var m = ctx.openModal("提交改动", body, fromEl);
-      var inp = m.querySelector("#cm-msg");
-      setTimeout(function () { if (inp) inp.focus(); }, K.dur(160));
+      var inp = m.querySelector("#cm-msg"), go = m.querySelector("#cm-go");
+      function syncBarDraft() {
+        if (!fromEl || !fromEl.isConnected || !fromEl.classList.contains("git-cbar")) return;
+        var v = ((S.commitDrafts && S.commitDrafts[dir]) || "").trim();
+        fromEl.classList.toggle("has-draft", !!v);
+        var b = fromEl.querySelector(".git-cbar-txt b");
+        if (b) b.textContent = v || "写提交说明…";
+      }
+      setTimeout(function () { if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); } }, K.dur(180));
+      if (inp) {
+        inp.addEventListener("input", function () {
+          S.commitDrafts = S.commitDrafts || {};
+          S.commitDrafts[dir] = inp.value;
+          if (go) go.disabled = !inp.value.trim();
+          syncBarDraft();
+        });
+      }
       m.addEventListener("click", function (e) {
         var b = e.target.closest("[data-mact]"); if (!b) return;
-        if (b.dataset.mact === "cancel") { m.close(); return; }
-        var msg = inp.value.trim() || ("更新 " + staged[0].name);
+        if (b.dataset.mact === "cancel") { m.close(function () { if (onDraftChanged) onDraftChanged(); }); return; }
+        var msg = inp ? inp.value.trim() : "";
+        if (!msg) return;
         var hash = Math.random().toString(16).slice(2, 9);
         var prev = r.commits[0];
         r.commits.forEach(function (c) { c.refs = (c.refs || []).filter(function (x) { return x.kind !== "head"; }); });
@@ -4223,6 +4334,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
         r.files = r.files.filter(function (f) { return !f.staged; });
         r.ahead = (r.ahead || 0) + 1;
         if (RC.dirs[dir]) RC.dirs[dir].ahead = r.ahead;
+        if (S.commitDrafts) S.commitDrafts[dir] = "";
         m.close(function () { if (onCommitted) onCommitted(); ctx.refreshAll(false); ctx.toast("已提交 · " + hash); });
       });
     };
@@ -4536,7 +4648,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
             A.branchBarHTML(dir) +
             '<div class="seg' + (S.gitPane === "files" ? " r" : "") + '"><i class="thumb"></i><button data-pane="log" class="' + (S.gitPane === "log" ? "on" : "") + '">时间线</button><button data-pane="files" class="' + (S.gitPane === "files" ? "on" : "") + '">改动 <i>' + r.files.length + "</i></button></div>" +
             '<div class="panes"><div class="card' + (S.gitPane !== "log" ? " off" : "") + '" data-p="log">' + A.gitLogHTML(dir, "tile") + '</div><div class="card' + (S.gitPane !== "files" ? " off" : "") + '" data-p="files" style="padding-top:12px">' + A.gitFilesHTML(dir, "tile") + "</div></div>") +
-          "</div>";
+          "</div>" + A.commitBarHTML(dir, "tile", pushed, false);
+        el.classList.toggle("pane-files", r.isGit && S.gitPane === "files");
         var sc = el.querySelector(".scroll");
         if (prevTop) sc.scrollTop = prevTop;
         sc.addEventListener("scroll", function () { el.classList.toggle("scrolled", sc.scrollTop > 70); });
@@ -4546,6 +4659,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
         S.gitPane = p;
         var seg = el.querySelector(".seg"); if (!seg) return;
         seg.classList.toggle("r", p === "files");
+        el.classList.toggle("pane-files", p === "files");
+        var cb = el.querySelector(".git-cbar");
+        if (cb) cb.classList.toggle("off", p !== "files");
         el.querySelectorAll(".seg button").forEach(function (b) { b.classList.toggle("on", b.dataset.pane === p); });
         el.querySelectorAll(".panes > *").forEach(function (x) { x.classList.toggle("off", x.dataset.p !== p); });
       }
@@ -4865,10 +4981,14 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
       Object.keys(box).forEach(function (k) { m.style[k] = box[k] + "px"; });
       m.querySelector(".morph-body").style.setProperty("--from-y", (opts.fromTop ? -10 : 10) + "px");
       layer.appendChild(scrim); layer.appendChild(m);
-      var mr = m.getBoundingClientRect();
       var pad = 12, rad = Math.min(28, Math.min(fr.width, fr.height) / 2);
-      var it = Math.max(0, fr.top - mr.top), ir = Math.max(0, mr.right - fr.right), ib = Math.max(0, mr.bottom - fr.bottom), il = Math.max(0, fr.left - mr.left);
-      var start = "inset(" + it + "px " + ir + "px " + ib + "px " + il + "px round " + rad + "px)";
+      function startClip() {
+        var mr = m.getBoundingClientRect();
+        var curFr = (hasFrom && from.isConnected && from.getBoundingClientRect().width > 0) ? from.getBoundingClientRect() : fr;
+        var it = Math.max(0, curFr.top - mr.top), ir = Math.max(0, mr.right - curFr.right), ib = Math.max(0, mr.bottom - curFr.bottom), il = Math.max(0, curFr.left - mr.left);
+        return "inset(" + it + "px " + ir + "px " + ib + "px " + il + "px round " + rad + "px)";
+      }
+      var start = startClip();
       var end = "inset(" + pad + "px round 30px)";
       var ghost = null;
       var useGhost = hasFrom && fr.width < 260;
@@ -4886,11 +5006,45 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
       m.style.clipPath = end;
       m.classList.add("on"); scrim.classList.add("on");
       if (ghost) requestAnimationFrame(function () { ghost.style.opacity = 0; });
+      var swapSeq = 0, closed = false;
+      m.swapLoaded = function (nextHtml) {
+        if (closed || !m.isConnected) return;
+        var morphIn = m.querySelector(".morph-in"), bodyEl = m.querySelector(".morph-body");
+        if (!morphIn || !bodyEl) return;
+        var tok = ++swapSeq;
+        m.style.transition = "none";
+        m.style.clipPath = "none";
+        var h0 = morphIn.getBoundingClientRect().height;
+        morphIn.style.transition = "none";
+        morphIn.style.height = h0 + "px";
+        bodyEl.innerHTML = nextHtml;
+        morphIn.style.height = "auto";
+        var maxH = opts.tall ? 730 : 690;
+        var h1 = Math.min(morphIn.getBoundingClientRect().height, maxH);
+        morphIn.style.height = h0 + "px";
+        morphIn.getBoundingClientRect();
+        morphIn.style.transition = "height calc(360ms * var(--slow)) var(--ease)";
+        morphIn.style.height = h1 + "px";
+        requestAnimationFrame(function () {
+          bodyEl.querySelectorAll(".mp-reveal").forEach(function (el) { el.classList.add("in"); });
+        });
+        setTimeout(function () {
+          if (closed || tok !== swapSeq || !m.isConnected) return;
+          morphIn.style.transition = "";
+          morphIn.style.height = "";
+        }, K.dur(390));
+      };
       function close(after) {
+        if (closed) return;
+        closed = true;
         K.dropOverlay(close);
+        var closeStart = startClip();
+        m.style.transition = "none";
+        m.style.clipPath = end;
+        m.getBoundingClientRect();
         m.classList.remove("on"); scrim.classList.remove("on");
         m.style.transition = "clip-path calc(340ms * var(--slow)) var(--ease-in)";
-        setTimeout(function () { m.style.clipPath = start; if (ghost) ghost.style.opacity = 1; }, K.dur(60));
+        setTimeout(function () { m.style.clipPath = closeStart; if (ghost) ghost.style.opacity = 1; }, K.dur(60));
         setTimeout(function () { if (useGhost) from.style.visibility = ""; m.remove(); scrim.remove(); if (ghost) ghost.remove(); if (typeof after === "function") after(); }, K.dur(420));
       }
       scrim.addEventListener("click", function () { close(); });
@@ -5091,8 +5245,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
             '<div class="brush-tabs"><span class="brush"><svg viewBox="0 0 100 30" preserveAspectRatio="none"><path d="M3 13 C 14 6, 38 9, 58 7 S 90 5, 97 10 C 100 15, 97 22, 88 24 C 70 26, 46 23, 27 26 S 5 25, 2 20 Z"/></svg></span><button data-list="log" data-pane="log" class="' + (S.gitPane === "log" ? "on" : "") + '">时间线</button><button data-list="files" data-pane="files" class="' + (S.gitPane === "files" ? "on" : "") + '">改动<i>' + r.files.length + "</i></button></div>" +
             A.branchBarHTML(dir) +
             '<div class="panes"><div class="' + (S.gitPane !== "log" ? "off" : "") + '" data-p="log">' + A.gitLogHTML(dir, "ink") + '</div><div class="' + (S.gitPane !== "files" ? "off" : "") + '" data-p="files">' + A.gitFilesHTML(dir, "ink") + "</div></div>") +
-          "</div>" +
+          "</div>" + A.commitBarHTML(dir, "ink", pushed, false) +
           (pushed ? '<div class="top"><button class="orb" data-act="back">' + ic("arrow_back") + '</button><button class="pill" data-act="where"><i class="dot"></i><span>' + esc(cur().name) + " · " + esc(dir) + "</span>" + ic("expand_more") + '</button><button class="orb" data-act="refresh">' + ic("refresh") + "</button></div>" : "");
+        el.classList.toggle("pane-files", r.isGit && S.gitPane === "files");
         var sc = el.querySelector(".scroll");
         if (prevTop && sc) sc.scrollTop = prevTop;
         if (r.isGit) requestAnimationFrame(function () { setPane(S.gitPane, true); });
@@ -5103,6 +5258,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
         var b = tabs.querySelector(".brush"), on = tabs.querySelector('[data-list="' + p + '"]');
         tabs.querySelectorAll("[data-list]").forEach(function (x) { x.classList.toggle("on", x === on); x.dataset.pane = x.dataset.list; });
         if (on && on.offsetWidth) { if (instant) b.style.transition = "none"; b.style.left = on.offsetLeft - 8 + "px"; b.style.width = on.offsetWidth + 16 + "px"; if (instant) { b.getBoundingClientRect(); b.style.transition = ""; } }
+        el.classList.toggle("pane-files", p === "files");
+        var cb = el.querySelector(".git-cbar");
+        if (cb) cb.classList.toggle("off", p !== "files");
         el.querySelectorAll(".panes > *").forEach(function (x) { x.classList.toggle("off", x.dataset.p !== p); });
       }
       render(dir);
@@ -5296,6 +5454,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
         pstrip.innerHTML = '<i class="dot"></i><span class="t"><b class="cnt">' + n + "</b> 个等你 <em>· " + esc(f.title) + (f.machine !== S.machine ? " · " + esc(m.name) : "") + "</em></span>" + ic("chevron_right");
       }
       pstrip.classList.toggle("on", n > 0);
+      phone.querySelectorAll(".git-cbar:not(.pushed)").forEach(function (cb) { cb.classList.toggle("above-pstrip", n > 0); });
       if (animate && n > lastN && lastN >= 0) { pstrip.classList.remove("bump"); void pstrip.offsetWidth; pstrip.classList.add("bump"); }
       lastN = n;
     }
@@ -5480,7 +5639,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
             A.branchBarHTML(dir) +
             '<div class="seglens glass"><i class="lens"></i><button data-pane="log" class="' + (S.gitPane === "log" ? "on" : "") + '">时间线</button><button data-pane="files" class="' + (S.gitPane === "files" ? "on" : "") + '">改动<i>' + r.files.length + "</i></button></div>" +
             '<div class="panes"><div class="' + (S.gitPane !== "log" ? "off" : "") + '" data-p="log">' + A.gitLogHTML(dir, "clear") + '</div><div class="' + (S.gitPane !== "files" ? "off" : "") + '" data-p="files">' + A.gitFilesHTML(dir, "clear") + "</div></div>") +
-          "</div>";
+          "</div>" + A.commitBarHTML(dir, "clear", pushed, !pushed && pending().length > 0);
+        el.classList.toggle("pane-files", r.isGit && S.gitPane === "files");
         var sc = el.querySelector(".scroll");
         if (prevTop) sc.scrollTop = prevTop;
         sc.addEventListener("scroll", function () { el.classList.toggle("scrolled", sc.scrollTop > 90); });
@@ -5493,6 +5653,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
         var on = seg.querySelector('[data-pane="' + p + '"]');
         seg.querySelectorAll("[data-pane]").forEach(function (b) { b.classList.toggle("on", b === on); });
         placeLens(seg, on, instant, p === "files" ? 1 : -1);
+        el.classList.toggle("pane-files", p === "files");
+        var cb = el.querySelector(".git-cbar");
+        if (cb) cb.classList.toggle("off", p !== "files");
         el.querySelectorAll(".panes > *").forEach(function (x) { x.classList.toggle("off", x.dataset.p !== p); });
       }
       render(dir);
@@ -5889,13 +6052,17 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
             A.branchBarHTML(dir) +
             '<div class="tabs2"><button data-pane="log" class="' + (S.gitPane === "log" ? "on" : "") + '">时间线</button><button data-pane="files" class="' + (S.gitPane === "files" ? "on" : "") + '">改动<i>' + two(r.files.length) + "</i></button></div>" +
             '<div class="panes static"><div class="' + (S.gitPane !== "log" ? "off" : "") + '" data-p="log">' + A.gitLogHTML(dir, "plate") + '</div><div class="' + (S.gitPane !== "files" ? "off" : "") + '" data-p="files">' + A.gitFilesHTML(dir, "plate") + "</div></div>") +
-          "</div>";
+          "</div>" + A.commitBarHTML(dir, "plate", pushed, false);
+        el.classList.toggle("pane-files", r.isGit && S.gitPane === "files");
         var sc = el.querySelector(".scroll");
         if (prevTop && sc) sc.scrollTop = prevTop;
       }
       function setPane(p) {
         S.gitPane = p;
         var pn = el.querySelector(".panes"); if (pn) pn.classList.remove("static");
+        el.classList.toggle("pane-files", p === "files");
+        var cb = el.querySelector(".git-cbar");
+        if (cb) cb.classList.toggle("off", p !== "files");
         el.querySelectorAll(".tabs2 button").forEach(function (b) { b.classList.toggle("on", b.dataset.pane === p); });
         el.querySelectorAll(".panes > *").forEach(function (x) {
           var off = x.dataset.p !== p;
@@ -6143,7 +6310,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
     else if (t.id === "rv-reset") {
       window.RC_RESET();
       cleared = [];
-      S.machine = "m1"; S.dir = null; S.gitDir = "clauderc-app"; S.paired = true; S.one = false; S.folded = {}; S.relayUrl = "wss://relay.example.com"; S.relayConnected = true; S.plateNav = "float"; S.ink = "black";
+      S.machine = "m1"; S.dir = null; S.gitDir = "clauderc-app"; S.commitDrafts = {}; S.paired = true; S.one = false; S.folded = {}; S.relayUrl = "wss://relay.example.com"; S.relayConnected = true; S.plateNav = "float"; S.ink = "black";
       mount(S.look);
       api.toast("已重置演示数据");
     }

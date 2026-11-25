@@ -346,4 +346,59 @@ class GitLogicTest {
         assertEquals(show, commit.state.value.value)
         assertEquals(diff, diffVm.state.value.value)
     }
+
+    @Test fun stageAllAndUnstageAllCallEachPathInOrderWithSingleBusyCheck() = runTest(dispatcher) {
+        relay.respond(Method.GIT_STAGE, clauderc.app.protocol.Empty.serializer(), clauderc.app.protocol.Empty())
+        relay.respond(Method.GIT_UNSTAGE, clauderc.app.protocol.Empty.serializer(), clauderc.app.protocol.Empty())
+        val vm = viewModel()
+        vm.request(GitOp.StageAll(listOf("AGENTS.md", "scripts/e2e-claude/run.py")))
+        assertEquals(1, relay.sent(Method.DIR_BUSY).size)
+        assertEquals(
+            listOf("AGENTS.md", "scripts/e2e-claude/run.py"),
+            relay.sent(Method.GIT_STAGE).map { it.decode(clauderc.app.protocol.GitPathRequest.serializer()).path },
+        )
+        assertFalse(vm.state.value.running)
+
+        vm.request(GitOp.UnstageAll(listOf("internal/protocol/errors.go")))
+        assertEquals(2, relay.sent(Method.DIR_BUSY).size)
+        assertEquals(
+            listOf("internal/protocol/errors.go"),
+            relay.sent(Method.GIT_UNSTAGE).map { it.decode(clauderc.app.protocol.GitPathRequest.serializer()).path },
+        )
+    }
+
+    @Test fun bulkStageAsksWhenDirectoryIsBusyThenRunsAllPaths() = runTest(dispatcher) {
+        relay.respond(Method.DIR_BUSY, DirBusyResponse.serializer(), DirBusyResponse(true))
+        relay.respond(Method.GIT_STAGE, clauderc.app.protocol.Empty.serializer(), clauderc.app.protocol.Empty())
+        val vm = viewModel()
+        vm.request(GitOp.StageAll(listOf("a.kt", "b.kt")))
+        val ask = vm.state.value.confirm as GitConfirm.Busy
+        assertEquals("全部暂存", ask.op.verb)
+        assertTrue(relay.sent(Method.GIT_STAGE).isEmpty())
+
+        vm.confirm()
+        assertEquals(
+            listOf("a.kt", "b.kt"),
+            relay.sent(Method.GIT_STAGE).map { it.decode(clauderc.app.protocol.GitPathRequest.serializer()).path },
+        )
+        assertNull(vm.state.value.confirm)
+        assertFalse(vm.state.value.running)
+    }
+
+    @Test fun bulkStageMidFailureReportsErrorAndRefreshes() = runTest(dispatcher) {
+        var count = 0
+        relay.on(Method.GIT_STAGE) {
+            count++
+            if (count == 2) throw clauderc.app.net.RemoteException(ErrorCode.GIT_FAILED, "fatal: pathspec failed")
+            kotlinx.serialization.json.JsonObject(emptyMap())
+        }
+        val vm = viewModel()
+        val statusBefore = relay.sent(Method.GIT_STATUS).size
+        vm.request(GitOp.StageAll(listOf("ok.kt", "bad.kt", "skipped.kt")))
+        assertEquals(2, count)
+        assertEquals("全部暂存失败", vm.state.value.failure?.title)
+        assertEquals("fatal: pathspec failed", vm.state.value.failure?.output)
+        assertEquals(statusBefore + 1, relay.sent(Method.GIT_STATUS).size)
+        assertFalse(vm.state.value.running)
+    }
 }

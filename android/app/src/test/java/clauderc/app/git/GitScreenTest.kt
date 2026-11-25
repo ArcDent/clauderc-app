@@ -8,12 +8,14 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.protocol.Commit
 import clauderc.app.protocol.CommitFile
@@ -92,18 +94,41 @@ class GitScreenTest {
         compose.onNodeWithText("时间线").assertDoesNotExist()
     }
 
-    @Test fun statusGroupsFilesAndCommitNeedsAMessage() {
+    @Test fun statusGroupsFilesAndSupportsBulkAndSingleStageOps() {
         val ops = mutableListOf<GitOp>()
         show(base.copy(tab = GitTab.Status), GitActions(onRequest = { ops += it }))
-        compose.onNodeWithText("已暂存").assertIsDisplayed()
-        compose.onNodeWithText("未暂存").assertIsDisplayed()
+        compose.onNodeWithText("拉取").assertIsDisplayed()
+        compose.onNodeWithText("推送 2").assertIsDisplayed()
+        compose.onNodeWithText("已暂存 · 1").assertIsDisplayed()
+        compose.onNodeWithText("未暂存 · 2").assertIsDisplayed()
         compose.onNodeWithText("errors.go").assertIsDisplayed()
         compose.onNodeWithText("AGENTS.md").assertIsDisplayed()
+        compose.onNodeWithText("根目录").assertIsDisplayed()
         compose.onNodeWithText("未跟踪").assertIsDisplayed()
         compose.onNodeWithText("改动(3)").assertIsDisplayed()
-        compose.onNodeWithText("提交").assertIsNotEnabled()
-        compose.onNodeWithText("取消暂存").performClick()
-        assertEquals(listOf<GitOp>(GitOp.Unstage("internal/protocol/errors.go")), ops)
+        compose.onNodeWithContentDescription("取消暂存").performClick()
+        compose.onNodeWithText("全部取消").performClick()
+        compose.onNodeWithText("全部暂存").performClick()
+        assertEquals(
+            listOf<GitOp>(
+                GitOp.Unstage("internal/protocol/errors.go"),
+                GitOp.UnstageAll(listOf("internal/protocol/errors.go")),
+                GitOp.StageAll(listOf("AGENTS.md", "scripts/e2e-claude/run.py")),
+            ),
+            ops,
+        )
+    }
+
+    @Test fun cleanWorkspaceShowsDemoAlignedEmptyState() {
+        val clean = status.copy(staged = emptyList(), unstaged = emptyList(), behind = 3, ahead = 0)
+        show(base.copy(tab = GitTab.Status, status = clean), style = UiStyle.Ink)
+        compose.onNodeWithText("拉取 3").assertIsDisplayed()
+        compose.onNodeWithText("推送").assertIsDisplayed()
+        compose.onNodeWithTag("gitCleanEmpty").assertIsDisplayed()
+        compose.onNodeWithText("工作区干净").assertIsDisplayed()
+        compose.onNodeWithText("当前分支没有未提交的改动").assertIsDisplayed()
+        compose.onNodeWithText("全部暂存").assertDoesNotExist()
+        compose.onNodeWithText("全部取消").assertDoesNotExist()
     }
 
     @Test fun busyAndUpstreamConfirmations() {
@@ -123,9 +148,11 @@ class GitScreenTest {
 
     @Test fun fileStageActionsAreDisabledWhileAWriteIsRunning() {
         show(base.copy(tab = GitTab.Status, running = true))
-        compose.onNodeWithText("取消暂存").assertIsNotEnabled()
-        for (node in compose.onAllNodesWithText("暂存").fetchSemanticsNodes().indices) {
-            compose.onAllNodesWithText("暂存")[node].assertIsNotEnabled()
+        compose.onNodeWithContentDescription("取消暂存").assertIsNotEnabled()
+        compose.onNodeWithText("全部取消").assertIsNotEnabled()
+        compose.onNodeWithText("全部暂存").assertIsNotEnabled()
+        for (node in compose.onAllNodesWithContentDescription("暂存").fetchSemanticsNodes().indices) {
+            compose.onAllNodesWithContentDescription("暂存")[node].assertIsNotEnabled()
         }
     }
 
@@ -414,5 +441,134 @@ class GitScreenTest {
         compose.onNodeWithTag("tileSheet").assertIsDisplayed()
         compose.onNodeWithText("api").performClick()
         assertEquals(listOf("/Users/me/github/api"), pickedDirs)
+    }
+
+    @Test fun inkCommitAndDiffMorphPanelsExpandSmoothlyFromLoadingAndAcrossParentSwitch() {
+        val show1 = GitShowResponse(
+            hash = "7c2e0d4aa",
+            parents = listOf("5b81aa0ff"),
+            author = "林舟",
+            time = T0,
+            message = "定义协议信封\n\n- 完整编解码与错误码测试",
+            files = (1..8).map { CommitFile("internal/protocol/file_$it.go", added = it * 10, deleted = it) },
+        )
+        val show2 = GitShowResponse(
+            hash = "5b81aa0ff",
+            parents = emptyList(),
+            author = "林舟",
+            time = T0,
+            message = "初始提交",
+            files = listOf(CommitFile("README.md", added = 12, deleted = 0)),
+        )
+        var commitState by mutableStateOf(Loadable<GitShowResponse>())
+        var hash by mutableStateOf("7c2e0d4aa")
+        var canBack by mutableStateOf(false)
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            ClaudercTheme(darkTheme = true, style = UiStyle.Ink) {
+                CommitMorphPanel(
+                    dir = "/Users/me/github/clauderc-app",
+                    hash = hash,
+                    canGoBack = canBack,
+                    state = commitState,
+                    anchor = null,
+                    onBackParent = { hash = "7c2e0d4aa"; canBack = false; commitState = Loadable(show1) },
+                    onClose = {},
+                    onOpenParent = { hash = it; canBack = true; commitState = Loadable() },
+                    onOpenFileAt = { _, _ -> },
+                )
+            }
+        }
+        compose.mainClock.advanceTimeBy(600)
+        compose.waitForIdle()
+        val hLoading = compose.onNodeWithTag("inkCommitMorph").fetchSemanticsNode().boundsInRoot.height
+
+        commitState = Loadable(show1)
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        val hStart = compose.onNodeWithTag("inkCommitMorph").fetchSemanticsNode().boundsInRoot.height
+        compose.mainClock.advanceTimeBy(120)
+        compose.waitForIdle()
+        val hMid = compose.onNodeWithTag("inkCommitMorph").fetchSemanticsNode().boundsInRoot.height
+
+        compose.mainClock.advanceTimeBy(600)
+        compose.waitForIdle()
+        val hLoaded = compose.onNodeWithTag("inkCommitMorph").fetchSemanticsNode().boundsInRoot.height
+        assertTrue("commit panel does not snap on first frame (loading=$hLoading start=$hStart loaded=$hLoaded)", hStart < hLoaded)
+        assertTrue("commit panel expands smoothly (loading=$hLoading mid=$hMid loaded=$hLoaded)", hMid > hLoading && hMid < hLoaded)
+
+        // Switching to a parent commit transitions smoothly without snapping.
+        compose.onNodeWithTag("commitParent:5b81aa0").performClick()
+        compose.mainClock.advanceTimeBy(100)
+        compose.waitForIdle()
+        commitState = Loadable(show2)
+        compose.mainClock.advanceTimeBy(600)
+        compose.waitForIdle()
+        compose.onNodeWithText("初始提交").assertIsDisplayed()
+    }
+
+    @Test fun commitCapsuleBarShowsHintWhenNothingStagedAndOpensModalWithDraftAcrossAllStyles() {
+        // 0 staged -> tapping commit bar shows guidance snackbar without opening modal.
+        val noStaged = status.copy(staged = emptyList())
+        var curStyle by mutableStateOf(UiStyle.Ink)
+        var uiState by mutableStateOf(base.copy(tab = GitTab.Status, status = noStaged))
+        val ops = mutableListOf<GitOp>()
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = curStyle) {
+                GitScreen(
+                    uiState,
+                    GitActions(
+                        onMessage = { uiState = uiState.copy(message = it) },
+                        onRequest = { ops += it },
+                    ),
+                )
+            }
+        }
+        compose.onNodeWithTag("gitCommitBar").assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("先点右侧 + 暂存要提交的文件").assertIsDisplayed()
+        compose.onNodeWithTag("commitMessageInput").assertDoesNotExist()
+
+        // Clean workspace hides commit bar completely.
+        uiState = uiState.copy(status = status.copy(staged = emptyList(), unstaged = emptyList()))
+        compose.waitForIdle()
+        compose.onNodeWithTag("gitCommitBar").assertDoesNotExist()
+
+        // With staged files: opens style-specific overlay for all 4 styles, keeps draft on cancel, and submits when non-blank.
+        uiState = base.copy(tab = GitTab.Status)
+        compose.waitForIdle()
+        val expectedTagByStyle = listOf(
+            UiStyle.Ink to "morphPanel",
+            UiStyle.Plate to "plateSlip",
+            UiStyle.Clear to "clearDrop",
+            UiStyle.Tile to "tileSheet",
+        )
+        expectedTagByStyle.forEach { (style, overlayTag) ->
+            curStyle = style
+            compose.waitForIdle()
+            compose.onNodeWithTag("gitCommitBar").assertIsDisplayed().performClick()
+            compose.waitForIdle()
+            compose.onNodeWithTag(overlayTag).assertIsDisplayed()
+            compose.onNodeWithText("提交改动").assertIsDisplayed()
+            compose.onNodeWithTag("commitSubmitButton").assertIsNotEnabled()
+            compose.onNodeWithText("取消").performClick()
+            compose.waitForIdle()
+        }
+
+        // Draft persists after cancel and displays in the compact bottom capsule; submitting dispatches GitOp.Commit.
+        curStyle = UiStyle.Ink
+        compose.waitForIdle()
+        compose.onNodeWithTag("gitCommitBar").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("commitMessageInput").performTextInput("对齐改动页与提交底栏")
+        compose.onNodeWithText("取消").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("对齐改动页与提交底栏").assertIsDisplayed()
+
+        compose.onNodeWithTag("gitCommitBar").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("commitSubmitButton").performClick()
+        compose.waitForIdle()
+        assertEquals(listOf<GitOp>(GitOp.Commit("对齐改动页与提交底栏")), ops)
     }
 }

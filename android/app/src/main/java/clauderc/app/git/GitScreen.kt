@@ -1,21 +1,29 @@
 package clauderc.app.git
 
 import clauderc.app.ui.components.CardCorner
+import clauderc.app.ui.components.LocalMorphClose
 import clauderc.app.ui.components.PlateClipShape
 import clauderc.app.ui.components.PlateSweep
 import clauderc.app.ui.components.inkSurface
 import clauderc.app.ui.components.plateBox
+import clauderc.app.ui.components.plateHardShadow
+import clauderc.app.ui.components.plateStamp
 import clauderc.app.ui.components.plateSweepFill
 import clauderc.app.ui.components.tileSurface
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
@@ -23,6 +31,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,7 +46,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -49,6 +60,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
@@ -127,7 +141,6 @@ import clauderc.app.ui.components.Glyph
 import clauderc.app.ui.components.MenuItem
 import clauderc.app.ui.components.PillButton
 import clauderc.app.ui.components.PillStyle
-import clauderc.app.ui.components.SectionHeading
 import clauderc.app.ui.components.SheetHead
 import clauderc.app.ui.components.SheetSection
 import clauderc.app.ui.components.SnackHost
@@ -136,8 +149,6 @@ import clauderc.app.ui.components.Spinner
 import clauderc.app.ui.components.StatusGlyph
 import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
-import clauderc.app.ui.components.TextTone
-import clauderc.app.ui.components.UnderlineField
 import clauderc.app.ui.components.captureAnchor
 import clauderc.app.ui.components.rememberAnchorBox
 import androidx.compose.ui.graphics.RectangleShape
@@ -172,6 +183,7 @@ class GitActions(
 private sealed interface GitSheet {
     data class Repo(val anchor: Rect? = null, val fromTop: Boolean = false) : GitSheet
     data class Branches(val anchor: Rect? = null) : GitSheet
+    data class Commit(val anchor: Rect? = null) : GitSheet
 }
 
 @Composable
@@ -282,7 +294,19 @@ fun GitScreen(
                                         shape = paneShape
                                     },
                             ) {
-                                if (tab == GitTab.Log) Timeline(state, actions, timelineList) else StatusPage(state, actions, changesList) { rect -> actions.onLoadBranches(); sheet = GitSheet.Branches(rect) }
+                                if (tab == GitTab.Log) {
+                                    Timeline(state, actions, timelineList)
+                                } else {
+                                    StatusPage(
+                                        state = state,
+                                        actions = actions,
+                                        changesList = changesList,
+                                        pendingCount = pendingCount,
+                                        clearHaze = clearHaze,
+                                        onNeedStage = { snack.show("先点右侧 + 暂存要提交的文件") },
+                                        onOpenCommit = { rect -> sheet = GitSheet.Commit(rect) },
+                                    )
+                                }
                             }
                         }
                     } else {
@@ -297,7 +321,19 @@ fun GitScreen(
                             },
                             label = "gitTabs",
                         ) { tab ->
-                            if (tab == GitTab.Log) Timeline(state, actions, timelineList) else StatusPage(state, actions, changesList) { rect -> actions.onLoadBranches(); sheet = GitSheet.Branches(rect) }
+                            if (tab == GitTab.Log) {
+                                Timeline(state, actions, timelineList)
+                            } else {
+                                StatusPage(
+                                    state = state,
+                                    actions = actions,
+                                    changesList = changesList,
+                                    pendingCount = pendingCount,
+                                    clearHaze = clearHaze,
+                                    onNeedStage = { snack.show("先点右侧 + 暂存要提交的文件") },
+                                    onOpenCommit = { rect -> sheet = GitSheet.Commit(rect) },
+                                )
+                            }
                         }
                     }
                 }
@@ -331,7 +367,13 @@ fun GitScreen(
                 modifier = Modifier.align(Alignment.TopCenter),
             )
         }
-        SnackHost(snack, Modifier.align(Alignment.BottomCenter), bottom = 88.dp)
+        val hasChanges = state.status?.let { it.staged.isNotEmpty() || it.unstaged.isNotEmpty() } == true
+        val snackBottom = when {
+            state.tab == GitTab.Status && hasChanges -> if (ui == UiStyle.Clear && pendingCount > 0) 208.dp else 154.dp
+            ui == UiStyle.Clear && pendingCount > 0 -> 148.dp
+            else -> 88.dp
+        }
+        SnackHost(snack, Modifier.align(Alignment.BottomCenter), bottom = snackBottom)
     }
 
     when (val s = sheet) {
@@ -362,6 +404,14 @@ fun GitScreen(
                     }
                 }
             }
+        }
+        is GitSheet.Commit -> ClaudercSheet(onDismiss = { sheet = null }, anchor = s.anchor, fromTop = false) {
+            CommitSheetBody(
+                state = state,
+                onMessage = actions.onMessage,
+                onClose = { sheet = null },
+                onCommit = { msg -> actions.onRequest(GitOp.Commit(msg)) },
+            )
         }
         null -> Unit
     }
@@ -1121,100 +1171,560 @@ private fun CommitRow(commit: Commit, g: RowGeometry, textStart: Float, head: St
 }
 
 @Composable
-private fun StatusPage(state: GitUiState, actions: GitActions, changesList: LazyListState = rememberLazyListState(), onBranches: (Rect?) -> Unit) {
+private fun StatusPage(
+    state: GitUiState,
+    actions: GitActions,
+    changesList: LazyListState = rememberLazyListState(),
+    pendingCount: Int = 0,
+    clearHaze: HazeState? = null,
+    onNeedStage: () -> Unit = {},
+    onOpenCommit: (Rect?) -> Unit = {},
+) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
+    val ui = Clauderc.style
     val st = state.status
-    val switchAnchor = rememberAnchorBox()
-    Column(Modifier.fillMaxSize()) {
-        state.busySession?.let { name ->
-            Row(Modifier.padding(start = sp.page, end = sp.page, bottom = sp.sp3), horizontalArrangement = Arrangement.spacedBy(sp.sp3), verticalAlignment = Alignment.CenterVertically) {
-                StatusGlyph(Glyph.Work)
-                Text("「$name」正在这个目录工作", fontSize = Clauderc.fontSizes.caption, color = c.fg2)
-            }
-        }
-        val card = Clauderc.look.cards
-        Row(
-            Modifier.padding(start = if (card) sp.sp4 else sp.page, end = if (card) sp.sp4 else sp.page, bottom = if (card) sp.sp3 else sp.sp4),
-            horizontalArrangement = Arrangement.spacedBy(sp.sp2),
-        ) {
-            PillButton("拉取", onClick = { actions.onRequest(GitOp.Pull) }, style = PillStyle.Tonal, icon = Symbols.Download, height = 40.dp, enabled = !state.running, modifier = Modifier.weight(1f))
-            PillButton("推送", onClick = { actions.onRequest(GitOp.Push()) }, style = PillStyle.Tonal, icon = Symbols.Upload, height = 40.dp, enabled = !state.running, modifier = Modifier.weight(1f))
-            PillButton("切换", onClick = { onBranches(switchAnchor.rect) }, style = PillStyle.Tonal, icon = Symbols.AltRoute, height = 40.dp, enabled = !state.running, modifier = Modifier.weight(1f).captureAnchor(switchAnchor))
-        }
-        LazyColumn(Modifier.weight(1f).testTag("changes"), state = changesList) {
-            item { SectionHeading("已暂存") }
-            if (st?.staged.isNullOrEmpty()) item { Hint("没有已暂存的文件", Modifier.groupItem(first = true, last = true)) }
-            val staged = st?.staged.orEmpty()
-            staged.forEachIndexed { i, f ->
-                item(key = "s:" + f.path) {
-                    FileRow(f, "取消暂存", { rect -> actions.onOpenDiffAt?.invoke(f.path, true, rect) ?: actions.onOpenDiff(f.path, true) }, Modifier.groupItem(i == 0, i == staged.lastIndex), enabled = !state.running) { actions.onRequest(GitOp.Unstage(f.path)) }
+    val staged = st?.staged.orEmpty()
+    val unstaged = st?.unstaged.orEmpty()
+    val hasFiles = st != null && (staged.isNotEmpty() || unstaged.isNotEmpty())
+    val opsPad = when (ui) {
+        UiStyle.Ink, UiStyle.Tile -> 16.dp
+        UiStyle.Plate -> 18.dp
+        UiStyle.Clear -> sp.page
+    }
+    val listBottomPad = when {
+        hasFiles && ui == UiStyle.Clear && pendingCount > 0 -> 224.dp
+        hasFiles -> 172.dp
+        ui == UiStyle.Clear -> 144.dp
+        else -> NavClearance
+    }
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            state.busySession?.let { name ->
+                Row(Modifier.padding(start = sp.page, end = sp.page, bottom = sp.sp3), horizontalArrangement = Arrangement.spacedBy(sp.sp3), verticalAlignment = Alignment.CenterVertically) {
+                    StatusGlyph(Glyph.Work)
+                    Text("「$name」正在这个目录工作", fontSize = Clauderc.fontSizes.caption, color = c.fg2)
                 }
             }
-            item { SectionHeading("未暂存") }
-            if (st?.unstaged.isNullOrEmpty()) item { Hint("工作目录是干净的", Modifier.groupItem(first = true, last = true)) }
-            val unstaged = st?.unstaged.orEmpty()
-            unstaged.forEachIndexed { i, f ->
-                item(key = "u:" + f.path) {
-                    FileRow(f, "暂存", { rect -> actions.onOpenDiffAt?.invoke(f.path, false, rect) ?: actions.onOpenDiff(f.path, false) }, Modifier.groupItem(i == 0, i == unstaged.lastIndex), enabled = !state.running) { actions.onRequest(GitOp.Stage(f.path)) }
-                }
-            }
-        }
-        val box = when (Clauderc.style) {
-            UiStyle.Tile -> Modifier
-                .fillMaxWidth()
-                .padding(start = sp.sp4, end = sp.sp4, top = sp.sp1, bottom = 84.dp)
-                .tileSurface(c.float, CardCorner)
-                .padding(horizontal = sp.sp4, vertical = sp.sp2)
-            UiStyle.Ink -> Modifier
-                .fillMaxWidth()
-                .padding(start = sp.sp4, end = sp.sp4, top = sp.sp1, bottom = 84.dp)
-                .inkSurface(c.float, c.edge, CardCorner)
-                .padding(horizontal = sp.sp4, vertical = sp.sp2)
-            UiStyle.Plate -> Modifier
-                .fillMaxWidth()
-                .padding(start = 18.dp, end = 18.dp, top = sp.sp1, bottom = 84.dp)
-                .plateBox(c.bg, c.fg, 1.5.dp)
-                .padding(horizontal = sp.sp3, vertical = sp.sp2)
-            UiStyle.Clear -> Modifier
-                .fillMaxWidth()
-                .background(c.bg)
-                .padding(start = sp.page, end = sp.page, top = sp.sp2, bottom = 144.dp)
-        }
-        Column(box, verticalArrangement = Arrangement.spacedBy(sp.sp2)) {
-            if (!card) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
             Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(sp.sp3),
-                verticalAlignment = Alignment.Bottom,
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = opsPad, end = opsPad, bottom = 10.dp)
+                    .testTag("gitOpsBar"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                UnderlineField(
-                    state.message,
-                    actions.onMessage,
+                val behind = st?.behind ?: 0
+                val ahead = st?.ahead ?: 0
+                GitOpButton(
+                    label = if (behind > 0) "拉取 $behind" else "拉取",
+                    icon = Symbols.Download,
+                    enabled = !state.running,
                     modifier = Modifier.weight(1f),
-                    placeholder = "提交说明",
-                    singleLine = false,
-                    maxLines = 4,
+                    onClick = { actions.onRequest(GitOp.Pull) },
                 )
-                PillButton(
-                    if (state.running) "处理中" else "提交",
-                    onClick = { actions.onRequest(GitOp.Commit(state.message)) },
-                    enabled = state.canCommit,
-                    height = 40.dp,
+                GitOpButton(
+                    label = if (ahead > 0) "推送 $ahead" else "推送",
+                    icon = Symbols.Upload,
+                    enabled = !state.running,
+                    modifier = Modifier.weight(1f),
+                    onClick = { actions.onRequest(GitOp.Push()) },
                 )
             }
+            LazyColumn(
+                Modifier.weight(1f).testTag("changes"),
+                state = changesList,
+                contentPadding = PaddingValues(bottom = listBottomPad),
+            ) {
+                if (st != null && !hasFiles) {
+                    item(key = "clean") { CleanWorkspaceEmpty() }
+                }
+                if (staged.isNotEmpty()) {
+                    item(key = "staged-head") {
+                        FileSectionHeader(
+                            title = "已暂存 · ${staged.size}",
+                            actionLabel = "全部取消",
+                            enabled = !state.running,
+                            onAction = { actions.onRequest(GitOp.UnstageAll(staged.map { it.path })) },
+                        )
+                    }
+                    staged.forEachIndexed { i, f ->
+                        item(key = "s:" + f.path) {
+                            FileRow(
+                                f = f,
+                                staged = true,
+                                onOpen = { rect -> actions.onOpenDiffAt?.invoke(f.path, true, rect) ?: actions.onOpenDiff(f.path, true) },
+                                modifier = Modifier.groupItem(i == 0, i == staged.lastIndex),
+                                enabled = !state.running,
+                                onAction = { actions.onRequest(GitOp.Unstage(f.path)) },
+                            )
+                        }
+                    }
+                }
+                if (unstaged.isNotEmpty()) {
+                    item(key = "unstaged-head") {
+                        FileSectionHeader(
+                            title = "未暂存 · ${unstaged.size}",
+                            actionLabel = "全部暂存",
+                            enabled = !state.running,
+                            onAction = { actions.onRequest(GitOp.StageAll(unstaged.map { it.path })) },
+                        )
+                    }
+                    unstaged.forEachIndexed { i, f ->
+                        item(key = "u:" + f.path) {
+                            FileRow(
+                                f = f,
+                                staged = false,
+                                onOpen = { rect -> actions.onOpenDiffAt?.invoke(f.path, false, rect) ?: actions.onOpenDiff(f.path, false) },
+                                modifier = Modifier.groupItem(i == 0, i == unstaged.lastIndex),
+                                enabled = !state.running,
+                                onAction = { actions.onRequest(GitOp.Stage(f.path)) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        val barBottom by animateDpAsState(
+            targetValue = when {
+                ui == UiStyle.Clear && pendingCount > 0 -> 148.dp
+                ui == UiStyle.Plate -> 86.dp
+                else -> 92.dp
+            },
+            animationSpec = Motion.enter(),
+            label = "gitCommitBarBottom",
+        )
+        AnimatedVisibility(
+            visible = hasFiles,
+            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = barBottom),
+            enter = fadeIn(Motion.enter()) + slideInVertically(Motion.enter()) { it / 3 },
+            exit = fadeOut(Motion.exit()) + slideOutVertically(Motion.exit()) { it / 3 },
+        ) {
+            CommitCapsuleBar(
+                draft = state.message,
+                ready = staged.isNotEmpty() && !state.running,
+                hasStaged = staged.isNotEmpty(),
+                clearHaze = clearHaze,
+                onNeedStage = onNeedStage,
+                onOpenCommit = onOpenCommit,
+            )
         }
     }
 }
 
+/**
+ * Compact floating commit bar above the bottom nav (demo.html `.git-cbar`):
+ * single-line draft preview or prompt + circular checkmark button (square stamp in 印版).
+ * Tapping with staged files opens the style-matched commit panel from this bar's anchor.
+ */
 @Composable
-private fun Hint(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text,
-        modifier.fillMaxWidth().padding(horizontal = Clauderc.look.rowStart, vertical = if (Clauderc.look.cards) Clauderc.spacing.sp4 else Clauderc.spacing.sp2),
-        fontSize = Clauderc.fontSizes.label,
-        color = Clauderc.colors.fg3,
+private fun CommitCapsuleBar(
+    draft: String,
+    ready: Boolean,
+    hasStaged: Boolean,
+    clearHaze: HazeState?,
+    onNeedStage: () -> Unit,
+    onOpenCommit: (Rect?) -> Unit,
+) {
+    val c = Clauderc.colors
+    val ui = Clauderc.style
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val barAnchor = rememberAnchorBox()
+    val shake = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val trimmed = draft.trim()
+    val hasDraft = trimmed.isNotEmpty()
+
+    val btnFill by animateColorAsState(
+        targetValue = when {
+            !ready -> when (ui) {
+                UiStyle.Ink -> c.surface2
+                UiStyle.Plate -> c.bg
+                UiStyle.Tile, UiStyle.Clear -> c.surface
+            }
+            ui == UiStyle.Ink -> c.inverse
+            ui == UiStyle.Plate -> c.fg
+            else -> c.accent
+        },
+        animationSpec = Motion.enter(),
+        label = "commitBarBtnBg",
     )
+    val btnFg by animateColorAsState(
+        targetValue = when {
+            !ready -> c.fg3
+            ui == UiStyle.Ink -> c.onInverse
+            ui == UiStyle.Plate -> c.bg
+            else -> c.onAccent
+        },
+        animationSpec = Motion.enter(),
+        label = "commitBarBtnFg",
+    )
+    val shape = if (ui == UiStyle.Plate) RectangleShape else RoundedCornerShape(28.dp)
+    val sidePad = if (ui == UiStyle.Plate) 18.dp else 16.dp
+    val surface = when (ui) {
+        UiStyle.Ink -> Modifier
+            .shadow(if (c.isDark) 0.dp else 10.dp, shape, ambientColor = c.scrim, spotColor = c.scrim)
+            .inkSurface(c.float, c.edge, 28.dp)
+        UiStyle.Tile -> Modifier
+            .shadow(if (c.isDark) 8.dp else 10.dp, shape, ambientColor = c.scrim, spotColor = c.scrim)
+            .tileSurface(c.card, 28.dp)
+            .border(1.dp, c.line, shape)
+        UiStyle.Clear -> Modifier
+            .shadow(10.dp, shape, ambientColor = c.glassShadow, spotColor = c.glassShadow)
+            .clip(shape)
+            .glassPane(clearHaze)
+            .border(0.5.dp, c.edge, shape)
+        UiStyle.Plate -> Modifier
+            .plateHardShadow(c.fg, 3.dp, pressed = pressed)
+            .plateBox(c.bg, c.fg, 1.5.dp)
+    }
+
+    val label = when {
+        hasDraft -> trimmed
+        hasStaged -> "写提交说明…"
+        else -> "先暂存要提交的文件"
+    }
+    val labelColor = when {
+        hasDraft -> c.fg
+        hasStaged -> c.fg2
+        else -> c.fg3
+    }
+    val iconColor = if (hasDraft || hasStaged) c.fg2 else c.fg3
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = sidePad)
+            .offset(x = Motion.nudgeDp(shake.value).dp)
+            .captureAnchor(barAnchor)
+            .pressShrink(press, if (ui == UiStyle.Plate) PressKind.Plain else PressKind.Card)
+            .heightIn(min = 52.dp)
+            .then(surface)
+            .clickable(press, PressIndication(c.fg), role = Role.Button, onClickLabel = "填写提交说明") {
+                if (!hasStaged) {
+                    scope.launch {
+                        shake.snapTo(0f)
+                        shake.animateTo(1f, Motion.nudge())
+                        shake.snapTo(0f)
+                    }
+                    onNeedStage()
+                } else {
+                    onOpenCommit(barAnchor.rect)
+                }
+            }
+            .padding(start = if (ui == UiStyle.Plate) 12.dp else 16.dp, end = if (ui == UiStyle.Plate) 8.dp else 6.dp, top = 6.dp, bottom = 6.dp)
+            .testTag("gitCommitBar"),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Symbols.Edit, contentDescription = null, tint = iconColor, modifier = Modifier.size(18.dp))
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            fontSize = 15.sp,
+            fontWeight = if (ui == UiStyle.Plate) FontWeight.ExtraBold else FontWeight.Medium,
+            color = labelColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Box(
+            Modifier
+                .size(if (ui == UiStyle.Plate) 36.dp else 40.dp)
+                .then(
+                    when {
+                        ui == UiStyle.Plate && ready -> Modifier.plateStamp(btnFill, c.bg, c.fg, source = press, enabled = true)
+                        ui == UiStyle.Plate -> Modifier.background(btnFill, RectangleShape).border(1.5.dp, c.line, RectangleShape)
+                        else -> Modifier.clip(CircleShape).background(btnFill)
+                    },
+                )
+                .semantics { contentDescription = "提交" }
+                .testTag("gitCommitBarCheck"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Symbols.Check,
+                contentDescription = null,
+                tint = btnFg,
+                modifier = Modifier.size(if (ui == UiStyle.Plate) 19.dp else 20.dp),
+            )
+        }
+    }
+}
+
+/** Modal commit form opened from [CommitCapsuleBar] through [ClaudercSheet] (demo.html `A.openCommitDialog`). */
+@Composable
+private fun CommitSheetBody(
+    state: GitUiState,
+    onMessage: (String) -> Unit,
+    onClose: () -> Unit,
+    onCommit: (String) -> Unit,
+) {
+    val c = Clauderc.colors
+    val sp = Clauderc.spacing
+    val ui = Clauderc.style
+    val close = LocalMorphClose.current
+    val stagedCount = state.status?.staged?.size ?: 0
+    val branch = state.status?.branch?.ifEmpty { "分离的 HEAD" } ?: "当前分支"
+    val side = when (ui) {
+        UiStyle.Plate -> 16.dp
+        UiStyle.Clear -> sp.page
+        UiStyle.Ink, UiStyle.Tile -> 20.dp
+    }
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val fieldShape = when (ui) {
+        UiStyle.Plate -> RectangleShape
+        UiStyle.Ink -> RoundedCornerShape(16.dp)
+        UiStyle.Tile -> RoundedCornerShape(14.dp)
+        UiStyle.Clear -> RoundedCornerShape(12.dp)
+    }
+    val fieldBg = when (ui) {
+        UiStyle.Plate -> c.bg
+        UiStyle.Ink -> c.surface2
+        UiStyle.Tile, UiStyle.Clear -> c.surface
+    }
+    val fieldBorder = when {
+        ui == UiStyle.Plate -> c.fg
+        focused -> if (ui == UiStyle.Ink) c.inverse else c.accent
+        ui == UiStyle.Ink -> c.edge
+        else -> c.line
+    }
+
+    SheetHead("提交改动")
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = side, end = side, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            buildAnnotatedString {
+                append("将提交已暂存的 $stagedCount 个文件到分支 ")
+                withStyle(SpanStyle(fontFamily = MonoFamily, fontWeight = FontWeight.SemiBold, color = c.fg)) { append(branch) }
+            },
+            fontSize = 13.sp,
+            color = c.fg2,
+            lineHeight = 1.6.em,
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                "提交说明",
+                fontSize = 12.sp,
+                fontWeight = if (ui == UiStyle.Plate) FontWeight.ExtraBold else FontWeight.SemiBold,
+                color = c.fg2,
+            )
+            BasicTextField(
+                value = state.message,
+                onValueChange = onMessage,
+                enabled = !state.running,
+                interactionSource = interaction,
+                minLines = 2,
+                maxLines = 5,
+                cursorBrush = SolidColor(if (ui == UiStyle.Plate) c.fg else c.accent),
+                textStyle = TextStyle(
+                    color = c.fg,
+                    fontSize = 14.5.sp,
+                    fontWeight = if (ui == UiStyle.Plate) FontWeight.SemiBold else FontWeight.Normal,
+                    lineHeight = 1.5.em,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 76.dp)
+                    .then(if (ui == UiStyle.Plate && focused) Modifier.plateHardShadow(c.fg, 3.dp) else Modifier)
+                    .clip(fieldShape)
+                    .background(fieldBg)
+                    .border(1.5.dp, fieldBorder, fieldShape)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .testTag("commitMessageInput"),
+                decorationBox = { inner ->
+                    Box {
+                        if (state.message.isEmpty()) {
+                            Text("输入提交说明…", color = c.fg3, fontSize = 14.5.sp, lineHeight = 1.5.em)
+                        }
+                        inner()
+                    }
+                },
+            )
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            PillButton(
+                "取消",
+                onClick = { close?.invoke(null) ?: onClose() },
+                style = PillStyle.Tonal,
+                enabled = !state.running,
+                height = 44.dp,
+                modifier = Modifier.weight(1f),
+            )
+            PillButton(
+                if (state.running) "处理中" else "提交",
+                onClick = {
+                    val msg = state.message
+                    val go = { onCommit(msg) }
+                    if (close != null) close(go) else { onClose(); go() }
+                },
+                style = PillStyle.Accent,
+                enabled = state.canCommit,
+                height = 44.dp,
+                modifier = Modifier.weight(1f).testTag("commitSubmitButton"),
+            )
+        }
+    }
+}
+
+/** .git-op: Pull / Push action buttons styled per look (demo.html). */
+@Composable
+private fun GitOpButton(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val c = Clauderc.colors
+    val ui = Clauderc.style
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val sweep by animateFloatAsState(
+        targetValue = if (ui == UiStyle.Plate && enabled && pressed) 1f else 0f,
+        animationSpec = tween(if (pressed) 220 else 160, easing = Motion.plateEasePress),
+        label = "plateGitOpSweep",
+    )
+    val contentFg = when {
+        !enabled -> c.fg3
+        ui == UiStyle.Plate -> lerp(c.fg, c.bg, sweep)
+        else -> c.fg
+    }
+    val surface = when (ui) {
+        UiStyle.Ink -> Modifier
+            .shadow(if (c.isDark) 0.dp else 4.dp, CircleShape, ambientColor = c.scrim, spotColor = c.scrim)
+            .inkSurface(c.float, c.edge, 999.dp)
+        UiStyle.Tile -> Modifier.tileSurface(c.card, 999.dp)
+        UiStyle.Clear -> Modifier.clip(CircleShape).background(c.surface)
+        UiStyle.Plate -> Modifier
+            .background(c.bg, RectangleShape)
+            .plateSweepFill(sweep, c.fg, PlateSweep.LeftToRight)
+            .border(1.5.dp, if (enabled) c.fg else c.fg3, RectangleShape)
+    }
+    Row(
+        modifier
+            .pressShrink(press, if (ui == UiStyle.Plate) PressKind.Plain else PressKind.Button)
+            .height(38.dp)
+            .then(surface)
+            .clickable(press, if (ui == UiStyle.Plate) null else PressIndication(contentFg), enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = contentFg, modifier = Modifier.size(17.dp))
+        Text(
+            label,
+            color = contentFg,
+            fontSize = 13.sp,
+            fontWeight = if (ui == UiStyle.Plate) FontWeight.ExtraBold else FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** .fsec: file group heading with count on the left and bulk stage/unstage button on the right (demo.html). */
+@Composable
+private fun FileSectionHeader(
+    title: String,
+    actionLabel: String,
+    enabled: Boolean,
+    onAction: () -> Unit,
+) {
+    val c = Clauderc.colors
+    val ui = Clauderc.style
+    val side = when (ui) {
+        UiStyle.Plate -> 18.dp
+        UiStyle.Tile -> 20.dp
+        UiStyle.Ink, UiStyle.Clear -> 24.dp
+    }
+    val press = remember { MutableInteractionSource() }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = side, end = side, top = 12.dp, bottom = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            fontSize = 12.5.sp,
+            fontWeight = if (ui == UiStyle.Plate) FontWeight.ExtraBold else FontWeight.SemiBold,
+            color = if (ui == UiStyle.Plate) c.fg2 else c.fg3,
+        )
+        val actionColor = when {
+            !enabled -> c.fg3
+            ui == UiStyle.Plate -> c.fg
+            else -> c.accent
+        }
+        Box(
+            Modifier
+                .pressShrink(press, PressKind.Plain)
+                .then(
+                    if (ui == UiStyle.Plate) {
+                        Modifier.drawBehind {
+                            val h = 1.5.dp.toPx()
+                            drawRect(actionColor, Offset(0f, size.height - h), Size(size.width, h))
+                        }
+                    } else {
+                        Modifier.clip(RoundedCornerShape(8.dp))
+                    },
+                )
+                .clickable(press, LocalIndication.current, enabled = enabled, role = Role.Button, onClick = onAction)
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+        ) {
+            Text(
+                actionLabel,
+                fontSize = 12.5.sp,
+                fontWeight = if (ui == UiStyle.Plate) FontWeight.ExtraBold else FontWeight.SemiBold,
+                color = actionColor,
+            )
+        }
+    }
+}
+
+/** .empty-box for a clean working tree (demo.html). */
+@Composable
+private fun CleanWorkspaceEmpty() {
+    val c = Clauderc.colors
+    val ui = Clauderc.style
+    val boxMod = if (ui == UiStyle.Tile) {
+        Modifier
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .fillMaxWidth()
+            .tileSurface(c.card, CardCorner)
+            .padding(horizontal = 24.dp, vertical = 40.dp)
+    } else {
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 28.dp, vertical = 48.dp)
+    }
+    Column(
+        boxMod.testTag("gitCleanEmpty"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(Symbols.CheckCircle, contentDescription = null, tint = c.fg3, modifier = Modifier.size(40.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "工作区干净",
+            fontSize = 17.sp,
+            fontWeight = if (ui == UiStyle.Plate) FontWeight.ExtraBold else FontWeight.SemiBold,
+            color = c.fg,
+        )
+        Text(
+            "当前分支没有未提交的改动",
+            fontSize = 13.sp,
+            color = c.fg2,
+        )
+    }
 }
 
 fun changeLetter(change: FileChange) = when (change) {
@@ -1226,31 +1736,154 @@ fun changeLetter(change: FileChange) = when (change) {
 }
 
 @Composable
-private fun FileRow(f: FileStatus, action: String, onOpen: (Rect?) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, onAction: () -> Unit) {
+private fun FileRow(
+    f: FileStatus,
+    staged: Boolean,
+    onOpen: (Rect?) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onAction: () -> Unit,
+) {
     val c = Clauderc.colors
-    val sp = Clauderc.spacing
+    val ui = Clauderc.style
     val rowAnchor = rememberAnchorBox()
-    Row(modifier.fillMaxWidth().captureAnchor(rowAnchor).padding(end = sp.sp2).semantics { isTraversalGroup = true }, verticalAlignment = Alignment.CenterVertically) {
-        Row(
-            Modifier.weight(1f).clickable(role = Role.Button) { onOpen(rowAnchor.rect) }.padding(start = Clauderc.look.rowStart, top = 10.dp, bottom = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(sp.sp4),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(changeLetter(f.change), Modifier.width(14.dp), fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm, color = c.fg3, textAlign = TextAlign.Center)
-            FilePath(f.path, Modifier.weight(1f))
-            if (f.change == FileChange.Untracked) Text("未跟踪", fontSize = Clauderc.fontSizes.caption, color = c.fg3, modifier = Modifier.padding(end = sp.sp4))
+    val startPad = when (ui) {
+        UiStyle.Ink, UiStyle.Clear -> 24.dp
+        UiStyle.Tile -> 16.dp
+        UiStyle.Plate -> 4.dp
+    }
+    val endPad = when (ui) {
+        UiStyle.Ink, UiStyle.Clear -> 20.dp
+        UiStyle.Tile -> 12.dp
+        UiStyle.Plate -> 4.dp
+    }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .captureAnchor(rowAnchor)
+            .clickable(role = Role.Button) { onOpen(rowAnchor.rect) }
+            .padding(start = startPad, end = endPad, top = 11.dp, bottom = 11.dp)
+            .semantics { isTraversalGroup = true },
+        horizontalArrangement = Arrangement.spacedBy(if (ui == UiStyle.Ink || ui == UiStyle.Clear) 12.dp else 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (ui == UiStyle.Plate) {
+            val solid = f.change == FileChange.Added
+            Box(
+                Modifier
+                    .size(20.dp)
+                    .background(if (solid) c.fg else c.bg, RectangleShape)
+                    .border(1.5.dp, c.fg, RectangleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    changeLetter(f.change),
+                    fontFamily = MonoFamily,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (solid) c.bg else c.fg,
+                )
+            }
+        } else {
+            val letterColor = when (f.change) {
+                FileChange.Added -> c.addFg
+                FileChange.Modified -> if (ui == UiStyle.Ink) c.fg else c.accent
+                FileChange.Deleted -> c.delFg
+                FileChange.Renamed, FileChange.Untracked -> c.fg3
+            }
+            Text(
+                changeLetter(f.change),
+                Modifier.width(18.dp),
+                fontFamily = MonoFamily,
+                fontSize = 13.sp,
+                fontWeight = if (ui == UiStyle.Tile) FontWeight.SemiBold else FontWeight.Medium,
+                color = letterColor,
+                textAlign = TextAlign.Center,
+            )
         }
-        TextAction(action, onClick = onAction, tone = TextTone.Quiet, enabled = enabled)
+        FilePath(f.path, Modifier.weight(1f))
+        if (f.change == FileChange.Untracked) {
+            Text("未跟踪", fontSize = 11.sp, color = c.fg3)
+        }
+        FileStageButton(staged = staged, enabled = enabled, onClick = onAction)
     }
 }
 
-/** .fpath: file name above its directory. */
+/** .file-act: compact circular/square icon button to stage (+) or unstage (−) one file (demo.html). */
+@Composable
+private fun FileStageButton(staged: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val c = Clauderc.colors
+    val ui = Clauderc.style
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val sweep by animateFloatAsState(
+        targetValue = if (ui == UiStyle.Plate && enabled && pressed) 1f else 0f,
+        animationSpec = tween(if (pressed) 180 else 140, easing = Motion.plateEasePress),
+        label = "plateFileActSweep",
+    )
+    val label = if (staged) "取消暂存" else "暂存"
+    val icon = if (staged) Symbols.Remove else Symbols.Add
+    val tint = when {
+        !enabled -> c.fg3
+        ui == UiStyle.Plate -> lerp(c.fg, c.bg, sweep)
+        else -> c.fg2
+    }
+    val boxMod = when (ui) {
+        UiStyle.Ink -> Modifier
+            .size(32.dp)
+            .shadow(if (c.isDark) 0.dp else 3.dp, CircleShape, ambientColor = c.scrim, spotColor = c.scrim)
+            .inkSurface(c.float, c.edge, 16.dp)
+        UiStyle.Tile, UiStyle.Clear -> Modifier
+            .size(30.dp)
+            .clip(CircleShape)
+            .background(c.surface)
+        UiStyle.Plate -> Modifier
+            .size(28.dp)
+            .background(c.bg, RectangleShape)
+            .plateSweepFill(sweep, c.fg, PlateSweep.LeftToRight)
+            .border(1.5.dp, if (enabled) c.fg else c.fg3, RectangleShape)
+    }
+    Box(
+        Modifier
+            .pressShrink(press, PressKind.Icon)
+            .then(boxMod)
+            .clickable(press, if (ui == UiStyle.Plate) null else PressIndication(tint), enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(if (ui == UiStyle.Plate) 16.dp else 17.dp))
+    }
+}
+
+/** .fpath: file name above its directory (showing "根目录" for repo-root files). */
 @Composable
 fun FilePath(path: String, modifier: Modifier = Modifier, mono: Boolean = false) {
     val c = Clauderc.colors
+    val ui = Clauderc.style
+    val dir = path.substringBeforeLast('/', "").ifEmpty { "根目录" }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(baseName(path), fontSize = if (mono) Clauderc.fontSizes.mono else 15.sp, fontFamily = if (mono) MonoFamily else null, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(path.substringBeforeLast('/', "./"), fontFamily = MonoFamily, fontSize = 11.sp, color = c.fg3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            baseName(path),
+            fontSize = if (mono) Clauderc.fontSizes.mono else 15.sp,
+            fontFamily = if (mono) MonoFamily else null,
+            fontWeight = when {
+                mono -> null
+                ui == UiStyle.Plate -> FontWeight.ExtraBold
+                ui == UiStyle.Clear -> FontWeight.Normal
+                else -> FontWeight.Medium
+            },
+            color = c.fg,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            dir,
+            fontFamily = MonoFamily,
+            fontSize = 11.5.sp,
+            color = if (ui == UiStyle.Plate) c.fg2 else c.fg3,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

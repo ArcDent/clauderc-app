@@ -1,54 +1,111 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="design/screenshots/cover-dark.png">
-    <img alt="clauderc 的会话列表、权限确认、子代理和 git 时间线" src="design/screenshots/cover.png" width="100%">
-  </picture>
+  <img src="design/screenshots/icon.png" alt="clauderc 图标" width="76" height="76">
 </p>
 
 <h1 align="center">clauderc</h1>
 
-<h3 align="center">在手机上查看和操作电脑上的 Claude Code 后台会话</h3>
-
 <p align="center">
-  <a href="#快速开始">快速开始</a> ·
-  <a href="#配置">配置</a> ·
-  <a href="../../releases/latest">下载</a>
+  <strong>在手机上远程查看和操作电脑上的 Claude Code 后台会话</strong>
 </p>
 
-## 能做什么
+<p align="center">
+  <a href="#功能一览">功能一览</a> ·
+  <a href="#四套外观">四套外观</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#配置">配置</a> ·
+  <a href="../../releases/latest">下载最新版</a>
+</p>
 
-- **对话**
-  - 看记录、发文字和图片，回答 claude 的权限请求和提问
-  - 回复按 Markdown 显示标题、列表、代码块和表格，公式按排好的样子显示
-  - 点链接可以在浏览器中打开或复制，代码块点一下就能复制，长按聊天气泡可以选字复制
-  - 左滑自己发过的消息可以回溯到它之前，和电脑上的 `/rewind` 一样，可以只回对话、只回代码或者都回
-  - Claude Code 建了任务清单时，输入框上方多一条，收起时显示正在做的任务和完成了几条，点开看全部
-  - 设了 `CLAUDE_CODE_TASK_LIST_ID`、多代理团队和用 TodoWrite 记任务的会话不显示任务清单条
-- **会话**：先按启动档位分组，再按工作目录分组，档位就是会话启动时用的接口地址
-- **管理**
-  - 新建会话时先选档位，已有的档位直接沿用它的接口和模型
-  - 新建时也可以用账户登录，或者自己填接口地址和 API key，各档模型都能改
-  - 停止和移出会话，Fork 当前会话，或者照当前会话在新的 worktree 里开会话
-- **后台**：看每个子代理在做什么，需要时打开终端视图直接按键
-- **额度**：看 Claude 账号的 5 小时额度、每周额度和每个会话的上下文，撞到限额时显示重置时间，可以到点自动发一句话
-- **git**：看提交时间线，暂存、提交、切换分支、拉取和推送
-- **外观**：清玻、格栅、贴纸三种样式，浅色或深色，贴纸样式还能换主题色或跟随壁纸取色
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="design/screenshots/cover-dark.png">
+    <img alt="clauderc 浮墨样式：会话列表、权限确认、子代理与任务清单、Git 时间线" src="design/screenshots/cover.png" width="100%">
+  </picture>
+  <br>
+  <sub>浮墨默认样式 · 会话列表 · 权限确认 · 子代理与任务清单 · Git 时间线</sub>
+</p>
+
+---
+
+## 功能一览
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>对话与待确认</h3>
+      <ul>
+        <li>实时看记录、发文字和图片，批准权限请求并回答单题或多题提问</li>
+        <li>完整渲染 Markdown、表格、排版公式，点链接打开或复制，代码块一键复制，长按气泡选字</li>
+        <li>左滑自己发过的消息可回溯到它之前，与电脑端 <code>/rewind</code> 一致，支持只回对话、只回代码或都回</li>
+        <li>Claude Code 建了任务清单时输入框上方显示进度条，点开看全部（设了 <code>CLAUDE_CODE_TASK_LIST_ID</code>、多代理团队及 <code>TodoWrite</code> 会话不显示）</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <h3>会话与多机管理</h3>
+      <ul>
+        <li>底栏为「会话 / git / 设置」，页内随时切换多台目标机，跨机待确认一步直达</li>
+        <li>按启动档位（接口地址）与工作目录双层分组，支持活跃筛选、分支标记与折叠</li>
+        <li>新建会话可沿用已有档位、使用账户登录或自填接口地址与 API key，各档模型均可修改</li>
+        <li>支持停止、移出、Fork 当前会话，或照当前会话在新的 worktree 中开启独立分支会话</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>子代理、终端与额度</h3>
+      <ul>
+        <li>查看每个后台子代理正在做什么与执行详情，随时切入实时终端视图直接按键</li>
+        <li>展示 Claude 账号的 5 小时额度、每周额度与每个会话的上下文占用</li>
+        <li>撞到限额时显示重置倒计时，支持设置到点自动发一句话继续会话</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Git 工作流</h3>
+      <ul>
+        <li>浏览多分支提交时间线，查看提交详情与文件差异，支持沿父提交逐层回看</li>
+        <li>在工作区按已暂存 / 未暂存管理改动，直接暂存、取消暂存与填写说明提交</li>
+        <li>一键切换本地或远端分支、拉取与推送，目录选择器快速切换目标机上的最近目录</li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+## 四套外观
+
+内置 **浮墨、素卡、清玻、印版** 四套独立UI ：
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="design/screenshots/styles-dark.png">
+    <img alt="clauderc 四套外观：浮墨、素卡、清玻、印版" src="design/screenshots/styles.png" width="100%">
+  </picture>
+</p>
+
+| 浮墨（默认） | 素卡 | 清玻 | 印版 |
+|---|---|---|---|
+| 深墨底配悬浮圆钮与陶土红点缀，露底推卡侧栏、手绘墨刷分页与原地展开的悬浮面板 | 暖灰底配纯白圆角便当块，双层曲奇徽章按压收圆回弹，柔和纯白底抽屉 | 纯白 / 纯黑纸面配通栏毛玻璃顶栏，顶落大圆角毛玻璃面板与延迟拉伸透镜 | 单色棉纸配八色油墨与四角裁切线，左印右抹纸条弹层，支持方形悬浮或贴底通栏底栏 |
+
+> 浮墨、素卡、清玻支持默认点缀色、8 种预设主题色及 Android 12+ 壁纸动态取色；印版支持墨黑、群青、朱红、松绿、靛紫、赭石、茜红、橄榄 8 种油墨。
 
 ## 快速开始
 
-整套东西由三个程序组成：
+```
+手机 APP  ⇄  中转服务器 relay (公网 WSS)  ⇄  目标机 clauderc  ⇄  Claude Code 后台会话
+```
 
-| 程序 | 装在哪 | 做什么 |
+| 程序 | 运行环境 | 职责 |
 |---|---|---|
-| 中转服务器 `relay` | 有公网地址的 Linux 服务器，装有 Docker，前面要有提供 HTTPS 的反向代理 | 手机和电脑都主动连它，它负责认证和转发 |
-| 目标机程序 `clauderc` | 每台跑 Claude Code 的电脑，macOS 或 Linux，要有 Node.js 18 或更新 | 读取后台会话，把手机上的操作换成按键敲进会话 |
-| Android APP | Android 10 或更新的手机 | 扫码配对后连中转服务器 |
+| **中转服务器 `relay`** | 有公网地址的 Linux 服务器（Docker + HTTPS 反向代理） | 手机与目标机都主动连它，负责认证与加密通道转发 |
+| **目标机程序 `clauderc`** | 跑 Claude Code 的 macOS / Linux 电脑（Node.js 18+） | 发现后台会话、同步记录与用量，将手机操作转为按键 |
+| **Android APP** | Android 10 或更新的手机 | 扫码配对后经中转服务器远程查看和操作会话 |
 
-APK、各平台的二进制和 `compose.yaml` 都在 [Releases](../../releases/latest) 页面下载，中转服务器的镜像是 `ghcr.io/arcdent/clauderc-relay`。
+APK、各平台二进制与 `compose.yaml` 均在 [Releases](../../releases/latest) 发布，中转服务器镜像地址为 `ghcr.io/arcdent/clauderc-relay`。
 
-1. 在服务器上用 Docker 拉起中转服务器，再让反向代理转到它
-2. 每台电脑运行 `npm i -g @arcdent/clauderc`，写好 `agent.toml`，运行 `clauderc start` 在后台运行
-3. 手机装上 Releases 里的 APK，扫 `clauderc pair` 显示的二维码
+**三步上手：**
+
+1. 在服务器上用 Docker 启动中转服务器，并用反向代理转发 HTTPS / WebSocket
+2. 在每台目标机运行 `npm i -g @arcdent/clauderc`，写好 `agent.toml`，执行 `clauderc start`
+3. 手机安装 Releases 里的 APK，扫描电脑上 `clauderc pair` 显示的二维码完成配对
 
 <details>
 <summary><b>1. 部署中转服务器</b></summary>
@@ -209,7 +266,7 @@ clauderc revoke <id>     # 吊销一台手机，它的连接会立即断开
 ## 配置
 
 <details>
-<summary>中转服务器 <code>relay.toml</code>，只在不用 Docker 时手写</summary>
+<summary><b>中转服务器 <code>relay.toml</code></b>（只在不用 Docker 时手写）</summary>
 
 用 Docker 部署时，容器按 `PUBLIC_URL` 和 `TRUSTED_PROXIES` 自动生成这个文件，不用手写。
 
@@ -224,9 +281,9 @@ clauderc revoke <id>     # 吊销一台手机，它的连接会立即断开
 </details>
 
 <details>
-<summary>目标机 <code>agent.toml</code></summary>
+<summary><b>目标机 <code>agent.toml</code></b>（默认 <code>~/.config/clauderc/agent.toml</code>）</summary>
 
-默认路径 `~/.config/clauderc/agent.toml`，每个命令都可以用 `--config <路径>` 指定。
+每个命令都可以用 `--config <路径>` 指定其他配置文件。
 
 | 键 | 必填 | 说明 |
 |---|---|---|
@@ -255,12 +312,10 @@ clauderc revoke <id>     # 吊销一台手机，它的连接会立即断开
 
 </details>
 
-APP 没有配置文件。中转服务器地址和凭证都从配对二维码里得到。档位名和外观在 APP 里改，只保存在这台手机上。
-
 ## 开发
 
 构建、测试和开发规则见 [AGENTS.md](AGENTS.md)。
 
 ## 许可证
 
-以 AGPL-3.0 许可证发布。
+以 [AGPL-3.0](LICENSE) 许可证发布。
