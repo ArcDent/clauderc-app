@@ -687,8 +687,10 @@ fun ChatScreen(
                             onRewind = { rewindingSeq = it.seq },
                         )
                     }
-                    Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().onSizeChanged { dockHeight = it.height }) {
-                        CompositionLocalProvider(LocalGlassSource provides glass) { dock() }
+                    Box(Modifier.fillMaxSize().padding(top = with(density) { barHeight.toDp() })) {
+                        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().onSizeChanged { dockHeight = it.height }) {
+                            CompositionLocalProvider(LocalGlassSource provides glass) { dock() }
+                        }
                     }
                 }
                 Column(
@@ -696,7 +698,8 @@ fun ChatScreen(
                         .align(Alignment.TopStart)
                         .fillMaxWidth()
                         .onSizeChanged { barHeight = it.height }
-                        .then(if (ui == UiStyle.Clear) Modifier.glassPane(glass, rimTop = false) else Modifier),
+                        .then(if (ui == UiStyle.Clear) Modifier.glassPane(glass, rimTop = false) else Modifier)
+                        .testTag("chatTopBar"),
                 ) { bar() }
             }
         } else {

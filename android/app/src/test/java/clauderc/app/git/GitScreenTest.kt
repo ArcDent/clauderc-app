@@ -571,4 +571,45 @@ class GitScreenTest {
         compose.waitForIdle()
         assertEquals(listOf<GitOp>(GitOp.Commit("对齐改动页与提交底栏")), ops)
     }
+
+    @Test fun diffScreenAndInkDiffMorphHandleUltraLongLinesAndHugeExpandedGroupsWithoutCrashing() {
+        val hugeLine = "data:image/png;base64," + "A".repeat(20_000)
+        val longLinePatch = "@@ -0,0 +1,2 @@\n+<img src=\"$hugeLine\" />\n+<p>done</p>\n"
+        val bigGroupPatch = "@@ -0,0 +1,5000 @@\n" + (1..5000).joinToString("\n") { "+row $it" }
+        var mode by mutableStateOf(0)
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Ink) {
+                when (mode) {
+                    0 -> DiffScreen("reports/icon-redesign/index.html", "未暂存", Loadable(GitDiffResponse("index.html", patch = longLinePatch)), onBack = {})
+                    1 -> DiffMorphPanel(
+                        path = "reports/icon-redesign/index.html",
+                        subtitle = "未暂存",
+                        state = Loadable(GitDiffResponse("index.html", patch = longLinePatch)),
+                        anchor = null,
+                        staged = false,
+                        onToggleStage = {},
+                        onClose = {},
+                    )
+                    else -> DiffScreen("big.txt", "未暂存", Loadable(GitDiffResponse("big.txt", patch = bigGroupPatch, collapsed = true)), onBack = {})
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("diff").assertIsDisplayed()
+        compose.onNode(hasText("已省略后", substring = true)).assertIsDisplayed()
+
+        mode = 1
+        compose.waitForIdle()
+        compose.onNodeWithTag("inkDiffMorph").assertIsDisplayed()
+        compose.onNodeWithTag("diff").assertIsDisplayed()
+        compose.onNode(hasText("已省略后", substring = true)).assertIsDisplayed()
+
+        mode = 2
+        compose.waitForIdle()
+        compose.onNodeWithText("5,000 行差异，已折叠").assertIsDisplayed()
+        compose.onNodeWithText("展开").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("diff").assertIsDisplayed()
+        compose.onNodeWithText("row 1").assertIsDisplayed()
+    }
 }

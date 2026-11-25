@@ -401,4 +401,45 @@ class GitLogicTest {
         assertEquals(statusBefore + 1, relay.sent(Method.GIT_STATUS).size)
         assertFalse(vm.state.value.running)
     }
+
+    @Test fun formatDiffLineExpandsTabsAndCapsUltraLongLinesSafely() {
+        assertEquals("", formatDiffLine(""))
+        assertEquals("    \"testing\"", formatDiffLine("\t\"testing\""))
+        val exact = "a".repeat(MAX_DIFF_LINE_CHARS)
+        assertEquals(exact, formatDiffLine(exact))
+
+        val huge = "<div style=\"width:100%\">%s" + "x".repeat(20_000)
+        val formatted = formatDiffLine(huge)
+        assertTrue(formatted.startsWith("<div style=\"width:100%\">%s"))
+        assertTrue("shows omitted character count", formatted.endsWith(" …（已省略后 %,d 字符）".format(huge.length - MAX_DIFF_LINE_CHARS)))
+
+        // Surrogate pair right across the limit is not split in half.
+        val emojiEdge = "a".repeat(MAX_DIFF_LINE_CHARS - 1) + "\uD83D\uDE00" + "z"
+        val emojiFormatted = formatDiffLine(emojiEdge)
+        assertTrue(emojiFormatted.startsWith("a".repeat(MAX_DIFF_LINE_CHARS - 1) + " …"))
+        assertFalse("no unpaired high surrogate", emojiFormatted.any { it.isHighSurrogate() || it.isLowSurrogate() })
+    }
+
+    @Test fun clampDiffContentWidthPxCapsHugeAndOverflowingWidths() {
+        assertEquals(1080, clampDiffContentWidthPx(viewportWidthPx = 1080, measuredLineWidthPx = 400, extraWidthPx = 408))
+        assertEquals(6408, clampDiffContentWidthPx(viewportWidthPx = 1080, measuredLineWidthPx = 6000, extraWidthPx = 408))
+        assertEquals(MAX_DIFF_WIDTH_PX, clampDiffContentWidthPx(viewportWidthPx = 1080, measuredLineWidthPx = 262_142, extraWidthPx = 408))
+        assertEquals(MAX_DIFF_WIDTH_PX, clampDiffContentWidthPx(viewportWidthPx = 1080, measuredLineWidthPx = Int.MAX_VALUE, extraWidthPx = 408))
+    }
+
+    @Test fun groupDiffLinesSplitsLargeConsecutiveGroupsIntoSeamlessChunks() {
+        val lines = listOf(DiffLine(DiffKind.Del, "old", oldNo = 1)) +
+            (1..200).map { DiffLine(DiffKind.Add, "line $it", newNo = it) }
+        val blocks = groupDiffLines(lines)
+        val del = blocks.first() as DiffBlock.Group
+        assertEquals(DiffKind.Del, del.kind)
+        assertTrue(del.joinNext && !del.continuesFromPrev && !del.continuesToNext)
+
+        val addChunks = blocks.drop(1).map { it as DiffBlock.Group }
+        assertEquals(4, addChunks.size) // 64 + 64 + 64 + 8
+        assertEquals(listOf(64, 64, 64, 8), addChunks.map { it.lines.size })
+        assertTrue("first add chunk joins del seam", addChunks.first().joinPrev && !addChunks.first().continuesFromPrev && addChunks.first().continuesToNext)
+        assertTrue("middle chunk continues both ways without del/add seam", !addChunks[1].joinPrev && addChunks[1].continuesFromPrev && addChunks[1].continuesToNext)
+        assertTrue("last chunk closes group cleanly", !addChunks.last().joinPrev && addChunks.last().continuesFromPrev && !addChunks.last().continuesToNext)
+    }
 }

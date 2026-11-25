@@ -108,19 +108,21 @@ fun PendingPanel(
         UiStyle.Ink -> Modifier.shadow(12.dp, shape, ambientColor = c.scrim, spotColor = c.scrim).inkSurface(c.sheet, c.edge, corner, bottom = false)
         UiStyle.Tile -> Modifier.shadow(10.dp, shape, ambientColor = c.scrim, spotColor = c.scrim).tileSurface(c.sheet, corner, bottom = false)
     }
+    val safeVertical = 14.dp
     Column(
         Modifier
             .fillMaxWidth()
             .heightIn(max = 560.dp)
             .then(surface)
+            .testTag("pendingPanel")
+            .padding(vertical = safeVertical)
             .verticalScroll(rememberScrollState())
             .padding(
                 start = if (inIsland) 18.dp else sp.page,
                 end = if (inIsland) 18.dp else sp.page,
-                top = if (inIsland) 16.dp else sp.sp6,
-                bottom = if (inIsland) 14.dp else sp.sp5,
-            )
-            .testTag("pendingPanel"),
+                top = (if (inIsland) 16.dp else sp.sp6) - safeVertical,
+                bottom = (if (inIsland) 14.dp else sp.sp5) - safeVertical,
+            ),
         verticalArrangement = Arrangement.spacedBy(sp.sp3),
     ) {
         when (pending.kind) {
