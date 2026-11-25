@@ -98,6 +98,8 @@ import clauderc.app.protocol.Hunk
 import clauderc.app.protocol.ItemKind
 import clauderc.app.protocol.Pending
 import clauderc.app.protocol.PendingKind
+import clauderc.app.protocol.Option
+import clauderc.app.protocol.Question
 import clauderc.app.protocol.ProtocolJson
 import clauderc.app.protocol.Ref
 import clauderc.app.protocol.RefKind
@@ -1065,6 +1067,10 @@ class ScreensTest {
         )
         val createCustom = create.copy(preset = CUSTOM_PRESET, presetModels = null, baseUrl = "https://anyrouter.example", apiKey = "sk-example-0123456789", modelsOpen = false)
         val createNote = createCustom.copy(apiKey = "", badFields = setOf(CreateField.Key), note = FormNote("地址和 key 都要填", 1))
+        val createForm = create.copy(recent = emptyList(), modelsOpen = false, name = "协议文档", prompt = "先核对错误码。\n再跑一遍测试。")
+        val question = Pending("t4", PendingKind.QUESTION, questions = listOf(Question(
+            "接下来跑哪项检查？", options = listOf(Option("单元测试"), Option("端到端测试")), multiSelect = false,
+        )))
         val status = GitStatusResponse(
             "dev", "origin/dev", 2, 0,
             staged = listOf(FileStatus("internal/protocol/errors.go", change = FileChange.Added)),
@@ -1175,6 +1181,12 @@ class ScreensTest {
                 }
             }
             shot("$name-03-chat$tail", isDark, look = s) { ChatScreen(chat, ChatActions()) }
+            if (!isDark || s == UiStyle.Ink) {
+                shot("$name-03b-chat-other$tail", isDark, look = s, fresh = true, open = {
+                    compose.onNodeWithText("其他").performClick()
+                }) { ChatScreen(chat.copy(pending = question), ChatActions()) }
+                shot("$name-04d-create-form$tail", isDark, look = s) { CreateSessionScreen(createForm, {}, {}, {}, {}, {}, {}, {}) }
+            }
             shot("$name-04-create$tail", isDark, look = s) { CreateSessionScreen(create, {}, {}, {}, {}, {}, {}, {}) }
             shot("$name-04b-create-custom$tail", isDark, look = s) { CreateSessionScreen(createCustom, {}, {}, {}, {}, {}, {}, {}) }
             shot("$name-04c-create-note$tail", isDark, look = s) { CreateSessionScreen(createNote, {}, {}, {}, {}, {}, {}, {}) }

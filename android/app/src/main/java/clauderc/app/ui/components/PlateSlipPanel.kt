@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -81,6 +82,7 @@ class PlateClipShape(
 fun PlateSlipPanel(
     onDismiss: () -> Unit,
     tag: String = "plateSlip",
+    dismissEnabled: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val c = Clauderc.colors
@@ -117,7 +119,7 @@ fun PlateSlipPanel(
     }
 
     Dialog(
-        onDismissRequest = { requestClose(null) },
+        onDismissRequest = { if (dismissEnabled) requestClose(null) },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         val view = LocalView.current
@@ -147,7 +149,7 @@ fun PlateSlipPanel(
                             }
                         }
                     }
-                    .clickable(remember { MutableInteractionSource() }, indication = null) { requestClose(null) }
+                    .clickable(remember { MutableInteractionSource() }, indication = null, enabled = dismissEnabled) { requestClose(null) }
                     .testTag("plateScrim"),
             )
 
@@ -157,6 +159,7 @@ fun PlateSlipPanel(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
+                    .imePadding()
                     .fillMaxWidth()
                     .graphicsLayer {
                         clip = true

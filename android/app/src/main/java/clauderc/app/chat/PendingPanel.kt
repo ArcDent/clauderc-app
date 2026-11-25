@@ -290,7 +290,7 @@ private fun QuestionContent(key: String, questions: List<Question>, enabled: Boo
                     val focus = remember { FocusRequester() }
                     LaunchedEffect(Unit) { focus.requestFocus() }
                     Row(
-                        Modifier.padding(start = 24.dp + sp.sp4, bottom = sp.sp2),
+                        Modifier.padding(start = 24.dp + sp.sp4, end = sp.sp1, bottom = sp.sp3),
                         horizontalArrangement = Arrangement.spacedBy(sp.sp2),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

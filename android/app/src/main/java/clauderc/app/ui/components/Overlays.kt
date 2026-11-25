@@ -318,13 +318,14 @@ fun ClaudercDialog(
     anchor: Rect? = null,
     fromTop: Boolean = false,
     body: (@Composable ColumnScope.() -> Unit)? = null,
+    dismissEnabled: Boolean = true,
     buttons: @Composable RowScope.() -> Unit,
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val ui = Clauderc.style
     if (ui == UiStyle.Ink) {
-        MorphOverlay(onDismiss = onDismiss, anchor = anchor, fromTop = fromTop) {
+        MorphOverlay(onDismiss = onDismiss, anchor = anchor, fromTop = fromTop, dismissEnabled = dismissEnabled) {
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -352,7 +353,7 @@ fun ClaudercDialog(
         return
     }
     if (ui == UiStyle.Plate) {
-        PlateSlipPanel(onDismiss = onDismiss, tag = "plateDialogSlip") {
+        PlateSlipPanel(onDismiss = onDismiss, tag = "plateDialogSlip", dismissEnabled = dismissEnabled) {
             SheetHead(title, text)
             if (body != null) {
                 Column(
@@ -371,7 +372,7 @@ fun ClaudercDialog(
         return
     }
     if (ui == UiStyle.Clear) {
-        ClearDropPanel(onDismiss = onDismiss, tag = "clearDialogDrop") {
+        ClearDropPanel(onDismiss = onDismiss, tag = "clearDialogDrop", dismissEnabled = dismissEnabled) {
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = sp.page, vertical = sp.sp2),
                 verticalArrangement = Arrangement.spacedBy(sp.sp3),
@@ -397,7 +398,7 @@ fun ClaudercDialog(
         return
     }
     if (ui == UiStyle.Tile) {
-        TileBottomSheet(onDismiss = onDismiss, tag = "tileDialogSheet") {
+        TileBottomSheet(onDismiss = onDismiss, tag = "tileDialogSheet", dismissEnabled = dismissEnabled) {
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = sp.page, vertical = sp.sp2),
                 verticalArrangement = Arrangement.spacedBy(sp.sp3),

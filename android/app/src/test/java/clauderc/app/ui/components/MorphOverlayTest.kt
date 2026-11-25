@@ -1,5 +1,6 @@
 package clauderc.app.ui.components
 
+import android.view.View
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,10 +9,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -19,6 +22,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.ClaudercTheme
@@ -30,11 +36,54 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.annotation.Config
 
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class MorphOverlayTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w390dp-h844dp")
+    fun allSheetStylesKeepTheirPanelsAboveTheKeyboard() {
+        var style by mutableStateOf(UiStyle.Ink)
+        lateinit var dialogView: View
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = style) {
+                androidx.compose.runtime.key(style) {
+                    ClaudercSheet(onDismiss = {}, fromTop = true) {
+                        val view = LocalView.current
+                        SideEffect { dialogView = view }
+                        Box(Modifier.size(width = 250.dp, height = 670.dp))
+                    }
+                }
+            }
+        }
+
+        for (look in UiStyle.entries) {
+            compose.runOnUiThread { style = look }
+            compose.waitForIdle()
+            val (panelTag, scrimTag) = when (look) {
+                UiStyle.Ink -> "morphPanel" to "morphScrim"
+                UiStyle.Tile -> "tileSheet" to "tileScrim"
+                UiStyle.Clear -> "clearDrop" to "clearScrim"
+                UiStyle.Plate -> "plateSlip" to "plateScrim"
+            }
+            val panel = compose.onNodeWithTag(panelTag)
+            val scrim = compose.onNodeWithTag(scrimTag).fetchSemanticsNode().boundsInRoot
+            val keyboard = (scrim.height * 0.6f).toInt()
+            val keyboardTop = scrim.bottom - keyboard
+            assertTrue(panel.fetchSemanticsNode().boundsInRoot.bottom > keyboardTop)
+            compose.runOnUiThread {
+                val type = WindowInsetsCompat.Type.ime()
+                ViewCompat.dispatchApplyWindowInsets(dialogView, WindowInsetsCompat.Builder()
+                    .setInsets(type, Insets.of(0, 0, 0, keyboard)).setVisible(type, true).build())
+            }
+            panel.assertIsDisplayed()
+            val after = panel.fetchSemanticsNode().boundsInRoot
+            assertTrue("$look panel bottom ${after.bottom} must be above keyboard $keyboardTop", after.bottom <= keyboardTop + 1f)
+        }
+    }
 
     @Test fun morphCapturesAnchorExpandsAndClosesWithFollowUp() {
         var open by mutableStateOf(false)

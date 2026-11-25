@@ -160,7 +160,11 @@ class ChatRewindTest {
         // The turn changed conn.go, so all three ways back are offered.
         compose.onNodeWithText("conn.go +1 −1 改回去").assertIsDisplayed()
         compose.onNodeWithText("只回代码").performClick()
+        compose.mainClock.autoAdvance = false
         compose.onNodeWithText("回溯").performClick()
+        compose.onNodeWithText("回溯到这条消息之前").assertIsDisplayed()
+        assertTrue(asked.isEmpty())
+        compose.mainClock.autoAdvance = true
         compose.waitForIdle()
         assertEquals(listOf("u-2" to RewindRestore.CODE), asked.map { it.first.uuid to it.second })
         compose.onNodeWithText("回溯到这条消息之前").assertDoesNotExist()

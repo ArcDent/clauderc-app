@@ -264,6 +264,8 @@ fun ChatScreen(
     actions: ChatActions,
     snack: SnackState = remember { SnackState() },
     nextPending: PendingEntry? = null,
+    createdWorktree: String? = null,
+    onWorktreeClosed: suspend (String) -> Unit = {},
 ) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
@@ -271,6 +273,9 @@ fun ChatScreen(
     // measured in them from the first frame instead of once more when they arrive.
     rememberLatexMeasurer(remember { LatexConfig() })
     var sheet by rememberSaveable { mutableStateOf<ChatSheet?>(null) }
+    LaunchedEffect(createdWorktree, sheet == ChatSheet.Worktree) {
+        if (createdWorktree != null && sheet != ChatSheet.Worktree) onWorktreeClosed(createdWorktree)
+    }
     var ctlAnchor by remember { mutableStateOf<Rect?>(null) }
     var attachAnchor by remember { mutableStateOf<Rect?>(null) }
     // The seq of the user's message whose rewind sheet is open; saved across rotation.
@@ -723,7 +728,6 @@ fun ChatScreen(
     rewinding?.let { item ->
         val files = remember(item, state.items) { filesChangedSince(state.items, item) }
         RewindSheet(item, files, onDismiss = { rewindingSeq = null }) { mode ->
-            rewindingSeq = null
             actions.onRewind(item, mode)
         }
     }
@@ -806,25 +810,22 @@ fun ChatScreen(
             onFork = { instruction ->
                 if (actions.onFork(instruction)) {
                     haptic.tap()
-                    sheet = null
                     snack.show("已发出 /fork，新会话会挂在会话页「$title」下面")
+                    true
                 } else {
                     snack.show("现在发不出去，稍后再试")
+                    false
                 }
             },
         )
         ChatSheet.Worktree -> {
-            // Closes once session.create succeeded; the page then moves on to the new session.
-            var asked by rememberSaveable { mutableStateOf(false) }
-            LaunchedEffect(state.creatingWorktree) {
-                if (state.creatingWorktree) asked = true else if (asked && state.worktreeError == null) sheet = null
-            }
             WorktreeDialog(
                 dir = state.session?.let { it.dir ?: it.cwd }.orEmpty(),
                 busy = state.creatingWorktree,
+                created = createdWorktree != null,
                 error = state.worktreeError,
                 enabled = state.online,
-                onDismiss = { if (!state.creatingWorktree) { actions.onClearWorktreeError(); sheet = null } },
+                onDismiss = { actions.onClearWorktreeError(); sheet = null },
                 onEdit = actions.onClearWorktreeError,
                 onCreate = actions.onCreateWorktree,
             )
@@ -1448,8 +1449,9 @@ private fun InkChatIsland(
 
 /** Fork: an optional instruction for the copy, which goes out as `/fork <instruction>`. */
 @Composable
-private fun ForkDialog(onDismiss: () -> Unit, onFork: (String) -> Unit) {
+private fun ForkDialog(onDismiss: () -> Unit, onFork: (String) -> Boolean) {
     var instruction by rememberSaveable { mutableStateOf("") }
+    var sent by remember { mutableStateOf(false) }
     ClaudercDialog(
         onDismiss = onDismiss,
         title = "Fork 这个会话",
@@ -1461,8 +1463,15 @@ private fun ForkDialog(onDismiss: () -> Unit, onFork: (String) -> Unit) {
             }
         },
         buttons = {
-            TextAction("取消", onClick = onDismiss)
-            TextAction("Fork", onClick = { onFork(instruction) })
+            val close = LocalMorphClose.current
+            val dismiss = { close?.invoke(null) ?: onDismiss() }
+            TextAction("取消", onClick = dismiss)
+            TextAction("Fork", onClick = {
+                if (!sent && onFork(instruction)) {
+                    sent = true
+                    dismiss()
+                }
+            }, enabled = !sent)
         },
     )
 }
@@ -1475,6 +1484,7 @@ private fun ForkDialog(onDismiss: () -> Unit, onFork: (String) -> Unit) {
 private fun WorktreeDialog(
     dir: String,
     busy: Boolean,
+    created: Boolean,
     error: String?,
     enabled: Boolean,
     onDismiss: () -> Unit,
@@ -1488,6 +1498,7 @@ private fun WorktreeDialog(
     var bad by rememberSaveable { mutableStateOf(false) }
     ClaudercDialog(
         onDismiss = onDismiss,
+        dismissEnabled = !busy && !created,
         title = "在新 worktree 里开会话",
         body = {
             Text(
@@ -1523,14 +1534,17 @@ private fun WorktreeDialog(
             if (error != null) FieldError(error)
         },
         buttons = {
-            TextAction("取消", onClick = onDismiss, enabled = !busy)
+            val close = LocalMorphClose.current
+            val dismiss = { close?.invoke(null) ?: onDismiss() }
+            LaunchedEffect(created) { if (created) dismiss() }
+            TextAction("取消", onClick = dismiss, enabled = !busy && !created)
             TextAction(
                 if (busy) "正在新建" else "新建",
                 onClick = {
                     val n = name.trim()
                     if (WORKTREE_NAME.matches(n)) onCreate(n, prompt) else bad = true
                 },
-                enabled = enabled,
+                enabled = enabled && !created,
                 busy = busy,
             )
         },

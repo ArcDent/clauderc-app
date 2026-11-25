@@ -993,8 +993,8 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
     }
     val snack = remember { SnackState() }
     LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
-    // A session started in a new worktree from here opens on top of this one, waiting if the page is paused.
-    LaunchedEffect(vm) { vm.created.collect { id -> nav.navigateWhenResumed(entry, ChatRoute(r.machineId, id)) } }
+    var createdWorktree by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(vm) { vm.created.collect { createdWorktree = it } }
     // A failed rewind falls back to the terminal view on the main thread, never directly from appScope.
     LaunchedEffect(vm) { vm.rewindFailed.collect { reason -> nav.navigateWhenResumed(entry, TermRoute(r.machineId, r.sessionId, notice = reason)) } }
 
@@ -1019,6 +1019,11 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
         state = state,
         snack = snack,
         nextPending = nextPending,
+        createdWorktree = createdWorktree,
+        onWorktreeClosed = { id ->
+            nav.navigateWhenResumed(entry, ChatRoute(r.machineId, id))
+            createdWorktree = null
+        },
         actions = ChatActions(
             onBack = { nav.popFrom(entry) },
             onOpenGit = { cwd ->

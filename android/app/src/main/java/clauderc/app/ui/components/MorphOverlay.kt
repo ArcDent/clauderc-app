@@ -100,6 +100,7 @@ fun MorphOverlay(
     tall: Boolean = false,
     smoothResize: Boolean = true,
     tag: String = "morphPanel",
+    dismissEnabled: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val c = Clauderc.colors
@@ -145,7 +146,7 @@ fun MorphOverlay(
     }
 
     Dialog(
-        onDismissRequest = { requestClose(null) },
+        onDismissRequest = { if (dismissEnabled) requestClose(null) },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         val view = LocalView.current
@@ -162,13 +163,13 @@ fun MorphOverlay(
                     .fillMaxSize()
                     .graphicsLayer { alpha = scrimAlpha.value }
                     .background(c.scrim)
-                    .clickable(remember { MutableInteractionSource() }, indication = null) { requestClose(null) }
+                    .clickable(remember { MutableInteractionSource() }, indication = null, enabled = dismissEnabled) { requestClose(null) }
                     .testTag("morphScrim"),
             )
 
             // Outer bleed box (12dp around the 30dp panel so spring overshoot visibly blooms outward).
             val alignMod = if (fromTop) {
-                Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 0.dp)
+                Modifier.align(Alignment.TopCenter).statusBarsPadding().imePadding()
             } else {
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 2.dp)
             }
