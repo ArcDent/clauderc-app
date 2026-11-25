@@ -995,6 +995,8 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
     LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
     // A session started in a new worktree from here opens on top of this one, waiting if the page is paused.
     LaunchedEffect(vm) { vm.created.collect { id -> nav.navigateWhenResumed(entry, ChatRoute(r.machineId, id)) } }
+    // A failed rewind falls back to the terminal view on the main thread, never directly from appScope.
+    LaunchedEffect(vm) { vm.rewindFailed.collect { reason -> nav.navigateWhenResumed(entry, TermRoute(r.machineId, r.sessionId, notice = reason)) } }
 
     fun add(uri: Uri) {
         val (name, size) = nameAndSize(context, uri)
@@ -1051,7 +1053,7 @@ private fun ChatRouteContent(container: AppContainer, r: ChatRoute, nav: NavHost
             onClearWorktreeError = vm::clearWorktreeError,
             onAutoResume = vm::setAutoResume,
             onResumeText = vm::typedResume,
-            onRewind = { item, restore -> vm.rewind(item, restore) { reason -> nav.navigateFrom(entry, TermRoute(r.machineId, r.sessionId, notice = reason)) } },
+            onRewind = vm::rewind,
             onOpenNextPending = { next ->
                 container.selection.selectMachine(next.machineId)
                 nav.navigate(ChatRoute(next.machineId, next.session.id)) { popUpTo<ChatRoute> { inclusive = true } }

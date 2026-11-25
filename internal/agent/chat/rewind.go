@@ -201,7 +201,7 @@ func runRewind(t *attach.Term, msgs []string, k int, label string, conversation 
 		return leave(rewindFailed("回溯面板列出的消息和会话记录对不上，已按 Esc 退出"))
 	}
 	for n := 1; n <= ups; n++ {
-		if err := move(t, attach.UpKeys(), func(s string) (int, bool) { at, _, ok := listAt(s); return at, ok }, n, deadline); err != nil {
+		if err := move(t, attach.UpKeys(), func(s string) (int, bool) { at, _, ok := listAt(s); return at, ok }, n, deadline, n == ups); err != nil {
 			return leave(late(err))
 		}
 	}
@@ -242,7 +242,7 @@ func runRewind(t *attach.Term, msgs []string, k int, label string, conversation 
 		keys, step = attach.UpKeys(), -1
 	}
 	for n := from + step; n != to+step; n += step {
-		if err := move(t, keys, optionAt, n, deadline); err != nil {
+		if err := move(t, keys, optionAt, n, deadline, true); err != nil {
 			return leave(late(err))
 		}
 	}
@@ -286,8 +286,9 @@ func runRewind(t *attach.Term, msgs []string, k int, label string, conversation 
 // move presses an arrow once and waits, until deadline at most, for the
 // cursor to stand where at reads want. A press drawn late, or not taken,
 // fails rather than being pressed again, which could take the cursor a
-// row too far.
-func move(t *attach.Term, keys []attach.Step, at func(string) (int, bool), want int, deadline time.Time) error {
+// row too far. When settle is true it also waits for output to go quiet
+// and checks that the cursor stayed put.
+func move(t *attach.Term, keys []attach.Step, at func(string) (int, bool), want int, deadline time.Time, settle bool) error {
 	if !time.Now().Before(deadline) {
 		return rewindFailed("回溯超时，已按 Esc 退出")
 	}
@@ -298,9 +299,11 @@ func move(t *attach.Term, keys []attach.Step, at func(string) (int, bool), want 
 	if !t.WaitFor(there, untilDeadline(deadline, rewindMoveWait)) {
 		return rewindFailed("回溯面板的光标没有跟着方向键移到下一行，已按 Esc 退出")
 	}
-	t.WaitQuiet(redrawQuiet, untilDeadline(deadline, redrawMax))
-	if !there(t.Screen()) {
-		return rewindFailed("回溯面板的光标移过了头，已按 Esc 退出")
+	if settle {
+		t.WaitQuiet(redrawQuiet, untilDeadline(deadline, redrawMax))
+		if !there(t.Screen()) {
+			return rewindFailed("回溯面板的光标移过了头，已按 Esc 退出")
+		}
 	}
 	return nil
 }

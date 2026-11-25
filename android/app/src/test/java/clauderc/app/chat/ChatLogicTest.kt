@@ -507,7 +507,7 @@ class ChatLogicTest {
     @Test fun nothingIsSentWhileARewindIsUnderway() = runTest(dispatcher) {
         val vm = viewModel()
         val rewound = hold(Method.CHAT_REWIND)
-        vm.rewind(ChatItem(60, ItemKind.USER, text = "第 60 条", uuid = "u-60"), clauderc.app.protocol.RewindRestore.BOTH) {}
+        vm.rewind(ChatItem(60, ItemKind.USER, text = "第 60 条", uuid = "u-60"), clauderc.app.protocol.RewindRestore.BOTH)
         assertTrue(vm.state.value.rewinding)
         assertFalse(vm.send("再跑一遍"))
         assertFalse(vm.fork(""))
