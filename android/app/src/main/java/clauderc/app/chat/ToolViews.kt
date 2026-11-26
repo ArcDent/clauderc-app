@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import clauderc.app.git.diffGroupFrame
 import clauderc.app.ui.components.Spinner
 import clauderc.app.ui.components.inkSurface
 import clauderc.app.ui.components.tileSurface
@@ -233,23 +234,34 @@ class Fold(expanded: Boolean) {
 @Composable
 fun rememberFold(key: String): Fold = rememberSaveable(key, saver = Fold.Saver) { Fold(false) }
 
-/** Background and text color of a diff row: the git diff page's add and del. */
-fun patchTone(kind: RowKind, c: ClaudercColors): Pair<Color, Color> = when (kind) {
-    RowKind.ADD -> c.addBg to c.addFg
-    RowKind.DEL -> c.delBg to c.delFg
-    else -> Color.Transparent to c.fg
+/** Text color of a diff row: the git diff page's add and del. */
+fun patchTone(kind: RowKind, c: ClaudercColors): Color = when (kind) {
+    RowKind.ADD -> c.addFg
+    RowKind.DEL -> c.delFg
+    else -> c.fg
 }
 
 private val PatchText = TextStyle(fontFamily = MonoFamily, fontSize = 11.5.sp, lineHeight = 1.7.em, fontFeatureSettings = "tnum")
 
+/** The margin [diffGroupFrame] keeps on each side; rows outside a frame keep it too, so the columns line up. */
+private val PatchInset = 6.dp
+
+/** Where the text column starts: the inset, the line number and the sign. */
+private val PatchTextStart = PatchInset + 56.dp
+
 /**
  * The diff view under an Edit, Write or Read row: a column of line numbers, the sign, the line.
+ * Runs of deleted and of added lines sit in the git diff page's bordered frames, no fill.
  * All of it, in a box [ToolBoxMax] tall at most that scrolls inside; [fetching] while the whole
  * text of a cut result is on its way, said at the end with a spinner.
  */
 @Composable
 fun PatchDetail(fold: Fold, rows: List<PatchRow>, fetching: Boolean) {
     val sp = Clauderc.spacing
+    fun Modifier.rowIn(i: Int, lift: Boolean = true) = graphicsLayer {
+        alpha = fold.rowAlpha(i)
+        if (lift) translationY = -4.dp.toPx() * fold.rowLift(i)
+    }
     Column(
         Modifier
             .padding(start = sp.sp2, end = sp.sp2, top = 2.dp, bottom = sp.sp2)
@@ -258,16 +270,35 @@ fun PatchDetail(fold: Fold, rows: List<PatchRow>, fetching: Boolean) {
             .toolBox()
             .padding(vertical = sp.sp2),
     ) {
-        rows.forEachIndexed { i, r ->
-            PatchLine(
-                r,
-                Modifier.graphicsLayer {
-                    alpha = fold.rowAlpha(i)
-                    translationY = -4.dp.toPx() * fold.rowLift(i)
-                },
-            )
+        var i = 0
+        while (i < rows.size) {
+            val kind = rows[i].kind
+            if (kind != RowKind.ADD && kind != RowKind.DEL) {
+                PatchLine(rows[i], Modifier.rowIn(i).padding(horizontal = PatchInset))
+                i++
+                continue
+            }
+            val start = i
+            while (i < rows.size && rows[i].kind == kind) i++
+            val add = kind == RowKind.ADD
+            // The frame fades in and lifts with its first row; the rows in it fade in one by one.
+            Column(
+                Modifier
+                    .rowIn(start)
+                    .fillMaxWidth()
+                    .diffGroupFrame(
+                        add = add,
+                        openTop = add && rows.getOrNull(start - 1)?.kind == RowKind.DEL,
+                        openBottom = !add && rows.getOrNull(i)?.kind == RowKind.ADD,
+                        seamTop = add && rows.getOrNull(start - 1)?.kind == RowKind.DEL,
+                    )
+                    .padding(vertical = 2.dp)
+                    .testTag(if (add) "patchAddGroup" else "patchDelGroup"),
+            ) {
+                for (j in start until i) PatchLine(rows[j], Modifier.rowIn(j, lift = false))
+            }
         }
-        if (fetching) Fetching(Modifier.padding(start = 56.dp, end = sp.sp3, top = sp.sp2))
+        if (fetching) Fetching(Modifier.padding(start = PatchTextStart, end = sp.sp3, top = sp.sp2))
     }
 }
 
@@ -288,8 +319,8 @@ private fun PatchLine(r: PatchRow, modifier: Modifier) {
         Text("⋯", modifier.padding(start = 56.dp), color = c.fg3, style = PatchText)
         return
     }
-    val (bg, fg) = patchTone(r.kind, c)
-    Row(modifier.fillMaxWidth().background(bg).padding(end = Clauderc.spacing.sp3).testTag("patchRow")) {
+    val fg = patchTone(r.kind, c)
+    Row(modifier.fillMaxWidth().padding(end = Clauderc.spacing.sp3).testTag("patchRow")) {
         Text(r.line.toString(), Modifier.width(40.dp), color = c.fg3, style = PatchText, textAlign = TextAlign.End)
         val sign = when (r.kind) {
             RowKind.ADD -> "+"

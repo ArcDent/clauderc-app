@@ -248,6 +248,8 @@ fun SessionsScreen(
     onSelectMachine: (Machine) -> Unit = {},
     onOpenPending: (PendingEntry) -> Unit = {},
     initialInkTab: InkListTab = InkListTab.Active,
+    /** 浮墨's 「活跃 / 全部」 changed; the caller keeps it so going back or switching tabs returns to it. */
+    onInkTabChange: (InkListTab) -> Unit = {},
     onOpenDrawer: (() -> Unit)? = null,
     onCreateAt: ((Rect?) -> Unit)? = null,
     onPairAt: ((Rect?) -> Unit)? = null,
@@ -260,6 +262,7 @@ fun SessionsScreen(
     var drawerOpen by remember { mutableStateOf(false) }
     var machineSheetOpen by remember { mutableStateOf(false) }
     var inkTab by remember(initialInkTab) { mutableStateOf(initialInkTab) }
+    val selectInkTab: (InkListTab) -> Unit = { inkTab = it; onInkTabChange(it) }
     val machine = state.machine
     val online = machine?.online == true
     val pull = rememberPullToRefreshState()
@@ -271,7 +274,7 @@ fun SessionsScreen(
     var lastDirFilter by remember { mutableStateOf(effectiveDirFilter) }
     LaunchedEffect(effectiveDirFilter) {
         if (effectiveDirFilter != lastDirFilter) {
-            if (effectiveDirFilter != null) inkTab = InkListTab.All
+            if (effectiveDirFilter != null) selectInkTab(InkListTab.All)
             lastDirFilter = effectiveDirFilter
         }
     }
@@ -403,7 +406,7 @@ fun SessionsScreen(
                                         InkBrushTabs(
                                             labels = listOf("活跃" to null, "全部" to null),
                                             selected = if (inkTab == InkListTab.Active) 0 else 1,
-                                            onSelect = { inkTab = if (it == 0) InkListTab.Active else InkListTab.All },
+                                            onSelect = { selectInkTab(if (it == 0) InkListTab.Active else InkListTab.All) },
                                         )
                                     }
                                     if (effectiveDirFilter != null && filteredDirTitle != null) {
@@ -649,7 +652,7 @@ fun SessionsScreen(
                                                 "查看全部 $totalSessions 个会话",
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(10.dp))
-                                                    .clickable(role = Role.Button) { inkTab = InkListTab.All }
+                                                    .clickable(role = Role.Button) { selectInkTab(InkListTab.All) }
                                                     .padding(vertical = 4.dp),
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Medium,
@@ -810,7 +813,7 @@ fun SessionsScreen(
             selectedDir = effectiveDirFilter,
             onSelectDir = { dir ->
                 onSelectDirFilter(dir)
-                inkTab = if (dir != null) InkListTab.All else InkListTab.Active
+                selectInkTab(if (dir != null) InkListTab.All else InkListTab.Active)
             },
             onScanPairAt = { rect ->
                 drawerOpen = false

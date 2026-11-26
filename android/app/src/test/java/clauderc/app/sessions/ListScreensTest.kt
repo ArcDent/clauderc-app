@@ -577,6 +577,55 @@ class ListScreensTest {
         compose.onNodeWithText("landing 页").assertIsDisplayed()
     }
 
+    @Test fun inkAllTabIsStillChosenWhenTheSessionsTabComesBack() {
+        val relay = FakeRelay().apply {
+            respond(Method.MACHINES_LIST, MachinesListResponse.serializer(), MachinesListResponse(listOf(machine("m-1", "工作室 Mac mini"))))
+            respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), sampleSessions)
+        }
+        val scope = CoroutineScope(Dispatchers.Unconfined + Job())
+        try {
+            val fleet = Fleet(relay, scope)
+            val selection = clauderc.app.Selection()
+            val notices = kotlinx.coroutines.flow.MutableSharedFlow<String>()
+            compose.setContent {
+                ClaudercTheme(darkTheme = false, style = UiStyle.Ink) {
+                    clauderc.app.HomeTabsContent(selection, fleet, notices) { tab, machineId ->
+                        when (tab) {
+                            // Wired as AppNav's SessionsTab: the choice lives in Selection, the page leaves composition with its tab.
+                            clauderc.app.MainTab.Sessions -> {
+                                val m = fleet.machines.collectAsState().value?.firstOrNull { it.id == machineId }
+                                SessionsScreen(
+                                    state = SessionsUiState(m, groupSessions(sampleSessions, emptyMap())),
+                                    onRefresh = {}, onOpenChat = {}, onCreate = {}, onRename = { _, _ -> }, onStop = {}, onRemove = {},
+                                    initialInkTab = selection.sessionTab.collectAsState().value,
+                                    onInkTabChange = { selection.sessionTab.value = it },
+                                )
+                            }
+                            else -> androidx.compose.material3.Text(tab.name)
+                        }
+                    }
+                }
+            }
+            compose.waitForIdle()
+            compose.onNodeWithText("landing 页").assertDoesNotExist()
+            compose.onNodeWithTag("brushTab:1").performClick()
+            compose.waitForIdle()
+            assertEquals(InkListTab.All, selection.sessionTab.value)
+
+            // Off to the git tab and back: still 全部, with its stopped sessions.
+            selection.tab.value = clauderc.app.MainTab.Git
+            compose.waitForIdle()
+            compose.onNodeWithText("Git").assertIsDisplayed()
+            compose.onNodeWithTag("sessionList").assertDoesNotExist()
+            selection.tab.value = clauderc.app.MainTab.Sessions
+            compose.waitForIdle()
+            compose.onNodeWithTag("sessionList").performScrollToNode(hasText("landing 页"))
+            compose.onNodeWithText("landing 页").assertIsDisplayed()
+        } finally {
+            scope.cancel()
+        }
+    }
+
     @Test fun inkDrawerFiltersDirectoriesAndOffersScanOrb() {
         var pickedDir by mutableStateOf<String?>(null)
         var paired = 0

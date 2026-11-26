@@ -620,7 +620,23 @@ class ScreensTest {
             model = "claude-opus-5-5", permissionMode = "default",
         )
         val fetching = chat.copy(items = items.take(9), fetchingResults = setOf("d1"))
+        // An edit opened: long lines wrap inside the bordered red and green frames, as on the git diff page.
+        val config = listOf(
+            "    \"default\": {", "      \"run\": {", "        \"simple\": \"local\",",
+            "-        \"normal\": [{ \"agent\": \"model-a\", \"effort\": \"xhigh\" }],",
+            "-        \"complex\": [{ \"agent\": \"model-a\", \"effort\": \"xhigh\" }]",
+            "+        \"normal\": [", "+          { \"agent\": \"model-b\", \"effort\": \"xhigh\" },", "+          { \"agent\": \"model-c\", \"effort\": \"high\" }", "+        ],",
+            "      }", "    }",
+        )
+        val edited = chat.copy(
+            items = listOf(
+                ChatItem(1, ItemKind.USER, text = "normal 档改成两个候选"),
+                call(2, "e1", "Edit", "编辑 config.json", "file_path" to "/p/config.json", ToolResult("The file config.json has been updated successfully.", patch = listOf(Hunk(80, 7, 80, 9, config)))),
+                ChatItem(3, ItemKind.ASSISTANT, text = "改好了。"),
+            ),
+        )
         for ((tail, isDark, s) in styleVariants) {
+            shot("19-tools-edit$tail", isDark, look = s, fresh = true, open = { compose.onNodeWithText("config.json").performClick() }) { ChatScreen(edited, ChatActions()) }
             shot("19-tools-folded$tail", isDark, look = s, fresh = true) { ChatScreen(chat, ChatActions()) }
             shot(
                 "19-tools-call$tail", isDark, look = s, fresh = true,

@@ -721,6 +721,7 @@ private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHost
     val allSessions by container.fleet.sessions.collectAsStateWithLifecycle()
     val relays by container.connection.links.collectAsStateWithLifecycle()
     val dirFilter by container.selection.sessionDir.collectAsStateWithLifecycle()
+    val inkTab by container.selection.sessionTab.collectAsStateWithLifecycle()
     val pending = collectPendingOnline(machines, allSessions, machineId)
     val inkShell = LocalInkShell.current
     val snack = remember { SnackState() }
@@ -749,6 +750,8 @@ private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHost
         pendingEntries = pending,
         dirFilter = dirFilter,
         onSelectDirFilter = { container.selection.sessionDir.value = it },
+        initialInkTab = inkTab,
+        onInkTabChange = { container.selection.sessionTab.value = it },
         onSelectMachine = { m ->
             if (m.online) container.selection.selectMachine(m.id)
             else container.notice("${m.name} 已离线，联网后才能查看会话")

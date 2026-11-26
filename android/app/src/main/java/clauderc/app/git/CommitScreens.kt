@@ -781,56 +781,18 @@ private fun DiffHunkRow(text: String, first: Boolean) {
 @Composable
 private fun DiffGroupBox(block: DiffBlock.Group) {
     val c = Clauderc.colors
-    val plate = Clauderc.style == UiStyle.Plate
     val accent = if (block.kind == DiffKind.Del) c.delFg else c.addFg
-    val borderColor = accent.copy(alpha = 0.58f)
-    val radius = if (plate) 0.dp else 8.dp
-    val openTop = block.joinPrev || block.continuesFromPrev
-    val openBottom = block.joinNext || block.continuesToNext
-    val topR = if (openTop) 0.dp else radius
-    val bottomR = if (openBottom) 0.dp else radius
-    val shape = RoundedCornerShape(topStart = topR, topEnd = topR, bottomStart = bottomR, bottomEnd = bottomR)
     val tag = if (block.continuesFromPrev) null else if (block.kind == DiffKind.Del) "diffDelGroup" else "diffAddGroup"
 
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(
-                start = 6.dp,
-                end = 6.dp,
-                top = if (openTop) 0.dp else 4.dp,
-                bottom = if (openBottom) 0.dp else 4.dp,
+            .diffGroupFrame(
+                add = block.kind == DiffKind.Add,
+                openTop = block.joinPrev || block.continuesFromPrev,
+                openBottom = block.joinNext || block.continuesToNext,
+                seamTop = block.joinPrev,
             )
-            .clip(shape)
-            .drawBehind {
-                val w = size.width
-                val h = size.height
-                val rail = 3.dp.toPx()
-                val stroke = 1.dp.toPx()
-                val tr = topR.toPx()
-                val br = bottomR.toPx()
-                val rr = RoundRect(
-                    rect = Rect(stroke / 2f, stroke / 2f, w - stroke / 2f, h - stroke / 2f),
-                    topLeft = CornerRadius(tr, tr),
-                    topRight = CornerRadius(tr, tr),
-                    bottomRight = CornerRadius(br, br),
-                    bottomLeft = CornerRadius(br, br),
-                )
-                val outline = Path().apply { addRoundRect(rr) }
-                // Outer 1dp border clipped so joining Del+Add seams and chunked continuations never double-stroke.
-                val clipTop = if (openTop) stroke else 0f
-                val clipBottom = if (openBottom) h - stroke else h
-                val clipRect = Path().apply { addRect(Rect(0f, clipTop, w, clipBottom)) }
-                clipPath(clipRect) {
-                    drawPath(outline, borderColor, style = Stroke(stroke))
-                }
-                // Single crisp seam divider between adjacent Del and Add groups.
-                if (block.joinPrev) {
-                    drawLine(c.line, Offset(rail, stroke / 2f), Offset(w - stroke, stroke / 2f), stroke)
-                }
-                // Solid 3dp left rail in red/green.
-                drawRect(accent, Offset.Zero, Size(rail, h))
-            }
             .padding(
                 top = if (block.continuesFromPrev) 0.dp else 2.dp,
                 bottom = if (block.continuesToNext) 0.dp else 2.dp,
@@ -841,6 +803,55 @@ private fun DiffGroupBox(block: DiffBlock.Group) {
             DiffLineRow(line, inGroup = true, groupColor = accent)
         }
     }
+}
+
+/**
+ * The frame of a run of deleted or added lines (demo.html .dgrp), shared by the git diff page and the
+ * chat's Edit and Write diffs: a 6dp margin, a 1dp border in the line colour and a solid 3dp rail on
+ * the left, no fill. [openTop] and [openBottom] square that edge off and drop its margin and border,
+ * where a deleted run meets the added run below it or a long run goes on in the next slice;
+ * [seamTop] draws the single divider where an added run meets the deleted run above.
+ */
+@Composable
+internal fun Modifier.diffGroupFrame(add: Boolean, openTop: Boolean, openBottom: Boolean, seamTop: Boolean): Modifier {
+    val c = Clauderc.colors
+    val accent = if (add) c.addFg else c.delFg
+    val borderColor = accent.copy(alpha = 0.58f)
+    val radius = if (Clauderc.style == UiStyle.Plate) 0.dp else 8.dp
+    val topR = if (openTop) 0.dp else radius
+    val bottomR = if (openBottom) 0.dp else radius
+    val shape = RoundedCornerShape(topStart = topR, topEnd = topR, bottomStart = bottomR, bottomEnd = bottomR)
+    return padding(start = 6.dp, end = 6.dp, top = if (openTop) 0.dp else 4.dp, bottom = if (openBottom) 0.dp else 4.dp)
+        .clip(shape)
+        .drawBehind {
+            val w = size.width
+            val h = size.height
+            val rail = 3.dp.toPx()
+            val stroke = 1.dp.toPx()
+            val tr = topR.toPx()
+            val br = bottomR.toPx()
+            val rr = RoundRect(
+                rect = Rect(stroke / 2f, stroke / 2f, w - stroke / 2f, h - stroke / 2f),
+                topLeft = CornerRadius(tr, tr),
+                topRight = CornerRadius(tr, tr),
+                bottomRight = CornerRadius(br, br),
+                bottomLeft = CornerRadius(br, br),
+            )
+            val outline = Path().apply { addRoundRect(rr) }
+            // Outer 1dp border clipped so joining Del+Add seams and chunked continuations never double-stroke.
+            val clipTop = if (openTop) stroke else 0f
+            val clipBottom = if (openBottom) h - stroke else h
+            val clipRect = Path().apply { addRect(Rect(0f, clipTop, w, clipBottom)) }
+            clipPath(clipRect) {
+                drawPath(outline, borderColor, style = Stroke(stroke))
+            }
+            // Single crisp seam divider between adjacent Del and Add groups.
+            if (seamTop) {
+                drawLine(c.line, Offset(rail, stroke / 2f), Offset(w - stroke, stroke / 2f), stroke)
+            }
+            // Solid 3dp left rail in red/green.
+            drawRect(accent, Offset.Zero, Size(rail, h))
+        }
 }
 
 @Composable
