@@ -854,10 +854,16 @@ class ChatScreenTest {
         return colors!!
     }
 
-    /** The color at the left edge of the [i]th diff row, under its line number. */
+    /** The color at the left edge of the [i]th diff row: a framed row's 3dp rail. */
     private fun rowColor(i: Int): Color {
         val px = compose.onAllNodesWithTag("patchRow")[i].captureToImage().toPixelMap()
         return px[2, px.height / 2]
+    }
+
+    /** The color 10dp into the [i]th diff row, left of its line number: what the row is drawn on. */
+    private fun rowFill(i: Int): Color {
+        val px = compose.onAllNodesWithTag("patchRow")[i].captureToImage().toPixelMap()
+        return px[with(compose.density) { 10.dp.roundToPx() }, px.height / 2]
     }
 
     private fun assertColor(want: Color, got: Color, what: String) =
@@ -871,7 +877,7 @@ class ChatScreenTest {
         ),
     )
 
-    @Test fun anEditStartsFoldedAndOpensIntoItsDiffInTheDiffColorsNumberedFromTheHunk() {
+    @Test fun anEditStartsFoldedAndOpensIntoItsDiffInBorderedFramesNumberedFromTheHunk() {
         val c = showTools(edit)
         // Folded like every tool row, with the counts at the end of the row.
         compose.onNodeWithText("+1").assertIsDisplayed()
@@ -882,19 +888,29 @@ class ChatScreenTest {
         assertEquals(4, compose.onAllNodesWithTag("patchRow").fetchSemanticsNodes().size)
         // Line numbers: the context line and the deleted one from the old start, the added one from the new start.
         assertEquals(listOf("8", "9", "9", "10"), (0..3).map { i -> compose.onAllNodesWithTag("patchRow", useUnmergedTree = true)[i].onChildAt(0).fetchSemanticsNode().config[SemanticsProperties.Text].first().text })
-        assertColor(c.delBg, rowColor(1), "deleted row")
-        assertColor(c.addBg, rowColor(2), "added row")
+        // The deleted line and the added one each sit in a frame with a red or green rail, on no fill of their own.
+        compose.onAllNodesWithTag("patchDelGroup").assertCountEquals(1)
+        compose.onAllNodesWithTag("patchAddGroup").assertCountEquals(1)
+        assertColor(c.delFg, rowColor(1), "deleted row's rail")
+        assertColor(c.addFg, rowColor(2), "added row's rail")
+        assertColor(rowFill(0), rowFill(1), "deleted row's fill")
+        assertColor(rowFill(0), rowFill(2), "added row's fill")
         compose.onNodeWithText("var ErrVersion = errors.New(\"unsupported\")", useUnmergedTree = true).assertIsDisplayed()
     }
 
-    @Test fun aWriteIsAllGreenAddedLines() {
+    @Test fun aWriteIsOneFrameOfGreenAddedLines() {
         val write = tool("toolu_W", "Write", "写入 errors.go", ToolResult("File created successfully at: errors.go", patch = listOf(Hunk(0, 0, 1, 3, listOf("+package protocol", "+", "+type Error struct{}")))))
         val c = showTools(write)
         compose.onNodeWithText("+3").assertIsDisplayed()
         compose.onNodeWithText("errors.go").performClick()
         compose.waitForIdle()
         assertEquals(3, compose.onAllNodesWithText("+", useUnmergedTree = true).fetchSemanticsNodes().size)
-        (0..2).forEach { assertColor(c.addBg, rowColor(it), "row $it") }
+        compose.onAllNodesWithTag("patchAddGroup").assertCountEquals(1)
+        compose.onAllNodesWithTag("patchDelGroup").assertCountEquals(0)
+        (0..2).forEach {
+            assertColor(c.addFg, rowColor(it), "row $it's rail")
+            assertFalse("row $it is drawn on the add fill", abs(rowFill(it).green - c.addBg.green) < 0.02f && abs(rowFill(it).red - c.addBg.red) < 0.02f)
+        }
     }
 
     @Test fun aReadSaysHowManyLinesItReadAndOpensOnTap() {

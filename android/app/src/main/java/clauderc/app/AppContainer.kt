@@ -18,6 +18,7 @@ import clauderc.app.net.RelayHub
 import clauderc.app.pair.OkHttpPairingApi
 import clauderc.app.pair.PairingApi
 import clauderc.app.protocol.Machine
+import clauderc.app.sessions.InkListTab
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +44,8 @@ class Selection {
     val gitDirs = MutableStateFlow<Map<String, String>>(emptyMap())
     /** Optional working directory filter set by 浮墨's left drawer; null shows all directories. */
     val sessionDir = MutableStateFlow<String?>(null)
+    /** 浮墨's 「活跃 / 全部」 on the Sessions page: back from a chat or from another tab, it is as it was left. */
+    val sessionTab = MutableStateFlow(InkListTab.Active)
 
     fun selectMachine(machineId: String) {
         if (this.machineId.value != machineId) {
