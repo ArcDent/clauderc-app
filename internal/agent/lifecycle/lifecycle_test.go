@@ -943,6 +943,41 @@ func TestRemove(t *testing.T) {
 	wantEqual(t, "args", launches[0].Args, []string{"rm", "stp00001"})
 }
 
+func TestHandleProfileForget(t *testing.T) {
+	f := newFixture(t)
+	f.setAgents(t, session{"stp00001", "uuid-stp", "/w/b", false})
+	f.job(t, "stp00001", []string{"--settings", anySettings}, nil, "2026-11-13T09:00:00Z")
+	for _, c := range []struct {
+		name, id, message string
+		code              protocol.ErrorCode
+	}{
+		{"success", "relay.example.net", "", ""},
+		{"fixed", "default", "「默认」和「其他」档位不能删除", protocol.CodeInvalidParams},
+		{"in use", "anyrouter.top", "档位里还有会话，先移出再删除", protocol.CodeInvalidParams},
+		{"internal", "relay.example.net", "删除档位失败，请在目标机上查看日志", protocol.CodeInternal},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			src := f.src
+			if c.code == protocol.CodeInternal {
+				src.ProfilesFile = ""
+			}
+			changed := 0
+			h := lifecycle.New(lifecycle.Options{Source: src, Changed: func() { changed++ }})
+			if !slices.Contains(h.Methods(), protocol.MethodProfileForget) {
+				t.Fatal("profile.forget is not registered")
+			}
+			res := h.Handle(t.Context(), request(protocol.MethodProfileForget, fmt.Sprintf(`{"profileId":%q}`, c.id)))
+			if c.code == "" {
+				if res.Error != nil || string(res.Body) != `{}` || changed != 1 {
+					t.Errorf("body = %s, error = %v, Changed = %d; want {}, nil, 1", res.Body, res.Error, changed)
+				}
+			} else if res.Error == nil || res.Error.Code != c.code || res.Error.Message != c.message || changed != 0 {
+				t.Errorf("error = %v, Changed = %d; want %s: %s, 0", res.Error, changed, c.code, c.message)
+			}
+		})
+	}
+}
+
 // Changed is called after each create, stop or remove that went through,
 // and not after one that failed.
 func TestChangedAfterActions(t *testing.T) {

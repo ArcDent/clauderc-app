@@ -119,6 +119,30 @@ func TestAnswerDialogMovesCursor(t *testing.T) {
 	}
 }
 
+func TestUnreliableScreenRefusesKeys(t *testing.T) {
+	t.Parallel()
+	// A frame Claude draws for a taller screen writes below the grid.
+	const wrongSize = "\x1b[?2026h\x1b[43;1Hx"
+	t.Run("send", func(t *testing.T) {
+		f := newFixture(t, setup{screen: "────\n❯\u00a0\n────" + wrongSize})
+		res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "hello"})
+		if res.Error == nil || res.Error.Code != protocol.CodeInvalidParams || f.keyLog() != "" {
+			t.Fatalf("send: error = %+v, keys = %q", res.Error, f.keyLog())
+		}
+	})
+	t.Run("confirm dialog", func(t *testing.T) {
+		f := newFixture(t, setup{status: "waiting", state: "blocked", screen: mcpDialog(t) + wrongSize})
+		f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
+		p := dialogPending(t, f)
+		res := f.call(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{
+			SessionID: shortID, ToolUseID: p.ToolUseID, Answers: []protocol.Answer{{Selected: []int{1}}},
+		})
+		if res.Error == nil || res.Error.Code != protocol.CodePendingChanged || f.keyLog() != "" {
+			t.Fatalf("dialog: error = %+v, keys = %q", res.Error, f.keyLog())
+		}
+	})
+}
+
 // A stale id, a custom answer or two picks type nothing.
 func TestAnswerDialogRefused(t *testing.T) {
 	t.Parallel()

@@ -879,6 +879,78 @@ class ChatLogicTest {
         assertNull(vm.state.value.activity)
     }
 
+    @Test fun emptyAndMissingScreenRepliesKeepTheBubbleUntilWorkStops() = runTest(dispatcher) {
+        val vm = viewModel()
+        fun screen(event: ChatStateEvent) = relay.event(Method.CHAT_STATE, "m-1", ChatStateEvent.serializer(), event)
+
+        screen(ChatStateEvent("s-need", SessionState.Working, partial = "还在写的回复"))
+        val bubble = requireNotNull(vm.state.value.partial)
+        screen(ChatStateEvent("s-need", SessionState.Working, partial = ""))
+        assertEquals(bubble, vm.state.value.partial)
+        screen(ChatStateEvent("s-need", SessionState.Working))
+        assertEquals(bubble, vm.state.value.partial)
+
+        screen(ChatStateEvent("s-need", SessionState.Idle))
+        assertNull(vm.state.value.partial)
+    }
+
+    @Test fun aScreenReplyMatchingTheWrittenReplyInThisTurnIsDropped() = runTest(dispatcher) {
+        relay.respond(
+            Method.CHAT_OPEN,
+            ChatOpenResponse.serializer(),
+            ChatOpenResponse(
+                items = listOf(
+                    text(1, ItemKind.USER, "上一轮"),
+                    text(2, body = "结论和依据都在上一轮。"),
+                    text(3, ItemKind.USER, "这一轮"),
+                    text(4, body = "**本轮结论**：核对完成。"),
+                ),
+                state = SessionState.Working,
+            ),
+        )
+        val vm = viewModel()
+        fun screen(partial: String) = relay.event(
+            Method.CHAT_STATE, "m-1", ChatStateEvent.serializer(), ChatStateEvent("s-need", SessionState.Working, partial = partial),
+        )
+
+        screen("结论和依据")
+        assertEquals("结论和依据", vm.state.value.partial?.text)
+        screen("本轮结论：核对")
+        assertNull(vm.state.value.partial)
+    }
+
+    @Test fun aReplyWrittenWhileReconnectingTakesOverTheOldPartial() = runTest(dispatcher) {
+        var snap = listOf(text(1, ItemKind.USER, "问题"))
+        relay.on(Method.CHAT_OPEN) {
+            ProtocolJson.encodeToJsonElement(ChatOpenResponse.serializer(), ChatOpenResponse(items = snap, state = SessionState.Working))
+        }
+        val vm = viewModel()
+        relay.event(Method.CHAT_STATE, "m-1", ChatStateEvent.serializer(), ChatStateEvent("s-need", SessionState.Working, partial = "正在写的回复"))
+        val key = requireNotNull(vm.state.value.partial).key
+
+        snap = listOf(text(1, ItemKind.USER, "问题"), text(2, body = "正在写的回复，已经写完。"))
+        relay.state.value = clauderc.app.net.ConnectionState.Waiting(1, 0)
+        relay.state.value = clauderc.app.net.ConnectionState.Connected
+
+        assertEquals(2, relay.sent(Method.CHAT_OPEN).size)
+        assertNull("the written reply replaces the partial", vm.state.value.partial)
+        assertEquals("it keeps the partial's bubble", key, vm.state.value.keys[2L])
+    }
+
+    @Test fun aNewTurnEndsTheOldPartialAndItsReplyDoesNotTakeTheBubble() = runTest(dispatcher) {
+        val vm = viewModel()
+        fun items(vararg new: ChatItem) = relay.event(Method.CHAT_ITEMS, "m-1", ChatItemsEvent.serializer(), ChatItemsEvent("s-need", new.toList()))
+        relay.event(Method.CHAT_STATE, "m-1", ChatStateEvent.serializer(), ChatStateEvent("s-need", SessionState.Working, partial = "上一轮没写完的回复"))
+        val old = requireNotNull(vm.state.value.partial)
+
+        items(ChatItem(old.afterSeq + 1, ItemKind.USER, text = "排队的消息", queued = true))
+        assertEquals("a queued message does not end the turn", old, vm.state.value.partial)
+
+        items(text(old.afterSeq + 2, ItemKind.USER, "新的问题"), text(old.afterSeq + 3, body = "新一轮的回复"))
+        assertNull(vm.state.value.partial)
+        assertNull("the next turn's reply is not the old partial", vm.state.value.keys[old.afterSeq + 3])
+    }
+
     @Test fun networkFailureOnOpenReopensWhenReconnected() = runTest(dispatcher) {
         var fail = true
         relay.on(Method.CHAT_OPEN) {

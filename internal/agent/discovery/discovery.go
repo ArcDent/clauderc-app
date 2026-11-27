@@ -327,8 +327,8 @@ func (s Source) ProfileOf(jobID string) protocol.Profile {
 }
 
 // List returns the background sessions with their profiles, plus every
-// profile seen in the jobs history or the template cache, so groups
-// without sessions stay listed. The "other" profile is listed only while
+// profile seen in the jobs history or the template cache unless forgotten.
+// The "other" profile is listed only while
 // a session falls into it. Each profile with a template carries the
 // models of that template. Templates found in jobs/ are saved to
 // ProfilesFile first; failing to save them does not fail List.
@@ -344,13 +344,21 @@ func (s Source) ListTargets(ctx context.Context) (protocol.SessionList, []Target
 	if err != nil {
 		return protocol.SessionList{}, nil, err
 	}
-	seen, latest := s.scanJobs()
+	var cache templatesFile
+	var old []byte
+	if s.ProfilesFile != "" {
+		// Keep the deletion times stable from filtering jobs through saving templates.
+		templatesMu.Lock()
+		defer templatesMu.Unlock()
+		cache, old, _ = readTemplates(s.ProfilesFile)
+	}
+	seen, latest := s.scanJobs(cache.Forgotten)
+	templates := latest
+	if s.ProfilesFile != "" {
+		templates = s.saveTemplates(latest, cache, old)
+	}
 	for _, p := range sessionProfiles {
 		seen[p.ID] = p
-	}
-	templates := s.saveTemplates(latest)
-	if templates == nil {
-		templates = latest
 	}
 	for id, t := range templates {
 		seen[id] = t.Profile
@@ -375,9 +383,9 @@ func (s Source) ListTargets(ctx context.Context) (protocol.SessionList, []Target
 }
 
 // scanJobs reads every jobs/*/state.json and returns the profiles seen
-// there by id, without "other", and the template of each profile's most
-// recent session.
-func (s Source) scanJobs() (map[string]protocol.Profile, map[string]Template) {
+// there by id and their most recent templates, skipping "other" and jobs
+// that have not been updated since the profile was forgotten.
+func (s Source) scanJobs(forgotten map[string]time.Time) (map[string]protocol.Profile, map[string]Template) {
 	seen := map[string]protocol.Profile{}
 	latest := map[string]Template{}
 	dirs, _ := os.ReadDir(filepath.Join(s.ClaudeDir, "jobs"))
@@ -388,6 +396,9 @@ func (s Source) scanJobs() (map[string]protocol.Profile, map[string]Template) {
 		job := s.readJobDir(d.Name())
 		p := profileOfJob(job)
 		if p.Kind == protocol.ProfileOther {
+			continue
+		}
+		if at, ok := forgotten[p.ID]; ok && !job.UpdatedAt.After(at) {
 			continue
 		}
 		seen[p.ID] = p

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 
 	"clauderc/internal/agent"
@@ -79,7 +80,11 @@ func (h *Handler) answerDialog(ctx context.Context, req protocol.Envelope, targe
 		if pick < 0 || pick >= len(d.Options) {
 			return &opError{protocol.CodeInvalidParams, "选的选项不存在"}
 		}
-		return t.Send(attach.DialogKeys(d.Cursor, pick))
+		if err := t.Send(attach.DialogKeys(d.Cursor, pick)); errors.Is(err, attach.ErrUnreliableScreen) {
+			return errPendingChanged
+		} else {
+			return err
+		}
 	})
 	if err != nil {
 		return failWith(req, err)

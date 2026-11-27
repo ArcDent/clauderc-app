@@ -15,6 +15,11 @@ import (
 // and returns the screen text.
 func recorded(t *testing.T, mark string) string {
 	t.Helper()
+	return recordedScreen(t, mark).Text()
+}
+
+func recordedScreen(t *testing.T, mark string) *attach.Screen {
+	t.Helper()
 	raw, err := os.ReadFile("testdata/recorded.raw")
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +40,13 @@ func recorded(t *testing.T, mark string) string {
 		s.Write(data[:n])
 		data = data[n:]
 	}
-	return s.Text()
+	return s
+}
+
+func TestRecordedAfterEscIsReliable(t *testing.T) {
+	if recordedScreen(t, "after-esc").View().Unreliable {
+		t.Error("screen after Esc is unreliable")
+	}
 }
 
 func TestParseModeFromRecordedScreens(t *testing.T) {

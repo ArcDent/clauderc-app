@@ -12,6 +12,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -42,6 +43,8 @@ const (
 
 // ErrClosed is returned when the attach process has ended.
 var ErrClosed = errors.New("attach: process ended")
+
+var ErrUnreliableScreen = errors.New("attach: screen is unreliable")
 
 // Options configures a Pool.
 type Options struct {
@@ -465,13 +468,22 @@ func (c *Conn) Send(ctx context.Context, steps []Step) error {
 		return err
 	}
 	defer c.unlockOps()
-	return c.send(ctx, steps)
+	return c.send(ctx, steps, false)
 }
 
-func (c *Conn) send(ctx context.Context, steps []Step) error {
+func (c *Conn) send(ctx context.Context, steps []Step, checkScreen bool) error {
 	for _, st := range steps {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if checkScreen {
+			c.mu.Lock()
+			c.screen.expireFrame(time.Now())
+			unsafe := c.screen.unreliable()
+			c.mu.Unlock()
+			if unsafe {
+				return ErrUnreliableScreen
+			}
 		}
 		if err := c.write(ctx, st.Keys); err != nil {
 			return err
@@ -552,8 +564,8 @@ type Term struct {
 	ctx context.Context
 }
 
-// Send types steps.
-func (t *Term) Send(steps []Step) error { return t.c.send(t.ctx, steps) }
+// Send types automatic steps only while the screen is reliable.
+func (t *Term) Send(steps []Step) error { return t.c.send(t.ctx, steps, true) }
 
 // Detached is the attach as the steps that close a panel see it: they go
 // on when the request is given up, so the panel is not left open on the
@@ -563,11 +575,15 @@ func (t *Term) Detached(d time.Duration) (*Term, context.CancelFunc) {
 	return &Term{c: t.c, ctx: ctx}, cancel
 }
 
-// Screen returns the current screen text.
+// Screen returns text for automatic operations, or empty if unreliable.
 func (t *Term) Screen() string {
 	t.c.mu.Lock()
 	defer t.c.mu.Unlock()
-	return t.c.screen.Text()
+	t.c.screen.expireFrame(time.Now())
+	if t.c.screen.unreliable() {
+		return ""
+	}
+	return t.c.screen.text()
 }
 
 // View returns the current screen and cursor.
@@ -584,7 +600,8 @@ func (t *Term) WaitQuiet(quiet, max time.Duration) { t.c.waitQuiet(t.ctx, quiet,
 func (t *Term) WaitFor(cond func(screen string) bool, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for {
-		if cond(t.Screen()) {
+		v := t.View()
+		if !v.Unreliable && cond(strings.Join(v.Lines, "\n")) {
 			return true
 		}
 		if time.Now().After(deadline) || t.ctx.Err() != nil || t.c.ended() {

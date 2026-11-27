@@ -109,5 +109,9 @@ data class SessionCreateResponse(val sessionId: String)
 @Serializable
 data class SessionIdRequest(val sessionId: String)
 
+/** Forgets a launch profile that no session uses. */
+@Serializable
+data class ProfileForgetRequest(val profileId: String)
+
 @Serializable
 data class DirsRecentResponse(val dirs: List<String> = emptyList())

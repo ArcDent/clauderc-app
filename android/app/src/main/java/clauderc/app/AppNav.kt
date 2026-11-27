@@ -734,6 +734,7 @@ private fun SessionsTab(container: AppContainer, machineId: String, nav: NavHost
         onRename = vm::rename,
         onStop = vm::stop,
         onRemove = vm::remove,
+        onForget = vm::forget,
         onToggle = vm::toggle,
         onToggleDir = vm::toggleDir,
         snack = snack,

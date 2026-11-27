@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -599,6 +600,11 @@ type session struct {
 	// activity and partial are the status line and the reply being drawn,
 	// as last read off the screen (see pollScreen).
 	activity, partial string
+	partialFenced     bool
+	lastReplyFrame    []string
+	waitingUser       *string
+	waitPromptCount   int
+	landedReplies     map[string]struct{}
 	// limitReset is usage.get's reset time for the limit of the record at
 	// limitFor, read once when the limit message gives none.
 	limitReset, limitFor time.Time
@@ -612,10 +618,8 @@ type session struct {
 	tasks taskList
 }
 
-// screenInterval is how often an open chat reads the status line and the
-// reply being drawn off its screen; Claude Code's timer there counts
-// seconds.
-const screenInterval = time.Second
+// screenInterval samples the reply four times a second as Claude draws it.
+const screenInterval = 250 * time.Millisecond
 
 func (h *Handler) newSession(t discovery.Target) *session {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -659,9 +663,7 @@ func (s *session) compute() (protocol.ChatStatus, *protocol.Pending) {
 	}
 	if state == protocol.StateWorking {
 		status.Activity = s.activity
-		if s.partial != "" && !landed(s.follower, s.partial) {
-			status.Partial = s.partial
-		}
+		status.Partial = s.partial
 	}
 	return status, pending
 }
@@ -731,10 +733,8 @@ func (s *session) run(ctx context.Context, polled <-chan struct{}) {
 }
 
 // pollScreen reads the permission mode, the status line and the reply
-// being drawn off the screen of the hidden attach; compute passes them on while the session
-// works. A screen without the status line is taken for a frame caught
-// mid-draw and keeps what the last one showed: once the turn ends,
-// compute drops them anyway.
+// being drawn in the hidden attach. While the session works, a frame
+// without a status line can still update the reply and keeps the last activity.
 func (s *session) pollScreen(ctx context.Context) {
 	s.mu.Lock()
 	conn := s.conn
@@ -747,7 +747,11 @@ func (s *session) pollScreen(ctx context.Context) {
 		return
 	}
 	driven := s.h.driven(s.id)
-	lines := conn.View().Lines
+	v := conn.View()
+	if v.Unreliable {
+		return
+	}
+	lines := v.Lines
 	// chat.rewind takes its messages away itself, and a screen of it would
 	// only mislead the watch afterwards.
 	if driven || s.h.driven(s.id) {
@@ -762,19 +766,94 @@ func (s *session) pollScreen(ctx context.Context) {
 		s.screenMode = mode
 		s.mu.Unlock()
 	}
-	activity := screenActivity(lines)
-	if activity == "" {
-		s.mu.Lock()
-		if s.target.SessionState(false) != protocol.StateWorking {
-			s.activity, s.partial = "", ""
-		}
-		s.mu.Unlock()
+	s.updateScreenReply(lines)
+}
+
+func (s *session) updateScreenReply(lines []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.target.SessionState(false) != protocol.StateWorking {
+		s.activity, s.partial, s.lastReplyFrame = "", "", nil
 		return
 	}
-	partial := screenPartial(lines)
-	s.mu.Lock()
-	s.activity, s.partial = activity, partial
-	s.mu.Unlock()
+	if slices.Equal(lines, s.lastReplyFrame) {
+		return
+	}
+	s.lastReplyFrame = lines
+	if activity := screenActivity(lines); activity != "" {
+		s.activity = activity
+	}
+	partial, atPrompt, fenced := screenPartial(lines, s.partial, s.partialFenced)
+	if s.waitingUser != nil {
+		count := screenUserCount(lines, *s.waitingUser)
+		if count == 0 || count <= s.waitPromptCount && !atPrompt {
+			return
+		}
+		s.waitingUser = nil
+	}
+	if atPrompt {
+		s.partial = ""
+	} else if partial != "" && !s.replyLanded(replyFingerprint(partial)) {
+		s.partial, s.partialFenced = partial, fenced
+	}
+}
+
+func (s *session) replyLanded(fingerprint string) bool {
+	for recorded := range s.landedReplies {
+		if fingerprint != "" && strings.HasPrefix(recorded, fingerprint) {
+			return true
+		}
+	}
+	if recorded := landed(s.follower, fingerprint); recorded != "" {
+		if s.landedReplies == nil {
+			s.landedReplies = make(map[string]struct{})
+		}
+		s.landedReplies[recorded] = struct{}{}
+		return true
+	}
+	return false
+}
+
+func (s *session) applyReplyItems(items []transcript.Item) {
+	for _, it := range items {
+		if it.Kind == protocol.ItemUser && !it.Queued {
+			user := withoutSpace(it.Text)
+			s.waitPromptCount = 0
+			// Identical inputs need a new visible occurrence or a prompt-only frame.
+			if s.waitingUser != nil && *s.waitingUser == user || previousUserMatches(s.follower, it.Seq, user) {
+				s.waitPromptCount = max(1, screenUserCount(s.lastReplyFrame, user))
+			}
+			s.waitingUser = &user
+			s.partial, s.lastReplyFrame, s.landedReplies = "", nil, nil
+		} else if it.Kind == protocol.ItemAssistant && s.partial != "" {
+			fingerprint := replyFingerprint(s.partial)
+			if recorded := replyFingerprint(it.Text); fingerprint != "" && strings.HasPrefix(recorded, fingerprint) {
+				if s.landedReplies == nil {
+					s.landedReplies = make(map[string]struct{})
+				}
+				s.landedReplies[recorded] = struct{}{}
+				s.partial = ""
+			}
+		}
+	}
+}
+
+func previousUserMatches(f *transcript.Follower, before int64, text string) bool {
+	if f == nil || before <= 1 {
+		return false
+	}
+	for {
+		items, more := f.Page(before, 20)
+		for i := len(items) - 1; i >= 0; i-- {
+			if it := items[i]; it.Kind == protocol.ItemUser && !it.Queued {
+				return withoutSpace(it.Text) == text
+			}
+		}
+		if !more {
+			return false
+		}
+		before = items[0].Seq
+	}
 }
 
 // switchTranscriptLocked switches the open chat to a new transcript when
@@ -799,7 +878,7 @@ func (s *session) switchTranscriptLocked() bool {
 	s.limitRead = false
 	s.limitReset = time.Time{}
 	s.limitFor = time.Time{}
-	s.activity, s.partial = "", ""
+	s.activity, s.partial, s.waitingUser, s.lastReplyFrame, s.landedReplies = "", "", nil, nil, nil
 	s.rev++
 	rev := s.rev
 	s.mu.Unlock()
@@ -840,6 +919,7 @@ func (s *session) pollTranscript() {
 	}
 	if len(items) > 0 {
 		s.mu.Lock()
+		s.applyReplyItems(items)
 		s.rev++
 		rev := s.rev
 		s.mu.Unlock()
@@ -948,7 +1028,7 @@ func hasInputBox(screen string) bool {
 // screen the emulator drew wrong, such as the 2.1.323 recording, from
 // counting as off the input.
 func awayFromInput(v attach.View) bool {
-	return !v.Cursor && !hasInputBox(strings.Join(v.Lines, "\n"))
+	return v.Unreliable || !v.Cursor && !hasInputBox(strings.Join(v.Lines, "\n"))
 }
 
 // offInput reports whether the session is off its input and the screen

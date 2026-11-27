@@ -433,6 +433,22 @@ class SessionsLogicTest {
         assertFalse("a session without forks has nothing to fold", rows[1].forksCollapsed)
     }
 
+    @Test fun activeForksBringTheirRootButNotInactiveSiblingsOrIntermediateForks() {
+        val a = session("a", "a", SessionState.Idle, "default")
+        val b = session("b", "b", SessionState.Idle, "default").copy(forkOf = "a")
+        val c = session("c", "c", SessionState.Pending, "default").copy(forkOf = "b")
+        val sibling = session("sibling", "sibling", SessionState.Idle, "default").copy(forkOf = "a")
+        val work = session("work", "work", SessionState.Working, "default", minutesAgo = 0)
+
+        val rows = activeForkTree(listOf(work, b, sibling, c, a)) {
+            it.state == SessionState.Pending || it.state == SessionState.Working
+        }
+
+        assertEquals(listOf(a, work), rows.map { it.session })
+        assertEquals(listOf(c), rows.first().forks)
+        assertFalse(rows.first().forksCollapsed)
+    }
+
     @Test fun foldedForksAreKeptPerMachine() = runTest(dispatcher) {
         val store = profileNames(tmp.root, scope)
         store.setForksCollapsed("m-1", "s1", true)

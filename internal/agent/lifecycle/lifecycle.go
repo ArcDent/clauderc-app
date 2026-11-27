@@ -1,5 +1,5 @@
 // Package lifecycle serves the session management methods session.create,
-// session.stop and session.remove, and wakes stopped sessions for
+// session.stop, session.remove and profile.forget, and wakes stopped sessions for
 // chat.send (design D8). Every claude call gets its arguments as a list,
 // never through a shell.
 package lifecycle
@@ -69,7 +69,7 @@ type Options struct {
 	// Logger receives the errors behind internal failures, which the
 	// phone only sees as a fixed message; nil discards them.
 	Logger *slog.Logger
-	// Changed is called once a create, stop or remove has gone through,
+	// Changed is called once a create, stop, remove or forget has gone through,
 	// before the phone gets its answer, so the session list can be read
 	// again at once; nil calls nothing.
 	Changed func()
@@ -126,6 +126,7 @@ func (h *Handler) Methods() []protocol.Method {
 		protocol.MethodSessionCreate,
 		protocol.MethodSessionStop,
 		protocol.MethodSessionRemove,
+		protocol.MethodProfileForget,
 	}
 }
 
@@ -157,6 +158,15 @@ func (h *Handler) Handle(ctx context.Context, req protocol.Envelope) protocol.En
 			return agent.Fail(req, protocol.CodeInvalidParams, agent.BadRequestMessage)
 		}
 		if err := h.Remove(ctx, body.SessionID); err != nil {
+			return agent.FailErr(req, err)
+		}
+		return agent.Reply(req, struct{}{})
+	case protocol.MethodProfileForget:
+		var body protocol.ProfileForgetRequest
+		if err := json.Unmarshal(req.Body, &body); err != nil || body.ProfileID == "" {
+			return agent.Fail(req, protocol.CodeInvalidParams, agent.BadRequestMessage)
+		}
+		if err := h.Forget(ctx, body.ProfileID); err != nil {
 			return agent.FailErr(req, err)
 		}
 		return agent.Reply(req, struct{}{})
@@ -612,6 +622,21 @@ func (h *Handler) Remove(ctx context.Context, id string) error {
 	}
 	if err != nil {
 		return h.internal("移出会话失败，请在目标机上查看日志", err)
+	}
+	h.opts.Changed()
+	return nil
+}
+
+// Forget deletes an unused launch profile and notifies the session list.
+func (h *Handler) Forget(ctx context.Context, profileID string) error {
+	err := h.opts.Source.Forget(ctx, profileID)
+	switch {
+	case errors.Is(err, discovery.ErrProfileFixed):
+		return invalid("「默认」和「其他」档位不能删除")
+	case errors.Is(err, discovery.ErrProfileInUse):
+		return invalid("档位里还有会话，先移出再删除")
+	case err != nil:
+		return h.internal("删除档位失败，请在目标机上查看日志", err)
 	}
 	h.opts.Changed()
 	return nil

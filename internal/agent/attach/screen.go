@@ -3,22 +3,29 @@ package attach
 import (
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
 // Screen is a minimal terminal emulator: it applies the cursor movement
 // and erase sequences Claude Code's UI uses to a grid of cells, so the
 // text on screen can be read even though the UI repaints only the cells
-// that change. Colors and modes are ignored. Not safe for concurrent use.
+// that change. Not safe for concurrent use.
 type Screen struct {
 	rows, cols int
 	cells      [][]rune // 0 marks the right half of a wide character
 	r, c       int
+	rowOutside bool
 	pending    []byte // an incomplete sequence or UTF-8 character
 	// hidden is set while the program hides the cursor; Claude Code hides
 	// it while it draws and shows it again at the input.
-	hidden bool
+	hidden               bool
+	syncOutput, badFrame bool
+	frame                *View
+	frameUntil           time.Time
 }
+
+const frameTimeout = time.Second
 
 // NewScreen returns a blank screen of the given size.
 func NewScreen(rows, cols int) *Screen {
@@ -40,6 +47,14 @@ func blankRow(cols int) []rune {
 
 // Text returns the screen, one line per row, trailing spaces removed.
 func (s *Screen) Text() string {
+	s.expireFrame(time.Now())
+	if s.frame != nil {
+		return strings.Join(s.frame.Lines, "\n")
+	}
+	return s.text()
+}
+
+func (s *Screen) text() string {
 	lines := make([]string, s.rows)
 	for i, row := range s.cells {
 		var b strings.Builder
@@ -63,21 +78,66 @@ type View struct {
 	Row, Col int
 	// Cursor is false while the program hides the cursor.
 	Cursor bool
+	// Unreliable views can be displayed but must not drive automatic keys.
+	Unreliable bool
 }
 
 // View returns the screen and its cursor.
 func (s *Screen) View() View {
+	s.expireFrame(time.Now())
+	if s.frame != nil {
+		v := *s.frame
+		v.Lines = append([]string(nil), v.Lines...)
+		v.Unreliable = true
+		return v
+	}
+	return s.currentView()
+}
+
+func (s *Screen) currentView() View {
 	col := 0
 	for _, r := range s.cells[s.r][:min(s.c, s.cols)] {
 		if r != 0 {
 			col++
 		}
 	}
-	return View{Lines: strings.Split(s.Text(), "\n"), Row: s.r, Col: col, Cursor: !s.hidden}
+	return View{Lines: strings.Split(s.text(), "\n"), Row: s.r, Col: col, Cursor: !s.hidden, Unreliable: s.unreliable()}
+}
+
+func (s *Screen) unreliable() bool { return s.frame != nil || s.syncOutput || s.badFrame }
+
+func (s *Screen) freezeFrame() {
+	if s.frameUntil.IsZero() {
+		s.frameUntil = time.Now().Add(frameTimeout)
+		if !s.badFrame {
+			v := s.currentView()
+			s.frame = &v
+		}
+	}
+}
+
+func (s *Screen) expireFrame(now time.Time) {
+	if !s.frameUntil.IsZero() && !now.Before(s.frameUntil) {
+		// Release the display, but never authorize keys on a corrupt grid.
+		s.syncOutput, s.frame, s.frameUntil = false, nil, time.Time{}
+	}
+}
+
+func (s *Screen) resetFrame() {
+	s.syncOutput, s.badFrame = false, false
+	s.rowOutside = false
+	s.finishFrame()
+}
+
+func (s *Screen) finishFrame() {
+	if !s.syncOutput && !s.badFrame {
+		s.frame, s.frameUntil = nil, time.Time{}
+	}
 }
 
 // Write applies terminal output; sequences may be split across calls.
 func (s *Screen) Write(p []byte) (int, error) {
+	s.expireFrame(time.Now())
 	data := append(s.pending, p...)
 	s.pending = nil
 	i := 0
@@ -137,7 +197,16 @@ func (s *Screen) put(r rune) {
 	if wide(r) {
 		w = 2
 	}
-	if s.c+w > s.cols {
+	wrap := s.c+w > s.cols
+	// Claude parks the cursor below the grid without writing. Only a write
+	// there or an implicit wrap can corrupt the layout it already drew, and
+	// only inside a synchronized frame, where Claude lays out every row for
+	// its own width: plain output outside one wraps at the edge as usual.
+	if !s.badFrame && s.syncOutput && (s.rowOutside || wrap) {
+		s.freezeFrame()
+		s.badFrame = true
+	}
+	if wrap {
 		s.c = 0
 		s.lineFeed()
 	}
@@ -180,6 +249,7 @@ func (s *Screen) escape(data []byte) (int, bool) {
 		}
 		return 3, true
 	case 'c':
+		s.resetFrame()
 		s.clear(0, s.rows)
 		s.r, s.c = 0, 0
 		return 2, true
@@ -194,9 +264,23 @@ func (s *Screen) csi(params string, final byte) {
 		if (final == 'h' || final == 'l') && (params == "?1049" || params == "?47" || params == "?1047") {
 			s.clear(0, s.rows)
 			s.r, s.c = 0, 0
+			s.resetFrame()
 		}
 		if (final == 'h' || final == 'l') && params == "?25" {
 			s.hidden = final == 'l'
+			if !s.hidden {
+				s.finishFrame()
+			}
+		}
+		if params == "?2026" {
+			switch final {
+			case 'h':
+				s.freezeFrame()
+				s.syncOutput = true
+			case 'l':
+				s.syncOutput = false
+				s.finishFrame()
+			}
 		}
 		return
 	}
@@ -217,6 +301,7 @@ func (s *Screen) csi(params string, final byte) {
 	switch final {
 	case 'H', 'f':
 		s.r, s.c = arg(0, 1)-1, arg(1, 1)-1
+		s.rowOutside = s.r >= s.rows
 	case 'A':
 		s.r -= arg(0, 1)
 	case 'B', 'e':
@@ -233,6 +318,7 @@ func (s *Screen) csi(params string, final byte) {
 		s.c = arg(0, 1) - 1
 	case 'd':
 		s.r = arg(0, 1) - 1
+		s.rowOutside = s.r >= s.rows
 	case 'K':
 		s.clampCursor()
 		row := s.cells[s.r]
@@ -261,6 +347,12 @@ func (s *Screen) csi(params string, final byte) {
 			}
 		default:
 			s.clear(0, s.rows)
+			if arg(0, 0) == 2 {
+				s.badFrame = false
+				if !s.hidden {
+					s.finishFrame()
+				}
+			}
 		}
 	case 'X':
 		s.clampCursor()

@@ -45,6 +45,8 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToKey
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeUp
@@ -556,6 +558,43 @@ class ScreensTest {
         }
     }
 
+    @Test fun roundFifteen() {
+        compose.mainClock.autoAdvance = false
+        val allTab = clauderc.app.sessions.InkListTab.All
+        val list = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(sampleSessions, emptyMap()))
+        val stopping = sampleSessions.copy(sessions = sampleSessions.sessions.map {
+            if (it.id == "s-work") it.copy(state = SessionState.Stopped) else it
+        })
+        val inFlight = list.copy(groups = groupSessions(stopping, emptyMap()), stopping = setOf("s-work"))
+        val active = clauderc.app.testing.branchSessions.let { list ->
+            list.copy(sessions = list.sessions.filter { it.id in setOf("s1", "s13", "s2") }.map {
+                when (it.id) {
+                    "s1" -> it.copy(state = SessionState.Idle, lastActiveAt = Instant.now().minusSeconds(3_600))
+                    "s13" -> it.copy(state = SessionState.Pending)
+                    else -> it
+                }
+            })
+        }
+        fun scrollToEmpty() = compose.onNodeWithTag("sessionList").performScrollToKey("h:anyrouter.top")
+        for ((tail, isDark, s) in styleVariants) {
+            shot("27-empty-profile$tail", isDark, nav = 0, look = s, fresh = true, open = { scrollToEmpty() }) {
+                SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}, initialInkTab = allTab)
+            }
+            shot("27-forget-profile$tail", isDark, nav = 0, look = s, fresh = true, open = {
+                scrollToEmpty()
+                compose.onNodeWithTag("forgetProfile:anyrouter.top").performClick()
+            }) { SessionsScreen(list, {}, {}, {}, { _, _ -> }, {}, {}, initialInkTab = allTab) }
+            shot("27-session-stopping$tail", isDark, nav = 0, look = s, fresh = true, open = {
+                compose.onNodeWithTag("sessionList").performScrollToKey("g:default")
+            }) { SessionsScreen(inFlight, {}, {}, {}, { _, _ -> }, {}, {}, initialInkTab = allTab) }
+            if (s == UiStyle.Ink) {
+                shot("27-active-fork-tree$tail", isDark, nav = 0, look = s, fresh = true) {
+                    SessionsScreen(list.copy(groups = groupSessions(active, emptyMap())), {}, {}, {}, { _, _ -> }, {}, {})
+                }
+            }
+        }
+    }
+
     /**
      * Round 5 items 9 and 11 as in the demo's 「自动演示一遍」 and 「新建到 new-repo」: a draft in place of
      * 周报整理's second line and back in its composer, and the sheet for a directory Claude Code does not
@@ -697,32 +736,83 @@ class ScreensTest {
         }
     }
 
-    /** Round 9: a reply with inline formulas, a block one, one wider than the bubble and one that cannot be drawn. */
+    /** Round 16: demo.html sample1 (mathematical derivation with inline matrices, bold math and wide formulas). */
     @Test fun formulaReplies() {
         compose.mainClock.autoAdvance = false
-        val reply = listOf(
-            "可以直接算。第 \$n\$ 次断开后等 \$d_n = \\min(2^{n-1},\\ 30)\$ 秒，没到上限前，前 \$k\$ 次一共等",
-            "\$\$",
-            "T_k = \\sum_{n=1}^{k} 2^{n-1} = 2^k - 1",
-            "\$\$",
-            "到上限以后每次多等 30 秒，所以 \$k > 5\$ 时是 \\(T_k = 31 + 30(k-5)\\)。",
-            "",
-            "加上抖动，每次等待乘一个 0.8 到 1.2 之间均匀分布的系数，平均下来总时间不变：",
-            "",
-            "\\[ \\mathbb{E}\\big[\\tilde T_k\\big] = \\sum_{n=1}^{k} \\mathbb{E}\\big[d_n \\cdot U(0.8,\\ 1.2)\\big] = T_k \\cdot \\frac{0.8 + 1.2}{2} = T_k \\]",
-            "",
-            "日志里的 \$PATH、「每月 \$5 到 \$10」这种写法不会被当成公式；写错的公式照原文显示，比如 \$\\backofff(n)\$。",
-        ).joinToString("\n")
+        val reply = """
+            你说得对，我上一轮看错了你的记号。你用的是**「第几行 + 第几列」定位元素**，不是 \(|0\rangle,|1\rangle\) 基矢标签。我重新按你的记号和基矢顺序走一遍，指出到底卡在哪。
+
+            ## 先统一你的记号
+
+            你取 ${'$'}B=\begin{pmatrix}1&0\\0&0\end{pmatrix}${'$'}，也就是基矢顺序是 ${'$'}(|b_1\rangle,|b_2\rangle)${'$'}，其中 ${'$'}|b_1\rangle${'$'} 是本征值 1 的态，${'$'}|b_2\rangle${'$'} 是本征值 0 的态。
+
+            你写的「${'$'}A_{ij}${'$'}」就是**第 i 行、第 j 列**的元素。比如 ${'$'}A_{21}${'$'} 是第 2 行第 1 列，不是「从第 2 个基矢到第 1 个基矢」——其实是一回事，但关键是 **${'$'}A_{21}${'$'} 属于第 1 列**。
+
+            ## 你算不出的根源：把「列」搞混了
+
+            你写的最后两行：
+            ${'$'}${'$'}|A_{11}|^2+|A_{21}|^2=1${'$'}${'$'}
+            ${'$'}${'$'}|A_{11}|^2+|A_{21}|^2=|A_{12}|^2+(A_{21}^*)^2=\cdots=0${'$'}${'$'}
+
+            问题出在这里：**第二行把一个等于 1 的量接着写成了等于 0**。你原本可能想写两个独立的方程：
+
+            - 第 1 列（对应 B 的本征值 1）：${'$'}|A_{11}|^2+|A_{21}|^2=1${'$'}
+            - 第 2 列（对应 B 的本征值 0）：${'$'}|A_{12}|^2+|A_{22}|^2=0${'$'}
+
+            但你把第二个写成了 ${'$'}|A_{11}|^2+|A_{21}|^2 = \cdots =0${'$'}，这就和第一行矛盾了。这就是你卡住的地方。
+
+            ## 按你的记号，正确走完
+
+            **第一步**：${'$'}B=A^+A=\mathrm{diag}(1,0)${'$'}，按「行+列」读矩阵元：
+
+            - ${'$'}B_{11}=1${'$'}：${'$'}(A^+A)_{11}=A_{11}^*A_{11}+A_{21}^*A_{21}=|A_{11}|^2+|A_{21}|^2=1${'$'}
+            - ${'$'}B_{22}=0${'$'}：${'$'}(A^+A)_{22}=A_{12}^*A_{12}+A_{22}^*A_{22}=|A_{12}|^2+|A_{22}|^2=0\ \Rightarrow\ A_{12}=A_{22}=0${'$'}
+
+            这里关键：${'$'}(A^+A)_{11}${'$'} 要乘以 A 的**第 1 列** ${'$'}(A_{11},A_{21})${'$'}，${'$'}(A^+A)_{22}${'$'} 用 A 的**第 2 列** ${'$'}(A_{12},A_{22})${'$'}。你之前写 ${'$'}A^+=\begin{pmatrix}A_{11}^*&A_{21}^*\\A_{12}^*&A_{22}^*\end{pmatrix}${'$'} 是对的，但乘的时候把列配对错了。
+
+            **第二步**：现在 ${'$'}A=\begin{pmatrix}A_{11}&0\\A_{21}&0\end{pmatrix}${'$'}。
+
+            由 ${'$'}A^2=0${'$'}：
+            ${'$'}${'$'}A^2=\begin{pmatrix}A_{11}&0\\A_{21}&0\end{pmatrix}^2=\begin{pmatrix}A_{11}^2&0\\A_{21}A_{11}&0\end{pmatrix}=0${'$'}${'$'}
+
+            所以 ${'$'}A_{11}^2=0\Rightarrow A_{11}=0${'$'}。
+
+            **第三步**：代回 ${'$'}|A_{11}|^2+|A_{21}|^2=1${'$'}，得 ${'$'}|A_{21}|=1${'$'}，即 ${'$'}A_{21}=e^{i\alpha}${'$'}。
+
+            **结论**（按你的基矢顺序）：
+            ${'$'}${'$'}A=\begin{pmatrix}0&0\\e^{i\alpha}&0\end{pmatrix}${'$'}${'$'}
+
+            这正是教材答案 ${'$'}\begin{pmatrix}0&e^{i\alpha}\\0&0\end{pmatrix}${'$'} 在你的基矢排序下的形式——因为你的 B 是 ${'$'}\mathrm{diag}(1,0)${'$'}，教材的是 ${'$'}\mathrm{diag}(0,1)${'$'}，两者差一个基矢交换。
+
+            ## 一句话总结你卡住的原因
+
+            你写了 ${'$'}B_{22}=0${'$'} 的方程，却把它的左边错写成了 ${'$'}B_{11}${'$'} 的表达式（第 1 列的模长平方和），所以从 1 跳到 0 自相矛盾，算不下去。**只要把「${'$'}B_{22}${'$'} 用 A 的第 2 列、${'$'}B_{11}${'$'} 用 A 的第 1 列」分开写，立刻就能得出 ${'$'}A_{12}=A_{22}=0${'$'}，后面就通了。**
+
+            喵呜~
+        """.trimIndent()
         val chat = ChatUiState(
             session = session("s20", "退避说明", SessionState.Idle, "default", context = SessionContext(28_000, 200_000)), loading = false,
             model = "claude-opus-5-5", permissionMode = "default",
             items = listOf(
-                ChatItem(1, ItemKind.USER, text = "连着失败 k 次一共要等多久？给个公式"),
+                ChatItem(1, ItemKind.USER, text = "按我写的行和列记号再核对一遍，我算出来为什么矛盾了？"),
                 ChatItem(2, ItemKind.ASSISTANT, text = reply),
             ),
         )
         for (s in UiStyle.entries) for (isDark in listOf(false, true)) {
             shot("24-chat-math-${s.name.lowercase()}${if (isDark) "-dark" else ""}", isDark, look = s, fresh = true) { ChatScreen(chat, ChatActions()) }
+        }
+
+        val fractionReply = """
+            设每次退避时间为 ${'$'}T_k${'$'}，那么平均等待是 ${'$'}\frac{a+b}{c+d}${'$'} 乘以基准间隔，再加上抖动项 ${'$'}\frac{1}{2}\sigma${'$'}；如果把重试概率写成 ${'$'}p = \frac{n}{n+1}${'$'}，整段推导里分式会出现在第二行和第三行，用来检查分式和上下两行的字有没有碰到。连分式 ${'$'}\frac{1}{1+\frac{1}{x}}${'$'} 也留在行内，最后的修正系数是 ${'$'}\dfrac{a+b}{c+d}${'$'}，它更高，应当单独占一行。
+        """.trimIndent()
+        val fractionChat = chat.copy(
+            items = listOf(
+                ChatItem(1, ItemKind.USER, text = "分式留在行内会碰到上下行吗？连分式呢？"),
+                ChatItem(2, ItemKind.ASSISTANT, text = fractionReply),
+            ),
+        )
+        for (s in UiStyle.entries) for (isDark in listOf(false, true)) {
+            shot("24b-chat-fraction-${s.name.lowercase()}${if (isDark) "-dark" else ""}", isDark, look = s, fresh = true) { ChatScreen(fractionChat, ChatActions()) }
         }
     }
 
@@ -1312,6 +1402,53 @@ class ScreensTest {
             )),
             ChatItem(9, ItemKind.ASSISTANT, text = "用这张做 README 的头图可以吗？"),
         )
+    }
+
+    /** Visual check for split-reply seams in Tile and Ink (light & dark) and Plate. */
+    @Test fun splitReplySeams() {
+        compose.mainClock.autoAdvance = false
+        val longReply = buildString {
+            // Chunk 0 (~3100) + Chunk 1 (~3100) push total past 6000; short Chunk 2 puts the seam mid-screen on open.
+            append("第一块内容：").append("重连与退避说明。".repeat(390)).append("\n\n")
+            append("```go\n")
+            append((1..80).joinToString("\n") { i -> "func step$i(n int) int { return n + $i } // 第 $i 行示例说明" })
+            append("\n```\n\n")
+            append("## 第三块：接缝下方\n\n")
+            append("这是接缝下方的短段，素卡和浮墨的底色、圆角与描边在接缝处应完全连续，不能出现横线或列表间距。\n\n")
+            append("```sh\ngo test ./...\n```\n\n")
+            append("最底部段落收尾，同时展示底部圆角与连续边框。")
+        }
+        val chat = ChatUiState(
+            session = session("s-split", "超长回复接缝", SessionState.Idle, "default"),
+            loading = false,
+            items = listOf(
+                ChatItem(1, ItemKind.USER, text = "把整套重试和退避逻辑详细展开写一下。"),
+                ChatItem(2, ItemKind.ASSISTANT, text = longReply),
+            ),
+        )
+        val variants = listOf(
+            Triple("seam-tile-light", false, UiStyle.Tile),
+            Triple("seam-tile-dark", true, UiStyle.Tile),
+            Triple("seam-ink-light", false, UiStyle.Ink),
+            Triple("seam-ink-dark", true, UiStyle.Ink),
+            Triple("seam-plate-light", false, UiStyle.Plate),
+        )
+        for ((name, isDark, look) in variants) {
+            shot(name, isDark = isDark, look = look, fresh = true) { ChatScreen(chat, ChatActions()) }
+        }
+        // Short chunk 0 followed by a >6000-char single block puts the top corners and chunk 0 -> chunk 1 seam in view.
+        val topReply = "第一块：顶部短段，用来核对素卡和浮墨第一块的上圆角以及与第二块之间的接缝。\n\n```go\n" +
+            (1..140).joinToString("\n") { i -> "func step$i(n int) int { return n + $i } // 第 $i 行示例说明" } + "\n```"
+        val topChat = chat.copy(items = listOf(ChatItem(1, ItemKind.ASSISTANT, text = topReply)))
+        for ((name, isDark, look) in listOf(
+            Triple("seam-ink-top-light", false, UiStyle.Ink),
+            Triple("seam-ink-top-dark", true, UiStyle.Ink),
+            Triple("seam-tile-top-light", false, UiStyle.Tile),
+        )) {
+            shot(name, isDark = isDark, look = look, fresh = true, open = {
+                compose.onNodeWithTag("chatList").performScrollToIndex(1)
+            }) { ChatScreen(topChat, ChatActions()) }
+        }
     }
 
     /** The machine's plan usage: 60% of the 5 hours, starting over in 3 hours, and 70% of the week. */

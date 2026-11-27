@@ -25,11 +25,11 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.draw.clipToBounds
 import kotlin.math.roundToInt
 import androidx.compose.foundation.Canvas
-import androidx.compose.runtime.Stable
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -37,6 +37,8 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -61,7 +63,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -91,6 +92,7 @@ import clauderc.app.ui.components.plateSweepFill
 import clauderc.app.ui.components.topLine
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -104,6 +106,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -112,6 +115,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -1575,9 +1579,9 @@ internal fun MessageList(
     val items = remember(state.items, partial?.text) {
         if (partial == null) state.items else state.items + ChatItem(PARTIAL_SEQ, ItemKind.ASSISTANT, text = partial.text)
     }
-    val keys = if (partial == null) state.keys else state.keys + (PARTIAL_SEQ to partial.key)
-    // Runs of searches, reads and commands are one entry, keyed by their first item.
-    val runs = remember(items) { chatRuns(items) }.asReversed()
+    val keys = remember(state.keys, partial?.key) {
+        if (partial == null) state.keys else state.keys + (PARTIAL_SEQ to partial.key)
+    }
     // The list is drawn bottom-up: the newest item is index 0, so the first page opens at the bottom
     // and older pages are appended at the top without moving what the user is reading.
     val autoLoadOlder by rememberUpdatedState(state.hasMore && !state.loadingOlder && !state.olderFailed && state.online)
@@ -1593,6 +1597,40 @@ internal fun MessageList(
     // A session at work or waiting on the user does not rewind, so its messages do not slide.
     val rewind = onRewind?.let { ask -> remember(ask) { RewindHub(ask) } }
     rewind?.enabled = state.online && state.state == SessionState.Idle && state.pending == null && !state.rewinding
+    // Replies that arrive while the page is open grow in and type out; what was already there, what
+    // chat.open brought, older pages and items scrolling back into view just show. Null until chat.open
+    // answered and its items have been drawn.
+    val newest = remember { Newest() }
+    val parsedCache = remember { ReplyParseCache() }
+    val typers = remember { ReplyTypers() }
+    val chunkLayouts = remember { HashMap<Any, ReplyLayout>() }
+    val hasOlder = state.hasMore || state.loadingOlder
+    // Only recompute runs and parsed reply entries when message items, keys, or older-spinner state change,
+    // so frequent unrelated updates (like the 250ms status line) reuse the built entries without walking items.
+    val prepared = remember(items, keys, hasOlder) {
+        prepareMessageEntries(items, keys, hasOlder, newest, parsedCache, typers)
+    }
+    val visibleCounts = if (prepared.splitTyping.isEmpty()) {
+        emptyList()
+    } else {
+        prepared.splitTyping.map { slot ->
+            val subscribed = slot.typer.visibleChunks(slot.parsed.chunkStarts)
+            if (slot.carried != null && slot.typer.reply !== slot.typingReply) {
+                visibleChunkCount(slot.parsed.chunkStarts, slot.carried.toInt(), slot.carried < slot.parsed.total)
+            } else {
+                subscribed
+            }
+        }
+    }
+    val entries = remember(prepared, visibleCounts) {
+        prepared.buildEntries(visibleCounts)
+    }
+    val outgoingReversed = remember(state.outgoing) { state.outgoing.asReversed() }
+    for ((baseKey, typer) in prepared.activeTypers) {
+        androidx.compose.runtime.key(baseKey) {
+            if (typer.typing) LaunchedEffect(typer) { typer.typeOut() }
+        }
+    }
     // A new bottom item that arrives while the list sits at the bottom is pinned there in the same
     // frame. Left alone, the list keeps the item that was at the bottom in place, so the new one lands
     // below the edge and a scroll has to catch up: the jump of plans.md 1. Away from the bottom
@@ -1601,25 +1639,35 @@ internal fun MessageList(
     LaunchedEffect(list) {
         snapshotFlow { list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset == 0 }.collect { pin.atBottom = it }
     }
+    // If a reply the user is reading away from the bottom changes chunk boundaries (e.g. a partial
+    // crossing 6000 chars), map the anchored passage to the new chunk in the same frame so reading stays put.
+    val prefixCount = (if (note != null) 1 else 0) + outgoingReversed.size
+    val restoredScroll = restoreSplitScroll(list, chunkLayouts, prepared.layoutSnapshots, entries, prefixCount)
     val bottomKey: Any? = when {
         note != null -> "notice"
         state.outgoing.isNotEmpty() -> outgoingKey(state.outgoing.last())
-        else -> items.lastOrNull()?.let { keys[it.seq] ?: it.seq }
+        else -> entries.firstOrNull()?.key
     }
     if (bottomKey != pin.key) {
-        if (pin.key != null && pin.atBottom) list.requestScrollToItem(0)
+        if (!restoredScroll && pin.key != null && pin.atBottom) list.requestScrollToItem(0)
         pin.key = bottomKey
     }
-    // Replies that arrive while the page is open grow in and type out; what was already there, what
-    // chat.open brought, older pages and items scrolling back into view just show. Null until chat.open
-    // answered and its items have been drawn.
-    val newest = remember { Newest() }
-    val growAfter = newest.seq
     SideEffect {
         if (state.opened) {
             val last = state.items.lastOrNull()?.seq ?: 0
             if (last > (newest.seq ?: Long.MIN_VALUE)) newest.seq = last
+            partial?.key?.let { newest.partials.add(it) }
         }
+        if (prepared.pendingCommits.isNotEmpty()) {
+            for ((typer, next, progress) in prepared.pendingCommits) typer.commit(next, progress)
+            prepared.pendingCommits.clear()
+        }
+        typers.prune(prepared.liveReplyKeys)
+        parsedCache.prune(prepared.liveReplyKeys)
+        for (snap in prepared.layoutSnapshots) {
+            chunkLayouts[snap.baseKey] = ReplyLayout(snap.parsed.chunkStarts, snap.parsed.chunkLengths, snap.parsed.total)
+        }
+        chunkLayouts.keys.retainAll(prepared.liveReplyKeys)
     }
     val tools = ToolOutputs(state.fullResults, state.fetchingResults, actions.onToolOutput, openImage, actions.onOpenAgent, live = state.state != SessionState.Stopped)
     // The snackbar is where a copied link says so.
@@ -1634,38 +1682,58 @@ internal fun MessageList(
         state = list,
         reverseLayout = true,
         contentPadding = PaddingValues(start = sp.sp4, end = sp.sp4, top = sp.sp4 + padTop, bottom = sp.sp5 + padBottom),
-        verticalArrangement = Arrangement.spacedBy(sp.sp2, Alignment.Bottom),
+        // Spacing lives on individual message items instead of spacedBy so chunks of one split reply touch seamlessly.
+        verticalArrangement = Arrangement.Bottom,
     ) {
         if (note != null) {
-            item(key = "notice") { Note(note, spinner = state.waking || state.rewinding) }
+            item(key = "notice") {
+                val topGap = outgoingReversed.isNotEmpty() || entries.isNotEmpty() || hasOlder
+                Box(Modifier.padding(top = if (topGap) sp.sp2 else 0.dp)) {
+                    Note(note, spinner = state.waking || state.rewinding)
+                }
+            }
         }
         // contentType lets the list reuse a bubble's composition for the next bubble of the same kind.
         // No placement animation: with a reply growing in, the items above would trail behind its
         // growth and catch up, which reads as a bounce. A delivered message keeps its bubble's key.
-        items(state.outgoing.asReversed(), key = ::outgoingKey, contentType = { ItemKind.USER }) { out ->
-            Box(Modifier.animateItem(fadeInSpec = Motion.enter(), placementSpec = null, fadeOutSpec = Motion.exit())) { OutgoingBubble(out) }
+        itemsIndexed(outgoingReversed, key = { _, out -> outgoingKey(out) }, contentType = { _, _ -> ItemKind.USER }) { i, out ->
+            val topGap = i < outgoingReversed.lastIndex || entries.isNotEmpty() || hasOlder
+            Box(
+                Modifier
+                    .animateItem(fadeInSpec = Motion.enter(), placementSpec = null, fadeOutSpec = Motion.exit())
+                    .padding(top = if (topGap) sp.sp2 else 0.dp),
+            ) { OutgoingBubble(out) }
         }
         items(
-            runs,
-            key = { keys[it.first().seq] ?: it.first().seq },
-            contentType = { run -> run.first().let { if (run.size > 1) "group" else if (it.tool?.let(::isCommand) == true) "command" else it.kind } },
-        ) { run ->
-            val item = run.first()
-            // The screen's reply is new only the first time its bubble is drawn, not when it scrolls back into view.
-            val grow = remember {
-                item.kind == ItemKind.ASSISTANT && growAfter != null &&
-                    if (item.seq == PARTIAL_SEQ) newest.partials.add(partial!!.key) else item.seq > growAfter
-            }
-            Box(Modifier.animateItem(fadeInSpec = if (grow) null else Motion.enter(), placementSpec = null, fadeOutSpec = Motion.exit())) {
-                val working = state.state == SessionState.Working
-                when {
-                    run.size > 1 -> ToolGroupRow(run.mapNotNull { it.tool }, working, tools)
-                    grow -> GrowIn { ChatItemView(item, working, tools, typed = true) }
-                    else -> ChatItemView(item, working, tools)
+            entries,
+            key = { it.key },
+            contentType = { it.contentType },
+        ) { entry ->
+            val working = state.state == SessionState.Working
+            when (entry) {
+                is ChatEntry.Run -> {
+                    Box(
+                        Modifier
+                            .animateItem(fadeInSpec = Motion.enter(), placementSpec = null, fadeOutSpec = Motion.exit())
+                            .padding(top = if (entry.topGap) sp.sp2 else 0.dp),
+                    ) {
+                        if (entry.items.size > 1) ToolGroupRow(entry.items.mapNotNull { it.tool }, working, tools)
+                        else ChatItemView(entry.items.first(), working, tools)
+                    }
+                }
+                is ChatEntry.ReplyChunk -> {
+                    val grow = remember { entry.grow }
+                    Box(
+                        Modifier
+                            .animateItem(fadeInSpec = if (grow || !entry.first) null else Motion.enter(), placementSpec = null, fadeOutSpec = Motion.exit())
+                            .padding(top = if (entry.topGap) sp.sp2 else 0.dp),
+                    ) {
+                        if (grow) GrowIn { AssistantChunk(entry) } else AssistantChunk(entry)
+                    }
                 }
             }
         }
-        if (state.hasMore || state.loadingOlder) {
+        if (hasOlder) {
             item(key = "older") {
                 if (state.olderFailed && !state.loadingOlder) {
                     Box(
@@ -1685,6 +1753,353 @@ internal fun MessageList(
             }
         }
     }
+    }
+}
+
+private sealed interface ChatEntry {
+    val key: Any
+    val contentType: Any
+    val topGap: Boolean
+
+    data class Run(
+        override val key: Any,
+        override val contentType: Any,
+        override val topGap: Boolean,
+        val items: List<ChatItem>,
+    ) : ChatEntry
+
+    data class ReplyChunk(
+        override val key: Any,
+        override val topGap: Boolean,
+        val item: ChatItem,
+        val parsed: ParsedReply?,
+        val typingReply: TypingReply?,
+        val typer: Typer?,
+        val carriedShown: Float?,
+        val chunkIndex: Int,
+        val first: Boolean,
+        val last: Boolean,
+        val marks: List<String>,
+        val grow: Boolean,
+    ) : ChatEntry {
+        override val contentType: Any get() = ItemKind.ASSISTANT
+    }
+}
+
+internal class ParsedReply(
+    val text: String,
+    val body: String,
+    val marks: List<String>,
+    val blocks: List<MdBlock>,
+    val total: Int,
+    val chunks: List<IntRange>,
+    val chunkBlocks: List<List<MdBlock>>,
+    val chunkStarts: IntArray,
+    val chunkLengths: IntArray,
+) {
+    private var previewReply: TypingReply? = null
+    private var formalReply: TypingReply? = null
+
+    fun typingReply(preview: Boolean): TypingReply = if (preview) {
+        previewReply ?: TypingReply(text, blocks, total, preview = true).also { previewReply = it }
+    } else {
+        formalReply ?: TypingReply(text, blocks, total, preview = false).also { formalReply = it }
+    }
+}
+
+/** Caches parsed replies by stable reply key so streaming updates overwrite in place without leaking old versions. */
+internal class ReplyParseCache {
+    private val map = HashMap<Any, ParsedReply>()
+
+    val size: Int get() = map.size
+
+    internal fun getOrParse(key: Any, text: String): ParsedReply {
+        val hit = map[key]
+        if (hit != null && hit.text == text) return hit
+        return parseReply(text).also { map[key] = it }
+    }
+
+    fun prune(liveKeys: Set<Any>) {
+        map.keys.retainAll(liveKeys)
+    }
+}
+
+private class ReplyLayout(val chunkStarts: IntArray, val chunkLengths: IntArray, val total: Int)
+
+private class LayoutSnapshot(
+    val baseKey: Any,
+    val parsed: ParsedReply,
+    val typer: Typer?,
+    val carried: Float?,
+)
+
+private class SplitTypingSlot(
+    val insertIndex: Int,
+    val topGapFirst: Boolean,
+    val baseKey: Any,
+    val item: ChatItem,
+    val parsed: ParsedReply,
+    val typingReply: TypingReply,
+    val typer: Typer,
+    val carried: Float?,
+    val growFirst: Boolean,
+)
+
+private class PreparedMessageList(
+    private val staticEntries: List<ChatEntry>,
+    val splitTyping: List<SplitTypingSlot>,
+    val activeTypers: List<Pair<Any, Typer>>,
+    val pendingCommits: MutableList<Triple<Typer, TypingReply, Float>>,
+    val liveReplyKeys: Set<Any>,
+    val layoutSnapshots: List<LayoutSnapshot>,
+) {
+    private val reversedStatic: List<ChatEntry> by lazy { staticEntries.asReversed() }
+
+    fun buildEntries(visibleCounts: List<Int>): List<ChatEntry> {
+        if (splitTyping.isEmpty()) return reversedStatic
+        val out = ArrayList<ChatEntry>(staticEntries.size + visibleCounts.sum())
+        var cursor = 0
+        for ((si, slot) in splitTyping.withIndex()) {
+            while (cursor < slot.insertIndex) out += staticEntries[cursor++]
+            val chunkCount = maxOf(slot.parsed.chunks.size, 1)
+            val visibleCount = visibleCounts[si]
+            for (k in 0 until visibleCount) {
+                out += ChatEntry.ReplyChunk(
+                    key = "${slot.baseKey}#$k",
+                    topGap = k == 0 && slot.topGapFirst,
+                    item = slot.item,
+                    parsed = slot.parsed,
+                    typingReply = slot.typingReply,
+                    typer = slot.typer,
+                    carriedShown = slot.carried,
+                    chunkIndex = k,
+                    first = k == 0,
+                    last = k == visibleCount - 1,
+                    marks = if (k == chunkCount - 1) slot.parsed.marks else emptyList(),
+                    grow = k == 0 && slot.growFirst,
+                )
+            }
+        }
+        while (cursor < staticEntries.size) out += staticEntries[cursor++]
+        return out.asReversed()
+    }
+}
+
+private fun prepareMessageEntries(
+    items: List<ChatItem>,
+    keys: Map<Long, String>,
+    hasOlder: Boolean,
+    newest: Newest,
+    parsedCache: ReplyParseCache,
+    typers: ReplyTypers,
+): PreparedMessageList {
+    val growAfter = newest.seq
+    val runs = chatRuns(items)
+    val staticEntries = ArrayList<ChatEntry>(runs.size)
+    val splitTyping = ArrayList<SplitTypingSlot>()
+    val activeTypers = ArrayList<Pair<Any, Typer>>()
+    val pendingCommits = ArrayList<Triple<Typer, TypingReply, Float>>()
+    val liveReplyKeys = HashSet<Any>()
+    val layoutSnapshots = ArrayList<LayoutSnapshot>()
+    var hasPreceding = hasOlder
+    for (run in runs) {
+        val item = run.first()
+        val baseKey: Any = keys[item.seq] ?: item.seq
+        if (run.size > 1 || item.kind != ItemKind.ASSISTANT) {
+            val contentType: Any = if (run.size > 1) "group" else if (item.tool?.let(::isCommand) == true) "command" else item.kind
+            staticEntries += ChatEntry.Run(
+                key = baseKey,
+                contentType = contentType,
+                topGap = hasPreceding,
+                items = run,
+            )
+            hasPreceding = true
+            continue
+        }
+        liveReplyKeys += baseKey
+        val text = item.text.orEmpty()
+        val preview = item.seq == PARTIAL_SEQ
+        val isNew = growAfter != null && if (preview) baseKey !in newest.partials else item.seq > growAfter
+        val existing = typers.get(baseKey)
+        if (existing == null && !isNew && !preview && text.length <= SPLIT_REPLY_CHARS) {
+            staticEntries += ChatEntry.ReplyChunk(
+                key = "$baseKey#0",
+                topGap = hasPreceding,
+                item = item,
+                parsed = null,
+                typingReply = null,
+                typer = null,
+                carriedShown = null,
+                chunkIndex = 0,
+                first = true,
+                last = true,
+                marks = emptyList(),
+                grow = false,
+            )
+            hasPreceding = true
+            continue
+        }
+        val parsed = parsedCache.getOrParse(baseKey, text)
+        val typingReply = parsed.typingReply(preview)
+        val typer = if (existing != null || isNew || preview) {
+            typers.obtain(baseKey, typingReply, typed = isNew)
+        } else {
+            null
+        }
+        var carried: Float? = null
+        if (typer != null) {
+            activeTypers += baseKey to typer
+            val old = typer.reply
+            if (old.text != text || old.preview != preview) {
+                carried = typer.progressFor(typingReply)
+                pendingCommits += Triple(typer, typingReply, carried)
+            }
+        }
+        layoutSnapshots += LayoutSnapshot(baseKey, parsed, typer, carried)
+        val chunkCount = maxOf(parsed.chunks.size, 1)
+        val growFirst = isNew && parsed.total <= TYPE_JUMP_GAP
+        if (parsed.chunks.size > 1 && typer != null) {
+            splitTyping += SplitTypingSlot(
+                insertIndex = staticEntries.size,
+                topGapFirst = hasPreceding,
+                baseKey = baseKey,
+                item = item,
+                parsed = parsed,
+                typingReply = typingReply,
+                typer = typer,
+                carried = carried,
+                growFirst = growFirst,
+            )
+        } else {
+            for (k in 0 until chunkCount) {
+                staticEntries += ChatEntry.ReplyChunk(
+                    key = "$baseKey#$k",
+                    topGap = k == 0 && hasPreceding,
+                    item = item,
+                    parsed = parsed,
+                    typingReply = typingReply,
+                    typer = typer,
+                    carriedShown = carried,
+                    chunkIndex = k,
+                    first = k == 0,
+                    last = k == chunkCount - 1,
+                    marks = if (k == chunkCount - 1) parsed.marks else emptyList(),
+                    grow = k == 0 && growFirst,
+                )
+            }
+        }
+        hasPreceding = true
+    }
+    return PreparedMessageList(staticEntries, splitTyping, activeTypers, pendingCommits, liveReplyKeys, layoutSnapshots)
+}
+
+private fun restoreSplitScroll(
+    list: androidx.compose.foundation.lazy.LazyListState,
+    oldLayouts: Map<Any, ReplyLayout>,
+    snapshots: List<LayoutSnapshot>,
+    entries: List<ChatEntry>,
+    prefixCount: Int,
+): Boolean {
+    if (snapshots.isEmpty() || oldLayouts.isEmpty()) return false
+    val changed = snapshots.filter { snap ->
+        val old = oldLayouts[snap.baseKey]
+        old != null && !old.chunkStarts.contentEquals(snap.parsed.chunkStarts)
+    }
+    if (changed.isEmpty()) return false
+    // Read live scroll state without subscribing MessageList to scroll offsets.
+    val (firstIdx, firstOff, anchor) = Snapshot.withoutReadObservation {
+        val idx = list.firstVisibleItemIndex
+        val off = list.firstVisibleItemScrollOffset
+        val info = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == idx }
+        Triple(idx, off, info)
+    }
+    if ((firstIdx == 0 && firstOff == 0) || anchor == null || anchor.size <= 0) return false
+    val anchorKey = anchor.key as? String ?: return false
+    val snap = changed.firstOrNull { anchorKey.startsWith("${it.baseKey}#") } ?: return false
+    val old = oldLayouts.getValue(snap.baseKey)
+    val prefix = "${snap.baseKey}#"
+    val oldK = anchorKey.removePrefix(prefix).toIntOrNull() ?: return false
+    if (oldK !in old.chunkStarts.indices) return false
+
+    val oldShown = (snap.typer?.shown?.toInt() ?: old.total).coerceAtLeast(1)
+    val newShown = (snap.carried?.toInt() ?: snap.typer?.shown?.toInt() ?: snap.parsed.total).coerceAtLeast(1)
+    val oldStart = old.chunkStarts[oldK]
+    val oldShownInChunk = (oldShown - oldStart).coerceIn(1, maxOf(old.chunkLengths[oldK], 1))
+    val newStarts = snap.parsed.chunkStarts
+    val newLengths = snap.parsed.chunkLengths
+    val visibleCount = entries.count { it is ChatEntry.ReplyChunk && (it.key as? String)?.startsWith(prefix) == true }
+    if (visibleCount <= 0) return false
+    if (oldK < visibleCount && oldStart == newStarts[oldK]) {
+        val newShownInOldK = (newShown - oldStart).coerceIn(1, maxOf(newLengths[oldK], 1))
+        if (newShownInOldK == oldShownInChunk) return false
+    }
+
+    // 1 -> N split with identical rendered content preserves total height across visible chunks (0px seam),
+    // so requesting the bottommost visible chunk with the same offset lets LazyListMeasure overflow exact pixels.
+    if (old.chunkStarts.size == 1 && oldShown == newShown) {
+        val eIdx = entries.indexOfFirst { it.key == "$prefix${visibleCount - 1}" }
+        if (eIdx >= 0) {
+            list.requestScrollToItem(prefixCount + eIdx, firstOff)
+            return true
+        }
+    }
+
+    val fromBottomFrac = (firstOff.toFloat() / anchor.size).coerceIn(0f, 1f)
+    val oldCharPos = oldStart + (1f - fromBottomFrac) * oldShownInChunk
+    val newCharPos = (oldCharPos * (newShown.toFloat() / oldShown)).roundToInt().coerceIn(0, newShown)
+    var newK = 0
+    for (k in 0 until visibleCount) {
+        if (newStarts[k] <= newCharPos) newK = k else break
+    }
+    val newStart = newStarts[newK]
+    val newShownInChunk = (newShown - newStart).coerceIn(1, maxOf(newLengths[newK], 1))
+    val newEnd = newStart + newShownInChunk
+    val pxPerChar = anchor.size.toFloat() / oldShownInChunk
+    val estOffset = ((newEnd - newCharPos).coerceIn(0, newShownInChunk) * pxPerChar).roundToInt()
+    val eIdx = entries.indexOfFirst { it.key == "$prefix$newK" }
+    if (eIdx < 0) return false
+    list.requestScrollToItem(prefixCount + eIdx, estOffset)
+    return true
+}
+
+internal fun parseReply(text: String): ParsedReply {
+    val (body, marks) = splitMarkers(text)
+    val blocks = if (body.isBlank()) emptyList() else mdBlocks(body)
+    val lengths = IntArray(blocks.size) { blocks[it].shownLength() }
+    val total = lengths.sum()
+    val chunks = replyChunks(blocks)
+    val chunkBlocks = chunks.map { blocks.subList(it.first, it.last + 1) }
+    val chunkStarts = IntArray(chunks.size)
+    val chunkLengths = IntArray(chunks.size)
+    var offset = 0
+    for ((ci, range) in chunks.withIndex()) {
+        chunkStarts[ci] = offset
+        var len = 0
+        for (bi in range) len += lengths[bi]
+        chunkLengths[ci] = len
+        offset += len
+    }
+    return ParsedReply(text, body, marks, blocks, total, chunks, chunkBlocks, chunkStarts, chunkLengths)
+}
+
+private fun visibleChunkCount(chunkStarts: IntArray, shown: Int, typing: Boolean): Int {
+    if (chunkStarts.size <= 1) return 1
+    if (!typing) return chunkStarts.size
+    var n = 1
+    while (n < chunkStarts.size && shown > chunkStarts[n]) n++
+    return n
+}
+
+private class ReplyTypers {
+    private val map = HashMap<Any, Typer>()
+
+    fun get(key: Any): Typer? = map[key]
+
+    fun obtain(key: Any, reply: TypingReply, typed: Boolean): Typer =
+        map[key] ?: Typer(if (typed) 0f else reply.total.toFloat(), reply).also { map[key] = it }
+
+    fun prune(liveKeys: Set<Any>) {
+        map.keys.retainAll(liveKeys)
     }
 }
 
@@ -1736,12 +2151,11 @@ private fun GrowIn(content: @Composable () -> Unit) {
     ) { content() }
 }
 
-/** [typed] marks a reply that came in while the page is open: it types out from the first character. */
 @Composable
-private fun ChatItemView(item: ChatItem, working: Boolean, tools: ToolOutputs, typed: Boolean = false) {
+private fun ChatItemView(item: ChatItem, working: Boolean, tools: ToolOutputs) {
     when (item.kind) {
         ItemKind.USER -> UserBubble(item, tools.open)
-        ItemKind.ASSISTANT -> AssistantItem(item.text.orEmpty(), typed)
+        ItemKind.ASSISTANT -> Unit
         ItemKind.TOOL -> item.tool?.let {
             when {
                 isSendMessage(it) -> {
@@ -1760,14 +2174,25 @@ private fun ChatItemView(item: ChatItem, working: Boolean, tools: ToolOutputs, t
     }
 }
 
-/** Where the text of a reply starts inside its bubble; grey lines start there too. */
-private val ReplyTextStart = 16.dp
+/** Where the text of a reply starts inside the message column; grey lines align with it. */
+private fun replyTextStart(style: UiStyle): Dp = when (style) {
+    UiStyle.Clear -> 0.dp
+    UiStyle.Plate, UiStyle.Tile -> 14.dp
+    UiStyle.Ink -> 16.dp
+}
+
+/** Horizontal inset of a tool or subagent row inside the message column (demo.html .tline / .tool-h). */
+private fun toolRowHorizontal(style: UiStyle): Dp = when (style) {
+    UiStyle.Tile -> 14.dp
+    UiStyle.Clear, UiStyle.Plate, UiStyle.Ink -> 0.dp
+}
 
 /** A short grey line in the message flow, like Claude Code's 「Interrupted」, its left edge lined up with Claude's text. */
 @Composable
 private fun Note(text: String, spinner: Boolean = false) {
     val sp = Clauderc.spacing
-    Row(Modifier.fillMaxWidth().padding(start = ReplyTextStart, end = ReplyTextStart, top = sp.sp2, bottom = sp.sp2), verticalAlignment = Alignment.CenterVertically) {
+    val side = replyTextStart(Clauderc.style)
+    Row(Modifier.fillMaxWidth().padding(start = side, end = side, top = sp.sp2, bottom = sp.sp2), verticalAlignment = Alignment.CenterVertically) {
         if (spinner) Spinner(size = 12.dp, color = Clauderc.colors.fg3)
         Text(text, Modifier.padding(start = if (spinner) sp.sp2 else 0.dp), fontSize = Clauderc.fontSizes.caption, color = Clauderc.colors.fg3)
     }
@@ -1781,22 +2206,56 @@ private fun Note(text: String, spinner: Boolean = false) {
 private fun PeerNote(title: String, body: String) {
     val c = Clauderc.colors
     val sp = Clauderc.spacing
-    Column(Modifier.fillMaxWidth().padding(horizontal = ReplyTextStart, vertical = sp.sp2), verticalArrangement = Arrangement.spacedBy(sp.sp1)) {
+    val side = replyTextStart(Clauderc.style)
+    Column(Modifier.fillMaxWidth().padding(horizontal = side, vertical = sp.sp2), verticalArrangement = Arrangement.spacedBy(sp.sp1)) {
         Text(title, fontSize = Clauderc.fontSizes.caption, color = c.fg3)
         Text(body, color = c.fg2, fontSize = 15.sp, lineHeight = 1.55.em)
     }
 }
 
 /**
- * A reply: its bubble, then the job-list lines a background session ends with, "result:",
- * "needs input:" or "failed:", taken out of the bubble and shown as written in grey, as the CLI prints them.
+ * One chunk of an assistant reply, plus any trailing job-list marker lines ("result:", "needs input:",
+ * "failed:") on its final chunk, shown outside the bubble in grey as the CLI prints them.
  */
 @Composable
-private fun AssistantItem(text: String, typed: Boolean = false) {
-    val (body, marks) = remember(text) { splitMarkers(text) }
-    if (marks.isEmpty()) return AssistantBubble(text, typed)
+private fun AssistantChunk(entry: ChatEntry.ReplyChunk) {
+    val text = entry.item.text.orEmpty()
+    val parsed = entry.parsed ?: remember(text) { parseReply(text) }
+    val marks = if (entry.parsed != null) entry.marks else parsed.marks
+    val hasBlocks = parsed.chunks.isNotEmpty()
+    val blocks = if (hasBlocks) parsed.chunkBlocks[entry.chunkIndex] else emptyList()
+    val chunkStart = if (hasBlocks) parsed.chunkStarts[entry.chunkIndex] else 0
+    val chunkLength = if (hasBlocks) parsed.chunkLengths[entry.chunkIndex] else 0
+    if (marks.isEmpty()) {
+        AssistantBubble(
+            blocks = blocks,
+            fullText = parsed.text,
+            total = parsed.total,
+            chunkStart = chunkStart,
+            chunkLength = chunkLength,
+            typer = entry.typer,
+            typingReply = entry.typingReply,
+            carriedShown = entry.carriedShown,
+            first = entry.first,
+            last = entry.last,
+        )
+        return
+    }
     Column(Modifier.fillMaxWidth()) {
-        if (body.isNotBlank()) AssistantBubble(body, typed)
+        if (parsed.body.isNotBlank()) {
+            AssistantBubble(
+                blocks = blocks,
+                fullText = parsed.text,
+                total = parsed.total,
+                chunkStart = chunkStart,
+                chunkLength = chunkLength,
+                typer = entry.typer,
+                typingReply = entry.typingReply,
+                carriedShown = entry.carriedShown,
+                first = entry.first,
+                last = entry.last,
+            )
+        }
         marks.forEach { Note(it) }
     }
 }
@@ -1877,20 +2336,88 @@ private fun UserBubbleLayout(text: String, pictures: Int, faded: Boolean, queued
 }
 
 @Composable
-private fun Modifier.bubble(mine: Boolean): Modifier {
+private fun Modifier.bubble(mine: Boolean, first: Boolean = true, last: Boolean = true): Modifier {
     val c = Clauderc.colors
     return when (Clauderc.style) {
-        UiStyle.Clear -> clip(RoundedCornerShape(22.dp)).background(if (mine) c.fg else c.surface)
-        UiStyle.Plate -> if (mine) background(c.fg) else drawBehind { drawRect(c.fg, size = Size(2.dp.toPx(), size.height)) }
+        UiStyle.Clear -> if (mine) clip(RoundedCornerShape(22.dp)).background(c.fg) else this
+        UiStyle.Plate -> if (mine) {
+            background(c.fg)
+        } else {
+            drawBehind { drawRect(c.line, size = Size(2.dp.toPx(), size.height)) }.padding(start = 2.dp)
+        }
         UiStyle.Tile -> if (mine) {
             clip(RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp)).background(c.accent)
         } else {
-            clip(RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp)).background(c.card)
+            val top = if (first) 16.dp else 0.dp
+            val bottom = if (last) 16.dp else 0.dp
+            val shape = if (first || last) RoundedCornerShape(top, top, bottom, bottom) else RectangleShape
+            clip(shape).background(c.surface)
         }
         UiStyle.Ink -> if (mine) {
             clip(RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp)).background(c.inverse)
+        } else if (first && last) {
+            val shape = RoundedCornerShape(22.dp, 22.dp, 22.dp, 8.dp)
+            clip(shape).background(c.card).border(1.dp, c.edge, shape)
         } else {
-            clip(RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp)).background(c.card).border(1.dp, c.edge, RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp))
+            // Split replies round only their outer top/bottom edges and leave touching seams open.
+            val top = if (first) 22.dp else 0.dp
+            val bottomEnd = if (last) 22.dp else 0.dp
+            val bottomStart = if (last) 8.dp else 0.dp
+            val shape = if (first || last) RoundedCornerShape(top, top, bottomEnd, bottomStart) else RectangleShape
+            clip(shape).background(c.card).inkChunkBorder(c.edge, first, last)
+        }
+    }
+}
+
+/** Draws Ink's 1dp reply outline without horizontal lines across split-chunk seams. */
+private fun Modifier.inkChunkBorder(color: Color, first: Boolean, last: Boolean): Modifier = drawWithCache {
+    val w = 1.dp.toPx()
+    val half = w / 2f
+    val path = if (!first && !last) {
+        null
+    } else {
+        Path().apply {
+            if (first) {
+                val r = minOf(22.dp.toPx(), size.width / 2f, size.height)
+                moveTo(half, size.height)
+                if (r > half) {
+                    lineTo(half, r)
+                    arcTo(Rect(half, half, 2 * r - half, 2 * r - half), 180f, 90f, false)
+                    lineTo(size.width - r, half)
+                    arcTo(Rect(size.width - 2 * r + half, half, size.width - half, 2 * r - half), 270f, 90f, false)
+                } else {
+                    lineTo(half, half)
+                    lineTo(size.width - half, half)
+                }
+                lineTo(size.width - half, size.height)
+            } else {
+                val rBL = minOf(8.dp.toPx(), size.width / 2f, size.height)
+                val rBR = minOf(22.dp.toPx(), size.width / 2f, size.height)
+                moveTo(half, 0f)
+                if (rBL > half) {
+                    lineTo(half, size.height - rBL)
+                    arcTo(Rect(half, size.height - 2 * rBL + half, 2 * rBL - half, size.height - half), 180f, -90f, false)
+                } else {
+                    lineTo(half, size.height - half)
+                }
+                if (rBR > half) {
+                    lineTo(size.width - rBR, size.height - half)
+                    arcTo(Rect(size.width - 2 * rBR + half, size.height - 2 * rBR + half, size.width - half, size.height - half), 90f, -90f, false)
+                } else {
+                    lineTo(size.width - half, size.height - half)
+                }
+                lineTo(size.width - half, 0f)
+            }
+        }
+    }
+    onDrawWithContent {
+        drawContent()
+        if (size.width <= 0f || size.height <= 0f) return@onDrawWithContent
+        if (path != null) {
+            drawPath(path, color, style = Stroke(width = w, cap = StrokeCap.Butt))
+        } else {
+            drawLine(color, Offset(half, 0f), Offset(half, size.height), strokeWidth = w, cap = StrokeCap.Butt)
+            drawLine(color, Offset(size.width - half, 0f), Offset(size.width - half, size.height), strokeWidth = w, cap = StrokeCap.Butt)
         }
     }
 }
@@ -1909,52 +2436,124 @@ private fun ChatPicture(bitmap: ImageBitmap?, onOpen: ((Rect?) -> Unit)? = null)
 }
 
 /**
- * A reply's bubble, its text cut into blocks (ReplyBlocks). One that came in while the page is open,
- * [typed], types out from the first character; any reply whose text grows, as the screen's preview
- * does, types out what is new. It is as wide as its widest line, up to 82%; code and tables wider than
- * that scroll inside it.
+ * One chunk (or the whole) of a reply's blocks (ReplyBlocks). All chunks of a split reply share a
+ * single [Typer] managed by [MessageList]; each chunk shows only the slice of progress falling in
+ * `[chunkStart, chunkStart + chunkLength]` and offers 「复制整条」 with the reply's [fullText].
  */
 @Composable
-private fun AssistantBubble(text: String, typed: Boolean = false) {
-    // Parsed once per text, not on every recomposition as the reply scrolls in.
-    val blocks = remember(text) { mdBlocks(text) }
-    val total = remember(blocks) { blocks.sumOf { it.shownLength() } }
-    // Kept across text changes: the written reply carries on from where its screen preview got to.
-    val typer = remember { Typer(if (typed) 0f else total.toFloat()) }
-    val target by rememberUpdatedState(total)
-    if (typer.shown < total) LaunchedEffect(typer) { typer.typeOut { target } }
-    Box(Modifier.fillMaxWidth(0.82f)) {
-        // While it types out, nothing in it can be selected.
-        BubbleSelection(enabled = typer.shown >= total, mine = false) {
-            ReplyBlocks(
-                blocks,
-                typer.shown.toInt(),
-                Clauderc.colors.fg,
-                Modifier.width(IntrinsicSize.Max).bubble(mine = false)
-                    .padding(start = if (Clauderc.style == UiStyle.Plate) 14.dp else 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp).testTag("reply"),
-            )
+private fun AssistantBubble(
+    blocks: List<MdBlock>,
+    fullText: String,
+    total: Int,
+    chunkStart: Int,
+    chunkLength: Int,
+    typer: Typer?,
+    typingReply: TypingReply?,
+    carriedShown: Float?,
+    first: Boolean,
+    last: Boolean,
+) {
+    val chunkShown by remember(typer, typingReply, carriedShown, chunkStart, chunkLength, total) {
+        derivedStateOf {
+            when {
+                typer == null -> Int.MAX_VALUE
+                carriedShown != null && typer.reply !== typingReply -> {
+                    val s = carriedShown.toInt()
+                    if (s >= total || s > chunkStart + chunkLength) Int.MAX_VALUE else (s - chunkStart).coerceIn(0, chunkLength)
+                }
+                else -> {
+                    val s = typer.shown.toInt()
+                    if (!typer.typing || s > chunkStart + chunkLength) Int.MAX_VALUE else (s - chunkStart).coerceIn(0, chunkLength)
+                }
+            }
         }
+    }
+    val selectable by remember(typer, typingReply, carriedShown, total) {
+        derivedStateOf {
+            when {
+                typer == null -> true
+                carriedShown != null && typer.reply !== typingReply -> carriedShown >= total
+                else -> !typer.typing
+            }
+        }
+    }
+    val pad = when (Clauderc.style) {
+        UiStyle.Tile -> PaddingValues(start = 14.dp, end = 14.dp, top = if (first) 12.dp else 0.dp, bottom = if (last) 12.dp else 0.dp)
+        UiStyle.Ink -> PaddingValues(start = 16.dp, end = 16.dp, top = if (first) 12.dp else 0.dp, bottom = if (last) 12.dp else 0.dp)
+        UiStyle.Clear -> PaddingValues(0.dp)
+        UiStyle.Plate -> PaddingValues(start = 12.dp)
+    }
+    // While it types out, nothing in it can be selected.
+    BubbleSelection(enabled = selectable, mine = false, copyAll = fullText) {
+        ReplyBlocks(
+            blocks = blocks,
+            shown = chunkShown,
+            color = Clauderc.colors.fg,
+            modifier = Modifier.fillMaxWidth().testTag("reply").bubble(mine = false, first = first, last = last).padding(pad),
+            leadingGap = !first,
+        )
     }
 }
 
+internal data class TypingReply(val text: String, val blocks: List<MdBlock>, val total: Int, val preview: Boolean)
+
 /** How much of a reply shows while it types out, in characters of its blocks as shown. */
-@Stable
-private class Typer(start: Float) {
+private class Typer(start: Float, reply: TypingReply) {
+    var reply: TypingReply by mutableStateOf(reply)
     var shown by mutableFloatStateOf(start)
+    var target by mutableIntStateOf(reply.total)
+    val typing: Boolean by derivedStateOf { shown < target }
+
+    private var starts: IntArray = IntArray(0)
+    private var visibleState: State<Int>? = null
+
+    /** Maps current progress into [next] before [commit] persists it in a SideEffect. */
+    fun progressFor(next: TypingReply): Float {
+        val s = shown
+        val old = reply
+        // Simple appends keep the cursor directly so leading formulas do not reset to 0 before completing;
+        // only preview-to-formal handoff or non-prefix rewrites remap through carryShown.
+        return when {
+            next.text == old.text -> s
+            !(old.preview && !next.preview) && next.text.startsWith(old.text) -> minOf(s, next.total.toFloat())
+            s < old.total || (old.preview && !next.preview) -> carryShown(old.blocks, s.toInt(), next.blocks).toFloat()
+            else -> minOf(s, next.total.toFloat())
+        }
+    }
+
+    fun commit(next: TypingReply, progress: Float) {
+        reply = next
+        target = next.total
+        shown = progress
+    }
+
+    /** Number of chunks reached so far; derived so MessageList recomposes only when another chunk opens. */
+    fun visibleChunks(chunkStarts: IntArray): Int {
+        if (chunkStarts.size <= 1) return 1
+        val state = visibleState?.takeIf { starts === chunkStarts } ?: derivedStateOf {
+            visibleChunkCount(chunkStarts, shown.toInt(), typing)
+        }.also {
+            starts = chunkStarts
+            visibleState = it
+        }
+        return state.value
+    }
 
     /**
      * Types on toward [target] off the loop rate, at least [TYPE_MIN] characters a second and faster the
      * further behind, what is left in [TYPE_CATCH] seconds, so it eases to typing speed as it catches up
      * (demo.html typeOn).
      */
-    suspend fun typeOut(target: () -> Int) {
+    suspend fun typeOut() {
         var last = withFrameMillis { it }
-        while (shown < target()) {
+        while (shown < target) {
             delay(LOOP_FRAME_MILLIS)
             val now = withFrameMillis { it }
             val dt = ((now - last) / 1000f).coerceAtMost(0.1f)
             last = now
-            val goal = target().toFloat()
+            val goal = target.toFloat()
+            // A large batch shows its earlier text immediately instead of typing through it for seconds.
+            if (goal - shown > TYPE_JUMP_GAP) shown = goal - TYPE_JUMP_TAIL
             shown = minOf(goal, shown + maxOf(TYPE_MIN * dt, (goal - shown) * dt / TYPE_CATCH))
         }
     }
@@ -1962,6 +2561,8 @@ private class Typer(start: Float) {
 
 private const val TYPE_MIN = 40f
 private const val TYPE_CATCH = 0.8f
+private const val TYPE_JUMP_GAP = 1200
+private const val TYPE_JUMP_TAIL = 400
 
 /** A slash command the user ran: their own bubble, with its output, if any, folded into a row under it. */
 @Composable
@@ -2058,7 +2659,7 @@ private fun ToolGroupRow(tools: List<ToolCall>, working: Boolean, outputs: ToolO
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(Clauderc.radii.sm))
                 .clickable(role = Role.Button, onClickLabel = if (fold.expanded) "收起" else "展开") { fold.toggle(scope, scroll) }
-                .padding(horizontal = sp.sp2, vertical = 6.dp)
+                .padding(horizontal = toolRowHorizontal(Clauderc.style), vertical = 6.dp)
                 .testTag("toolGroup"),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -2110,7 +2711,7 @@ private fun AgentRow(agent: Subagent, live: Boolean, onOpen: (Subagent) -> Unit)
             .fillMaxWidth()
             .clip(RoundedCornerShape(Clauderc.radii.sm))
             .clickable(enabled = agent.id != null, role = Role.Button, onClickLabel = "打开子代理") { onOpen(agent) }
-            .padding(horizontal = sp.sp2, vertical = 6.dp)
+            .padding(horizontal = toolRowHorizontal(Clauderc.style), vertical = 6.dp)
             .testTag("agentRow"),
         horizontalArrangement = Arrangement.spacedBy(sp.sp2),
         verticalAlignment = Alignment.CenterVertically,
@@ -2152,7 +2753,7 @@ private fun FoldRow(verb: String?, arg: String, fold: Fold, status: @Composable 
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(Clauderc.radii.sm))
                 .clickable(role = Role.Button, onClickLabel = if (fold.expanded) "收起" else "展开") { fold.toggle(scope, scroll) }
-                .padding(horizontal = sp.sp2, vertical = 6.dp),
+                .padding(horizontal = toolRowHorizontal(Clauderc.style), vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(sp.sp2),
             verticalAlignment = Alignment.CenterVertically,
         ) {

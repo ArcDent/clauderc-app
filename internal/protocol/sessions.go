@@ -25,7 +25,7 @@ const (
 )
 
 // Profile is one launch profile group on a machine. Profiles seen only in
-// past job records are listed too, so empty groups stay visible.
+// past job records are listed too, unless they were forgotten.
 type Profile struct {
 	// ID is stable per machine: "default", "other", or for ProfileEndpoint
 	// the ANTHROPIC_BASE_URL host itself.
@@ -166,6 +166,12 @@ type SessionStopRequest struct {
 // SessionRemoveRequest removes a stopped session from the list.
 type SessionRemoveRequest struct {
 	SessionID string `json:"sessionId"`
+}
+
+// ProfileForgetRequest asks the agent to forget a launch profile that no
+// session uses any more (design D5).
+type ProfileForgetRequest struct {
+	ProfileID string `json:"profileId"`
 }
 
 // DirsRecentResponse answers dirs.recent: existing working directories,

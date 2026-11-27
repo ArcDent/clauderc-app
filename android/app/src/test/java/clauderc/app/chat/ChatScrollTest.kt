@@ -1,5 +1,6 @@
 package clauderc.app.chat
 
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.performTouchInput
@@ -83,7 +84,7 @@ class ChatScrollTest {
         show()
         val reply101 = compose.onAllNodesWithTag("reply", useUnmergedTree = true).fetchSemanticsNodes().maxBy { it.boundsInRoot.bottom }.boundsInRoot
         val list = compose.onNodeWithTag("chatList").fetchSemanticsNode().boundsInRoot
-        assertTrue("the bubble ${reply101.width} is at most 82% of ${list.width}", reply101.width <= 0.82f * (list.width - 2 * px(16.dp)) + 1f)
+        assertEquals("the reply fills the content column", list.width - 2 * px(16.dp), reply101.width, 1f)
         for (tag in listOf("code", "table")) {
             val node = compose.onNodeWithTag(tag, useUnmergedTree = true)
             fun range() = node.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
@@ -107,9 +108,9 @@ class ChatScrollTest {
         }
         tops.zipWithNext().forEachIndexed { i, (a, b) -> assertTrue("frame ${i + 1}: the previous message went down from $a to $b", b <= a + 0.5f) }
         assertTrue("the previous message moved up: $before -> ${tops.last()}", tops.last() < before - 1f)
-        // The reply's text ends its bubble's 10dp padding above the list's bottom padding.
+        // In 印版 (Plate), replies have no bottom padding, so the text ends at the list's bottom padding.
         val listBottom = compose.onNodeWithTag("chatList").fetchSemanticsNode().boundsInRoot.bottom
-        assertEquals(listBottom - px(bottomPadding) - px(10.dp), bounds("新回复第一行\n第二行\n第三行").bottom, 1f)
+        assertEquals(listBottom - px(bottomPadding), bounds("新回复第一行\n第二行\n第三行").bottom, 1f)
     }
 
     /** 清玻: the list runs under the bar and the input, and the newest message still ends above the input. */
@@ -269,5 +270,108 @@ class ChatScrollTest {
             compose.onAllNodesWithText("big.log").fetchSemanticsNodes().firstOrNull { it.layoutInfo.isPlaced }?.boundsInRoot?.top ?: Float.NaN
         }
         tops.forEachIndexed { i, t -> assertEquals("frame ${i + 1}: the tapped row moved", before, t, 1f) }
+    }
+
+    @Test fun aSplitLongReplyArrivingAtTheBottomStaysPinnedToTheBottom() {
+        show()
+        val longReply = (1..10).joinToString("\n\n") { i ->
+            "第%02d段：".format(i) + "测试拆块长回复贴底行为的内容。".repeat(68) + "【末$i】"
+        }
+        state = state.copy(items = state.items + ChatItem(101, ItemKind.ASSISTANT, text = longReply))
+        compose.mainClock.advanceTimeBy(4_000)
+        val listBottom = compose.onNodeWithTag("chatList").fetchSemanticsNode().boundsInRoot.bottom
+        val lowest = compose.onAllNodesWithTag("reply", useUnmergedTree = true).fetchSemanticsNodes().maxBy { it.boundsInRoot.bottom }.boundsInRoot
+        assertEquals("bottom chunk sits flush on list bottom padding", listBottom - px(bottomPadding), lowest.bottom, 1f)
+        compose.onNodeWithText("【末10】", substring = true, useUnmergedTree = true)
+    }
+
+    @Test fun readingAPartialReplyAwayFromBottomDoesNotJumpWhenCrossingSixThousandChars() {
+        // 11 sections of ~500 chars stay below 6000 (1 chunk); appending 2 sections crosses 6000 into 3 chunks.
+        fun sec(i: Int) = "第%02d段：".format(i) + "流式回复阅读位置防跳动验证内容。".repeat(30) + "【尾%02d】".format(i)
+        val under = (1..11).joinToString("\n\n", transform = ::sec)
+        val over = (1..13).joinToString("\n\n", transform = ::sec)
+        assertTrue("under stays single chunk: ${under.length}", under.length < SPLIT_REPLY_CHARS)
+        assertTrue("over splits into multiple chunks: ${over.length}", over.length > SPLIT_REPLY_CHARS)
+
+        state = state.copy(
+            state = SessionState.Working,
+            items = listOf(ChatItem(1, ItemKind.USER, text = "详细展开说明")),
+            partial = PartialReply(under, "partial-scroll", afterSeq = 1),
+        )
+        show()
+        compose.mainClock.autoAdvance = true
+        val listBounds = compose.onNodeWithTag("chatList").fetchSemanticsNode().boundsInRoot
+        fun visibleIn(range: IntRange): Pair<String, Float>? = range.firstNotNullOfOrNull { i ->
+            val tag = "第%02d段：".format(i)
+            val node = compose.onAllNodesWithText(tag, substring = true, useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .firstOrNull { it.layoutInfo.isPlaced && it.boundsInRoot.top > listBounds.top + 30f && it.boundsInRoot.top < listBounds.bottom - 30f }
+            node?.let { tag to it.boundsInRoot.top }
+        }
+        // Drag gently upward through the unsplit reply (no fling) until a section in the second half (sections 7..9,
+        // which moves from chunk #0 into chunk #1 upon splitting) is clearly in view away from the bottom.
+        var anchor: Pair<String, Float>? = null
+        for (step in 0 until 20) {
+            compose.onNodeWithTag("chatList").performTouchInput {
+                down(center)
+                moveBy(Offset(0f, 220f), 250L)
+                up()
+            }
+            compose.waitForIdle()
+            anchor = visibleIn(7..9)
+            if (anchor != null) break
+        }
+        val (anchorTag, beforeTop) = requireNotNull(anchor) { "could not scroll a second-half section (7..9) into view" }
+
+        // Crossing 6000 chars splits the reply into chunks; the visible passage in the second half stays put.
+        compose.mainClock.autoAdvance = false
+        state = state.copy(partial = PartialReply(over, "partial-scroll", afterSeq = 1))
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        val afterTop = compose.onNodeWithText(anchorTag, substring = true, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top
+        assertEquals("$anchorTag stayed in place across 6000-char split", beforeTop, afterTop, 3f)
+    }
+
+    @Test fun readingTheTopHalfOfAMixedPartialDoesNotJumpWhenCrossingSixThousandChars() {
+        // Chunk 0 has dense prose + a code block (different px/char than Chunk 1); scrolling into Chunk 0 must still stay pixel-exact.
+        val code = "```go\n" + (1..60).joinToString("\n") { i -> "func f$i() int { return $i }" } + "\n```"
+        fun sec(i: Int) = "甲%02d段：".format(i) + "测试前半段高度不均时的防跳动。".repeat(34)
+        val under = (1..3).joinToString("\n\n", transform = ::sec) + "\n\n$code\n\n" + (4..8).joinToString("\n\n", transform = ::sec)
+        val over = under + "\n\n" + (9..11).joinToString("\n\n", transform = ::sec)
+        assertTrue("under < 6000: ${under.length}", mdBlocks(under).sumOf { it.shownLength() } < SPLIT_REPLY_CHARS)
+        assertTrue("over > 6000: ${over.length}", mdBlocks(over).sumOf { it.shownLength() } > SPLIT_REPLY_CHARS)
+
+        state = state.copy(
+            state = SessionState.Working,
+            items = listOf(ChatItem(1, ItemKind.USER, text = "贴出实现")),
+            partial = PartialReply(under, "partial-top", afterSeq = 1),
+        )
+        show()
+        compose.mainClock.autoAdvance = true
+        val listBounds = compose.onNodeWithTag("chatList").fetchSemanticsNode().boundsInRoot
+        var beforeTop: Float? = null
+        for (step in 0 until 40) {
+            compose.onNodeWithTag("chatList").performTouchInput {
+                down(center)
+                moveBy(Offset(0f, 260f), 200L)
+                up()
+            }
+            compose.waitForIdle()
+            val hit = compose.onAllNodesWithText("甲02段：", substring = true, useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .firstOrNull { it.layoutInfo.isPlaced && it.boundsInRoot.top > listBounds.top + 30f && it.boundsInRoot.top < listBounds.bottom - 30f }
+            if (hit != null) {
+                beforeTop = hit.boundsInRoot.top
+                break
+            }
+        }
+        val expectedTop = requireNotNull(beforeTop) { "could not scroll 甲02段 into view" }
+
+        compose.mainClock.autoAdvance = false
+        state = state.copy(partial = PartialReply(over, "partial-top", afterSeq = 1))
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        val afterTop = compose.onNodeWithText("甲02段：", substring = true, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top
+        assertEquals("甲02段 stayed in place across 6000-char split despite mixed code/prose heights", expectedTop, afterTop, 3f)
     }
 }

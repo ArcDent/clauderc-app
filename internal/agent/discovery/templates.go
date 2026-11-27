@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,11 +36,19 @@ type Template struct {
 // templatesFile is the content of profiles.json, keyed by profile id.
 type templatesFile struct {
 	Profiles map[string]Template `json:"profiles"`
+	// Forgotten holds deletion times so old job records cannot restore profiles.
+	Forgotten map[string]time.Time `json:"forgotten,omitempty"`
 }
 
 // templatesMu serialises the read-modify-write of profiles.json between
-// concurrent List calls.
+// List and Forget calls.
 var templatesMu sync.Mutex
+
+// ErrProfileFixed rejects forgetting the default and other profiles.
+var ErrProfileFixed = errors.New("cannot forget a fixed profile")
+
+// ErrProfileInUse rejects forgetting a profile that still has sessions.
+var ErrProfileInUse = errors.New("cannot forget a profile with sessions")
 
 // Template returns the cached template of the profile with id profileID,
 // as a phone names it in session.create. ok is false when the profile has
@@ -55,8 +64,43 @@ func (s Source) Template(profileID string) (t Template, ok bool, err error) {
 	if err != nil {
 		return Template{}, false, err
 	}
-	t, ok = cache[profileID]
+	t, ok = cache.Profiles[profileID]
 	return t, ok, nil
+}
+
+// Forget removes an unused profile's template and records when it was deleted.
+func (s Source) Forget(ctx context.Context, profileID string) error {
+	if profileID == profileDefault.ID || profileID == profileOther.ID {
+		return ErrProfileFixed
+	}
+	if s.ProfilesFile == "" {
+		return errors.New("discovery: ProfilesFile is not set")
+	}
+	templatesMu.Lock()
+	defer templatesMu.Unlock()
+	sessions, _, _, err := s.sessions(ctx)
+	if err != nil {
+		return err
+	}
+	for _, session := range sessions {
+		if session.ProfileID == profileID {
+			return ErrProfileInUse
+		}
+	}
+	cache, _, err := readTemplates(s.ProfilesFile)
+	if err != nil {
+		return err
+	}
+	delete(cache.Profiles, profileID)
+	if cache.Forgotten == nil {
+		cache.Forgotten = map[string]time.Time{}
+	}
+	cache.Forgotten[profileID] = time.Now().UTC()
+	data, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		return err
+	}
+	return keyfile.Write(s.ProfilesFile, append(data, '\n'))
 }
 
 // SessionTemplate returns what a copy of the session with short id id
@@ -145,55 +189,55 @@ func sessionFreeFlags(flags []string) []string {
 }
 
 // saveTemplates merges the templates found in jobs/ into ProfilesFile,
-// keeping the newer one per profile id, and returns the merged cache. The
-// file is rewritten only when its content or mode would change. Errors
-// are swallowed: the cache is best effort and must not break the list.
-func (s Source) saveTemplates(found map[string]Template) map[string]Template {
-	if s.ProfilesFile == "" {
-		return nil
-	}
-	templatesMu.Lock()
-	defer templatesMu.Unlock()
-	cache, old, err := readTemplates(s.ProfilesFile)
-	if err != nil {
+// keeping the newer one per profile id, and returns the merged templates.
+// The caller holds templatesMu from reading the cache through this write.
+// Errors are swallowed: the cache is best effort and must not break the list.
+func (s Source) saveTemplates(found map[string]Template, cache templatesFile, old []byte) map[string]Template {
+	if cache.Profiles == nil {
 		// A corrupt cache is replaced by what jobs/ shows now.
-		cache, old = map[string]Template{}, nil
+		cache.Profiles = map[string]Template{}
 	}
 	for id, t := range found {
-		if cur, ok := cache[id]; !ok || !t.UpdatedAt.Before(cur.UpdatedAt) {
-			cache[id] = t
+		if at, ok := cache.Forgotten[id]; ok {
+			if !t.UpdatedAt.After(at) {
+				continue
+			}
+			delete(cache.Forgotten, id)
+		}
+		if cur, ok := cache.Profiles[id]; !ok || !t.UpdatedAt.Before(cur.UpdatedAt) {
+			cache.Profiles[id] = t
 		}
 	}
-	data, err := json.MarshalIndent(templatesFile{Profiles: cache}, "", "  ")
+	data, err := json.MarshalIndent(cache, "", "  ")
 	if err != nil {
-		return cache
+		return cache.Profiles
 	}
 	data = append(data, '\n')
 	if bytes.Equal(data, old) {
 		if info, err := os.Stat(s.ProfilesFile); err == nil && info.Mode().Perm() == 0o600 {
-			return cache
+			return cache.Profiles
 		}
 	}
 	_ = keyfile.Write(s.ProfilesFile, data)
-	return cache
+	return cache.Profiles
 }
 
 // readTemplates returns the cache and the raw file; a missing file is an
 // empty cache.
-func readTemplates(path string) (map[string]Template, []byte, error) {
+func readTemplates(path string) (templatesFile, []byte, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return map[string]Template{}, nil, nil
+		return templatesFile{Profiles: map[string]Template{}}, nil, nil
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("profiles file: %w", err)
+		return templatesFile{}, nil, fmt.Errorf("profiles file: %w", err)
 	}
 	var f templatesFile
 	if err := json.Unmarshal(raw, &f); err != nil {
-		return nil, nil, fmt.Errorf("profiles file %s: %w", path, err)
+		return templatesFile{}, nil, fmt.Errorf("profiles file %s: %w", path, err)
 	}
 	if f.Profiles == nil {
 		f.Profiles = map[string]Template{}
 	}
-	return f.Profiles, raw, nil
+	return f, raw, nil
 }

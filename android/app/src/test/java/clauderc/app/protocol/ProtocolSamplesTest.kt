@@ -69,6 +69,8 @@ class ProtocolSamplesTest {
         "session.stop.res" to Empty.serializer(),
         "session.remove.req" to SessionIdRequest.serializer(),
         "session.remove.res" to Empty.serializer(),
+        "profile.forget.req" to ProfileForgetRequest.serializer(),
+        "profile.forget.res" to Empty.serializer(),
         "dirs.recent.req" to Empty.serializer(),
         "dirs.recent.res" to DirsRecentResponse.serializer(),
         "usage.get.req" to Empty.serializer(),

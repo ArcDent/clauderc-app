@@ -311,13 +311,25 @@ data class PartialReply(val text: String, val key: String, val afterSeq: Long)
  * current turn's latest reply is that echo and is dropped.
  */
 fun nextPartial(old: PartialReply?, partial: String?, items: List<ChatItem>, newKey: () -> String): PartialReply? {
-    if (partial.isNullOrEmpty() || writtenAlready(items, partial)) return null
+    if (partial.isNullOrEmpty()) return old
+    if (writtenAlready(items, partial)) return null
     return old?.copy(text = partial) ?: PartialReply(partial, newKey(), items.lastOrNull()?.seq ?: 0)
 }
 
-/** The first reply among [new] that came after [partial] started: it takes over the partial's bubble. */
-fun takeOver(partial: PartialReply?, new: List<ChatItem>): ChatItem? =
-    partial?.let { p -> new.firstOrNull { it.kind == ItemKind.ASSISTANT && it.seq > p.afterSeq } }
+/**
+ * The first reply among [new] that came after [partial] started and before the next user message: it
+ * takes over the partial's bubble. A reply of a later turn is not the one the partial was showing.
+ */
+fun takeOver(partial: PartialReply?, new: List<ChatItem>): ChatItem? = partial?.let { p ->
+    new.asSequence().filter { it.seq > p.afterSeq }.takeWhile { !it.startsTurn() }.firstOrNull { it.kind == ItemKind.ASSISTANT }
+}
+
+/** True when [new] holds a user message sent after [partial] started: the turn it was showing is over. */
+fun turnChanged(partial: PartialReply?, new: List<ChatItem>): Boolean =
+    partial != null && new.any { it.seq > partial.afterSeq && it.startsTurn() }
+
+/** A user message that started a turn; one still in Claude Code's queue has not. */
+private fun ChatItem.startsTurn() = kind == ItemKind.USER && queued != true
 
 /** True when the latest reply since the last user message begins with [partial], ignoring markdown and spacing. */
 private fun writtenAlready(items: List<ChatItem>, partial: String): Boolean {
@@ -582,7 +594,7 @@ class ChatViewModel(
                                         outgoing = outbox.outgoing.value,
                                         wholeImages = it.wholeImages + localImgs,
                                         keys = it.keys + deliveredKeys(before, e.items) + listOfNotNull(taker?.let { t -> t.seq to it.partial!!.key }),
-                                        partial = if (taker != null) null else it.partial,
+                                        partial = if (taker != null || turnChanged(it.partial, e.items)) null else it.partial,
                                     )
                                 }
                             }
@@ -727,13 +739,21 @@ class ChatViewModel(
                         else -> snap
                     }
                     val nextHasMore = if (older.isNotEmpty()) it.hasMore else res.hasMore
+                    // A reply written, or a new turn started, while the page was away ends the old partial;
+                    // the screen's partial is then judged against the items the snapshot brings.
+                    val taker = takeOver(it.partial, snap)
+                    val current = it.copy(
+                        items = nextItems,
+                        partial = if (taker != null || turnChanged(it.partial, snap)) null else it.partial,
+                        keys = it.keys + listOfNotNull(taker?.let { t -> t.seq to it.partial!!.key }),
+                    )
                     val withStatus = if (stateFresh) {
-                        applyStatus(it, res.state, res.model, res.permissionMode)
+                        applyStatus(current, res.state, res.model, res.permissionMode)
                             .copy(unknownDialog = res.unknownDialog == true)
                             .withScreen(res.state, res.activity, res.partial)
                             .withLimit(res.limit)
                     } else {
-                        it
+                        current
                     }
                     withStatus.copy(
                         loading = false,
@@ -745,7 +765,7 @@ class ChatViewModel(
                         tasks = if (tasksFresh) (if (agentId == null) res.tasks.orEmpty() else emptyList()) else it.tasks,
                         wholeImages = it.wholeImages + localImgs,
                         outgoing = outbox.outgoing.value,
-                        keys = it.keys + deliveredKeys(before, snap),
+                        keys = current.keys + deliveredKeys(before, snap),
                     )
                 }
                 for (lost in uncertainLost) {

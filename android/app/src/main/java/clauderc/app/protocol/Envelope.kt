@@ -128,6 +128,7 @@ object Method {
     const val SESSION_CREATE = "session.create"
     const val SESSION_STOP = "session.stop"
     const val SESSION_REMOVE = "session.remove"
+    const val PROFILE_FORGET = "profile.forget"
     const val DIRS_RECENT = "dirs.recent"
     const val USAGE_GET = "usage.get"
 
