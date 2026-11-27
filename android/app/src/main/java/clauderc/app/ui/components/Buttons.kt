@@ -1,12 +1,9 @@
 package clauderc.app.ui.components
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -38,9 +35,10 @@ import androidx.compose.ui.unit.sp
 import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
-import clauderc.app.ui.theme.Motion
-import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.PressKind
+import clauderc.app.ui.theme.PressTone
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.theme.pressProgress
 import clauderc.app.ui.theme.pressShrink
 import clauderc.app.ui.theme.styled
 
@@ -84,13 +82,10 @@ fun PillButton(
         else -> Color.Transparent to c.fg
     }
     val press = remember { MutableInteractionSource() }
-    val pressed by press.collectIsPressedAsState()
     val primary = style == PillStyle.Accent || style == PillStyle.Ink
-    val sweep by animateFloatAsState(
-        targetValue = if (ui == UiStyle.Plate && !primary && enabled && pressed) 1f else 0f,
-        animationSpec = tween(if (pressed) 220 else 160, easing = Motion.plateEasePress),
-        label = "platePillSweep",
-    )
+    val kind = if (primary) PressKind.Primary else PressKind.Button
+    val sweep = if (ui == UiStyle.Plate && !primary) pressProgress(press, sweep = true).value else 0f
+    val tone = when { primary -> PressTone.Primary; style == PillStyle.Danger -> PressTone.Danger; else -> PressTone.Normal }
     val contentFg = if (ui == UiStyle.Plate && !primary && enabled) {
         val target = if (style == PillStyle.Danger) Color.White else c.bg
         lerp(fg, target, sweep)
@@ -125,10 +120,10 @@ fun PillButton(
     }
     Row(
         modifier
-            .pressShrink(press, if (primary) PressKind.Primary else PressKind.Button)
+            .pressShrink(press, kind)
             .height(height)
             .then(surface)
-            .clickable(press, if (ui == UiStyle.Plate && !primary) null else PressIndication(contentFg), enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(press, if (ui == UiStyle.Plate) null else controlPress(kind, tone, corner = 100.dp), enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = if (height < 48.dp) Clauderc.spacing.sp4 else Clauderc.spacing.sp6),
         horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp2, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
@@ -168,6 +163,7 @@ fun TextAction(
     tone: TextTone = TextTone.Accent,
     enabled: Boolean = true,
     busy: Boolean = false,
+    pressKind: PressKind = PressKind.Button,
 ) {
     val c = Clauderc.colors
     val ui = Clauderc.style
@@ -186,12 +182,7 @@ fun TextAction(
             tone == TextTone.Accent -> Triple(c.fg, c.bg, c.fg)
             else -> Triple(c.bg, c.fg, c.fg)
         }
-        val pressed by press.collectIsPressedAsState()
-        val sweep by animateFloatAsState(
-            targetValue = if (tone != TextTone.Accent && enabled && !busy && pressed) 1f else 0f,
-            animationSpec = tween(if (pressed) 220 else 160, easing = Motion.plateEasePress),
-            label = "plateTextActionSweep",
-        )
+        val sweep = if (tone != TextTone.Accent) pressProgress(press, sweep = true).value else 0f
         val labelColor = when {
             !enabled || busy || tone == TextTone.Accent -> fg
             tone == TextTone.Danger -> lerp(fg, Color.White, sweep)
@@ -214,7 +205,7 @@ fun TextAction(
                             .border(1.5.dp, borderCol, RectangleShape)
                     },
                 )
-                .clickable(press, if (tone == TextTone.Accent) PressIndication(fg) else null, enabled = enabled && !busy, role = Role.Button, onClick = onClick)
+                .clickable(press, null, enabled = enabled && !busy, role = Role.Button, onClick = onClick)
                 .padding(horizontal = Clauderc.spacing.sp4),
             contentAlignment = Alignment.Center,
         ) {
@@ -223,16 +214,19 @@ fun TextAction(
         return
     }
     val shape = if (ui == UiStyle.Plate) RectangleShape else CircleShape
+    val danger = tone == TextTone.Danger
+    val hit = if (ui == UiStyle.Plate) (if (danger) c.danger else c.fg) else Color.Unspecified
+    val labelColor = if (ui == UiStyle.Plate) lerp(color, if (danger) Color.White else c.bg, pressProgress(press).value) else color
     Box(
         modifier
-            .pressShrink(press, if (tone == TextTone.Quiet) PressKind.Plain else PressKind.Button)
+            .pressShrink(press, pressKind)
             .height(40.dp)
             .clip(shape)
-            .clickable(press, PressIndication(color), enabled = enabled && !busy, role = Role.Button, onClick = onClick)
+            .clickable(press, controlPress(pressKind, if (danger) PressTone.Danger else PressTone.Normal, fill = hit, corner = if (ui == UiStyle.Plate) 0.dp else 100.dp), enabled = enabled && !busy, role = Role.Button, onClick = onClick)
             .padding(horizontal = Clauderc.spacing.sp3),
         contentAlignment = Alignment.Center,
     ) {
-        BusyLabel(text, color, if (ui == UiStyle.Plate) FontWeight.Bold else FontWeight.Medium, busy)
+        BusyLabel(text, labelColor, if (ui == UiStyle.Plate) FontWeight.Bold else FontWeight.Medium, busy)
     }
 }
 
@@ -255,12 +249,14 @@ fun SymbolButton(
     small: Boolean = false,
     enabled: Boolean = true,
     tint: Color = Clauderc.colors.fg,
+    darkPressAlpha: Float? = null,
 ) {
-    SymbolButtonFrame(onClick, modifier, small, enabled, tint) {
+    SymbolButtonFrame(onClick, modifier, small, enabled, darkPressAlpha) { press ->
+        val c = Clauderc.colors
         Icon(
             icon.styled,
             contentDescription = contentDescription,
-            tint = if (enabled) tint else Clauderc.colors.fg3,
+            tint = if (!enabled) c.fg3 else if (Clauderc.style == UiStyle.Plate) lerp(tint, if (darkPressAlpha != null) Color.Black else c.bg, press.value) else tint,
             modifier = Modifier.size(if (small) 20.dp else 24.dp),
         )
     }
@@ -273,19 +269,40 @@ fun SymbolButtonFrame(
     modifier: Modifier = Modifier,
     small: Boolean = false,
     enabled: Boolean = true,
-    tint: Color = Clauderc.colors.fg,
-    content: @Composable BoxScope.() -> Unit,
+    darkPressAlpha: Float? = null,
+    content: @Composable BoxScope.(androidx.compose.runtime.State<Float>) -> Unit,
 ) {
     val press = remember { MutableInteractionSource() }
     val ui = Clauderc.style
+    val c = Clauderc.colors
+    val kind = if (darkPressAlpha != null) PressKind.DarkIcon else PressKind.Icon
+    val progress = pressProgress(press, kind)
+    val hit = when {
+        darkPressAlpha != null -> Color.White.copy(alpha = if (ui == UiStyle.Plate) 1f else darkPressAlpha)
+        ui == UiStyle.Plate -> c.fg
+        else -> Color.Unspecified
+    }
     val shape = if (ui == UiStyle.Plate) RectangleShape else CircleShape
     Box(
         modifier
-            .pressShrink(press, PressKind.Icon)
+            .pressShrink(press, kind)
             .size(if (small) 40.dp else 48.dp)
             .clip(shape)
-            .clickable(press, PressIndication(tint), enabled = enabled, role = Role.Button, onClick = onClick),
+            .clickable(press, controlPress(kind, fill = hit, corner = if (ui == UiStyle.Plate) 0.dp else 100.dp), enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
-        content = content,
-    )
+    ) { content(progress) }
+}
+
+@Composable
+internal fun smallButtonTint(source: MutableInteractionSource, color: Color): Color =
+    if (Clauderc.style == UiStyle.Plate) lerp(color, Clauderc.colors.bg, pressProgress(source, PressKind.SmallButton).value) else color
+
+@Composable
+internal fun Modifier.smallPressButton(source: MutableInteractionSource, shrink: Boolean = true, onClick: () -> Unit): Modifier {
+    val c = Clauderc.colors
+    val plate = Clauderc.style == UiStyle.Plate
+    val sweep = if (plate) pressProgress(source, PressKind.SmallButton, sweep = true).value else 0f
+    return (if (shrink) pressShrink(source, PressKind.SmallButton) else this)
+        .then(if (plate) Modifier.plateSweepFill(sweep, c.fg, PlateSweep.LeftToRight) else Modifier)
+        .clickable(source, if (plate) null else controlPress(PressKind.SmallButton), role = Role.Button, onClick = onClick)
 }

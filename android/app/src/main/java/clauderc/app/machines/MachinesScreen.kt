@@ -1,10 +1,11 @@
 package clauderc.app.machines
 
+import clauderc.app.ui.theme.PressIndication
+import clauderc.app.ui.theme.controlPress
 import clauderc.app.ui.theme.MonoFamily
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.LocalIndication
 import clauderc.app.ui.theme.pressShrink
 import clauderc.app.ui.theme.PressKind
 import clauderc.app.ui.components.CardCorner
@@ -202,7 +203,7 @@ private fun MachineRowView(row: MachineRow, index: Int, modifier: Modifier = Mod
         modifier
             .fillMaxWidth()
             .then(surface)
-            .clickable(press, LocalIndication.current, role = Role.Button, onClick = onClick)
+            .clickable(press, if (card) controlPress(PressKind.Card, corner = CardCorner) else PressIndication(), role = Role.Button, onClick = onClick)
             .padding(start = Clauderc.look.rowStart, top = if (card) sp.sp4 else if (plate) 12.dp else 14.dp, bottom = if (card) sp.sp4 else if (plate) 12.dp else 14.dp),
         horizontalArrangement = Arrangement.spacedBy(if (plate) sp.sp3 else sp.sp4),
     ) {

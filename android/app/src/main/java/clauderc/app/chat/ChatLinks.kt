@@ -15,6 +15,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.runtime.State
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -55,11 +56,13 @@ fun isOpenable(url: String): Boolean = Regex("^(https?://[^/?#\\s]|mailto:[^\\s]
  * finger went down; and the link whose menu is open, with the box it hangs from in the window.
  */
 internal class TextLinks {
-    class Spot(val url: String, val box: Rect, val baseline: Float)
+    class Spot(val url: String, val box: Rect, val baseline: Float, val range: IntRange)
 
     var spots: List<Spot> = emptyList()
     var coords: LayoutCoordinates? = null
     var down: Offset? = null
+    var pressedRange by mutableStateOf<IntRange?>(null)
+    var held by mutableStateOf(false)
     var open by mutableStateOf<String?>(null)
     var shown by mutableStateOf("")
     var at by mutableStateOf(IntRect.Zero)
@@ -69,20 +72,21 @@ internal class TextLinks {
         val found = mutableListOf<Spot>()
         for (range in text.getLinkAnnotations(0, text.length)) {
             val url = (range.item as? LinkAnnotation.Clickable)?.tag ?: continue
+            val span = range.start until range.end
             var line = -1
             var box = Rect.Zero
             for (i in range.start until minOf(range.end, text.length)) {
                 val l = layout.getLineForOffset(i)
                 val b = layout.getBoundingBox(i)
                 if (l != line) {
-                    if (line >= 0) found += Spot(url, box, layout.getLineBaseline(line))
+                    if (line >= 0) found += Spot(url, box, layout.getLineBaseline(line), span)
                     line = l
                     box = b
                 } else {
                     box = Rect(min(box.left, b.left), min(box.top, b.top), max(box.right, b.right), max(box.bottom, b.bottom))
                 }
             }
-            if (line >= 0) found += Spot(url, box, layout.getLineBaseline(line))
+            if (line >= 0) found += Spot(url, box, layout.getLineBaseline(line), span)
         }
         spots = found
     }
@@ -103,20 +107,39 @@ internal class TextLinks {
 }
 
 /** Notes where fingers go down, how the text sits in the window, and draws the links' underlines 3dp under their baseline at 45%. */
-internal fun Modifier.links(links: TextLinks, color: Color): Modifier = this
+internal fun Modifier.links(links: TextLinks, color: Color, press: State<Float>): Modifier = this
     .pointerInput(links) {
         awaitPointerEventScope {
-            while (true) {
-                val e = awaitPointerEvent(PointerEventPass.Initial)
-                if (e.type == PointerEventType.Press) links.down = e.changes.firstOrNull()?.position
+            try {
+                while (true) {
+                    val e = awaitPointerEvent(PointerEventPass.Initial)
+                    if (e.type == PointerEventType.Press) {
+                        val point = e.changes.firstOrNull { it.pressed && !it.previousPressed }?.position
+                        links.down = point
+                        val hit = point?.let { p -> links.spots.firstOrNull { p in it.box } }
+                        if (hit != null) links.pressedRange = hit.range
+                        links.held = hit != null
+                    } else if (e.type == PointerEventType.Release) {
+                        links.held = false
+                    }
+                    if (links.held && e.type == PointerEventType.Move) {
+                        val final = awaitPointerEvent(PointerEventPass.Final)
+                        if (final.changes.any { change ->
+                            change.isConsumed || links.spots.none { it.range == links.pressedRange && change.position in it.box }
+                        }) links.held = false
+                    }
+                }
+            } finally {
+                links.held = false
             }
         }
     }
     .onGloballyPositioned { links.coords = it }
     .drawBehind {
-        val line = color.copy(alpha = 0.45f)
         for (s in links.spots) {
             val y = s.baseline + 3.dp.toPx()
+            val opacity = if (s.range == links.pressedRange) 1f - 0.35f * press.value else 1f
+            val line = color.copy(alpha = 0.45f * opacity)
             drawLine(line, Offset(s.box.left, y), Offset(s.box.right, y), strokeWidth = 1.dp.toPx())
         }
     }

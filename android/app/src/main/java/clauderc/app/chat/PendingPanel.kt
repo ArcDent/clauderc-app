@@ -61,6 +61,8 @@ import clauderc.app.ui.components.PillStyle
 import clauderc.app.ui.components.StatusGlyph
 import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.UnderlineField
+import clauderc.app.ui.theme.PressIndication
+import clauderc.app.ui.theme.PressRow
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
@@ -313,9 +315,9 @@ private fun ChoiceRow(label: String, description: String, multi: Boolean, on: Bo
     val c = Clauderc.colors
     val sp = Clauderc.spacing
     val rowModifier = if (multi) {
-        Modifier.toggleable(value = on, enabled = enabled, role = Role.Checkbox, onValueChange = { onClick() })
+        Modifier.toggleable(value = on, interactionSource = null, indication = PressIndication(row = PressRow.Choice), enabled = enabled, role = Role.Checkbox, onValueChange = { onClick() })
     } else {
-        Modifier.selectable(selected = on, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+        Modifier.selectable(selected = on, interactionSource = null, indication = PressIndication(row = PressRow.Choice), enabled = enabled, role = Role.RadioButton, onClick = onClick)
     }
     Row(
         Modifier.fillMaxWidth().then(rowModifier).padding(vertical = 10.dp),

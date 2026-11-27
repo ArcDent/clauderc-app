@@ -1,10 +1,58 @@
 package attach
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestAlternateScreenLimits(t *testing.T) {
+	for _, out := range []string{"x", fmt.Sprintf("\x1b[%dG", maxCols+1), fmt.Sprintf("\x1b[%dd", maxRows+1)} {
+		s := NewScreen(Rows, Cols)
+		line := strings.Repeat("─", maxCols)
+		s.Write(fmt.Appendf(nil, "\x1b[?1047h\x1b[?2026h\x1b[%d;1H%s\x1b[?2026l", maxRows, line))
+		if v := s.View(); v.Unreliable || v.Width != maxCols || v.Height != maxRows || v.Lines[maxRows-1] != line {
+			t.Fatalf("screen at limits: %d×%d, unreliable=%v", v.Width, v.Height, v.Unreliable)
+		}
+		s.Write([]byte("\x1b[?2026h" + out + "\x1b[?2026l"))
+		if v := s.View(); !v.Unreliable || v.Lines[maxRows-1] != line {
+			t.Errorf("overflow %q did not freeze the last good frame", out)
+		}
+	}
+}
+
+func TestAlternateScreenErasesAcrossExpandedGrid(t *testing.T) {
+	s := NewScreen(Rows, Cols)
+	s.Write([]byte("\x1b[?1049h\x1b[43d\x1b[123GABCDE\x1b[124G\x1b[2X\x1b[127G\x1b[K"))
+	if v := s.View(); v.Unreliable || v.Width != 127 || v.Height != 43 || v.Lines[42] != strings.Repeat(" ", 122)+"A  D" {
+		t.Fatalf("erase in expanded row: %+v", v)
+	}
+	s.Write([]byte("\x1b[42;1H\x1b[J"))
+	if line := s.View().Lines[42]; line != "" {
+		t.Errorf("erase below the cursor left %q", line)
+	}
+	s.Write([]byte("\x1b[43d\x1b[127G\x1b[2JZ"))
+	if v := s.View(); v.Unreliable || v.Width != 127 || v.Height != 43 || v.Lines[42] != strings.Repeat(" ", 126)+"Z" {
+		t.Fatalf("clear must not move the cursor: %+v", v)
+	}
+}
+
+func TestSendRefusesSmallAlternateScreen(t *testing.T) {
+	for _, size := range [][2]int{{100, 20}, {79, 30}} {
+		s := NewScreen(Rows, Cols)
+		s.Write(fmt.Appendf(nil, "\x1b[?47h%s\x1b[%d;1H\x1b[?25h\x1b[2J\x1b[H", strings.Repeat("─", size[0]), size[1]))
+		if v := s.View(); v.Unreliable || v.Width != size[0] || v.Height != size[1] || strings.TrimSpace(s.Text()) != "" {
+			t.Fatalf("after clear: %d×%d, unreliable=%v", v.Width, v.Height, v.Unreliable)
+		}
+		term := Term{c: &Conn{screen: s}, ctx: context.Background()}
+		if err := term.Send(AllowKeys()); !errors.Is(err, ErrScreenTooSmall) {
+			t.Errorf("Send on %v: %v, want ErrScreenTooSmall", size, err)
+		}
+	}
+}
 
 func TestFrozenFrameReset(t *testing.T) {
 	for _, reset := range []string{"\x1bc", "\x1b[?1049h", "\x1b[?47l", "\x1b[?1047h"} {

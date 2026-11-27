@@ -48,6 +48,7 @@ import clauderc.app.data.UiStyle
 import clauderc.app.protocol.ChatTask
 import clauderc.app.protocol.TaskStatus
 import clauderc.app.ui.components.LocalGlassSource
+import clauderc.app.ui.theme.PressRow
 import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.components.glassPane
 import clauderc.app.ui.components.inkSurface
@@ -116,7 +117,7 @@ internal fun TaskBar(tasks: List<ChatTask>, modifier: Modifier = Modifier, inIsl
             Modifier
                 .fillMaxWidth()
                 .height(40.dp)
-                .clickable(press, PressIndication(c.fg2), role = Role.Button, onClickLabel = if (open) "收起任务清单" else "展开任务清单") { open = !open }
+                .clickable(press, PressIndication(row = PressRow.CompactPanel), role = Role.Button, onClickLabel = if (open) "收起任务清单" else "展开任务清单") { open = !open }
                 .semantics { stateDescription = if (open) "已展开" else "已收起" }
                 .padding(start = sp.sp4, end = sp.sp2)
                 .testTag("taskHead"),

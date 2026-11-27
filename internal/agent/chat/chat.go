@@ -1032,9 +1032,9 @@ func awayFromInput(v attach.View) bool {
 }
 
 // offInput reports whether the session is off its input and the screen
-// shows no dialog the agent can read.
+// shows no dialog the agent can read. An unreliable frame is not evidence.
 func offInput(v attach.View) bool {
-	if !awayFromInput(v) {
+	if v.Unreliable || !awayFromInput(v) {
 		return false
 	}
 	_, known := attach.ParseDialog(strings.Join(v.Lines, "\n"))

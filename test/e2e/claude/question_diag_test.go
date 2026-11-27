@@ -76,7 +76,49 @@ func TestQuestionAllPatterns(t *testing.T) {
 			},
 		},
 	}
+	useQuestionEndpoint(t, cases)
 
+	s := launch(t, "qpat")
+
+	run := func(name string, freshAttach bool, as []protocol.Answer, want map[int]string) {
+		p := ask(t, s, "QPAT:"+name)
+		if freshAttach {
+			s.x.must(t, protocol.MethodChatClose, protocol.ChatCloseRequest{SessionID: s.id}, nil)
+			time.Sleep(3 * time.Second)
+			s.x.must(t, protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: s.id}, nil)
+			time.Sleep(2 * time.Second)
+		}
+		s.x.must(t, protocol.MethodChatAnswer, protocol.ChatAnswerRequest{
+			SessionID: s.id, ToolUseID: p.ToolUseID, Answers: as,
+		}, nil)
+		_, tur := s.result(p.ToolUseID)
+		got := answers(tur)
+		for qi, w := range want {
+			if got[p.Questions[qi].Question] != w {
+				t.Errorf("[%s] q%d got %q, want %q (all=%v)", name, qi, got[p.Questions[qi].Question], w, got)
+			}
+		}
+		waitFor(t, 20*time.Second, name+" idle", func() bool { return s.state() == protocol.StateIdle })
+	}
+
+	run("single_option", false, []protocol.Answer{{Selected: []int{1}}}, map[int]string{0: "绿"})
+	run("single_custom_zh", false, []protocol.Answer{{Custom: "冬天"}}, map[int]string{0: "冬天"})
+	run("single_multi_custom", false, []protocol.Answer{{Selected: []int{0, 2}, Custom: "南瓜"}}, map[int]string{0: "白菜, 茄子, 南瓜"})
+	run("three_q_mixed", false, []protocol.Answer{{Custom: "墨黑"}, {Selected: []int{1, 2}}, {Selected: []int{0}}},
+		map[int]string{0: "墨黑", 1: "Android, Web", 2: "本周"})
+	run("long_single_line", false, []protocol.Answer{{Selected: []int{0}}, {Selected: []int{1}}},
+		map[int]string{0: "会", 1: "不能"})
+	run("markdown_multiline", false, []protocol.Answer{{Selected: []int{0}}, {Selected: []int{1}}},
+		map[int]string{0: "方案一", 1: "否"})
+	run("ultra_long_headers", false, []protocol.Answer{{Selected: []int{0}}, {Selected: []int{1}}, {Selected: []int{0}}, {Selected: []int{1}}},
+		map[int]string{0: "A", 1: "D", 2: "E", 3: "H"})
+	run("fresh_attach_single", true, []protocol.Answer{{Selected: []int{2}}}, map[int]string{0: "蓝"})
+	run("fresh_attach_two_q", true, []protocol.Answer{{Selected: []int{1}}, {Selected: []int{0}}},
+		map[int]string{0: "蓝", 1: "大"})
+}
+
+func useQuestionEndpoint(t *testing.T, cases map[string]any) {
+	t.Helper()
 	var seq atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/count_tokens") {
@@ -98,13 +140,21 @@ func TestQuestionAllPatterns(t *testing.T) {
 			model = "claude-sonnet-4-5"
 		}
 		msgID := fmt.Sprintf("msg_q_%d", seq.Add(1))
-		var lastUser string
+		var userText strings.Builder
 		hasToolResult := false
-		if len(req.Messages) > 0 {
-			last := req.Messages[len(req.Messages)-1]
-			switch v := last.Content.(type) {
+		// UserPromptSubmit hooks can append separate user messages after the prompt.
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			msg := req.Messages[i]
+			if msg.Role == "assistant" {
+				break
+			}
+			if msg.Role != "user" {
+				continue
+			}
+			switch v := msg.Content.(type) {
 			case string:
-				lastUser = v
+				userText.WriteString(v)
+				userText.WriteByte('\n')
 			case []any:
 				for _, blk := range v {
 					if m, ok := blk.(map[string]any); ok {
@@ -113,7 +163,8 @@ func TestQuestionAllPatterns(t *testing.T) {
 						}
 						if m["type"] == "text" {
 							if s, ok := m["text"].(string); ok {
-								lastUser += "\n" + s
+								userText.WriteString(s)
+								userText.WriteByte('\n')
 							}
 						}
 					}
@@ -123,7 +174,7 @@ func TestQuestionAllPatterns(t *testing.T) {
 		var toolInput any
 		if !hasToolResult {
 			for key, payload := range cases {
-				if strings.Contains(lastUser, "QPAT:"+key) {
+				if strings.Contains(userText.String(), "QPAT:"+key) {
 					toolInput = payload
 					break
 				}
@@ -174,42 +225,4 @@ func TestQuestionAllPatterns(t *testing.T) {
 	endpoint.url = srv.URL
 	endpoint.key = "sk-ant-mock-qpat"
 	t.Cleanup(func() { endpoint = prevEndpoint })
-
-	s := launch(t, "qpat")
-
-	run := func(name string, freshAttach bool, as []protocol.Answer, want map[int]string) {
-		p := ask(t, s, "QPAT:"+name)
-		if freshAttach {
-			s.x.must(t, protocol.MethodChatClose, protocol.ChatCloseRequest{SessionID: s.id}, nil)
-			time.Sleep(3 * time.Second)
-			s.x.must(t, protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: s.id}, nil)
-			time.Sleep(2 * time.Second)
-		}
-		s.x.must(t, protocol.MethodChatAnswer, protocol.ChatAnswerRequest{
-			SessionID: s.id, ToolUseID: p.ToolUseID, Answers: as,
-		}, nil)
-		_, tur := s.result(p.ToolUseID)
-		got := answers(tur)
-		for qi, w := range want {
-			if got[p.Questions[qi].Question] != w {
-				t.Errorf("[%s] q%d got %q, want %q (all=%v)", name, qi, got[p.Questions[qi].Question], w, got)
-			}
-		}
-		waitFor(t, 20*time.Second, name+" idle", func() bool { return s.state() == protocol.StateIdle })
-	}
-
-	run("single_option", false, []protocol.Answer{{Selected: []int{1}}}, map[int]string{0: "绿"})
-	run("single_custom_zh", false, []protocol.Answer{{Custom: "冬天"}}, map[int]string{0: "冬天"})
-	run("single_multi_custom", false, []protocol.Answer{{Selected: []int{0, 2}, Custom: "南瓜"}}, map[int]string{0: "白菜, 茄子, 南瓜"})
-	run("three_q_mixed", false, []protocol.Answer{{Custom: "墨黑"}, {Selected: []int{1, 2}}, {Selected: []int{0}}},
-		map[int]string{0: "墨黑", 1: "Android, Web", 2: "本周"})
-	run("long_single_line", false, []protocol.Answer{{Selected: []int{0}}, {Selected: []int{1}}},
-		map[int]string{0: "会", 1: "不能"})
-	run("markdown_multiline", false, []protocol.Answer{{Selected: []int{0}}, {Selected: []int{1}}},
-		map[int]string{0: "方案一", 1: "否"})
-	run("ultra_long_headers", false, []protocol.Answer{{Selected: []int{0}}, {Selected: []int{1}}, {Selected: []int{0}}, {Selected: []int{1}}},
-		map[int]string{0: "A", 1: "D", 2: "E", 3: "H"})
-	run("fresh_attach_single", true, []protocol.Answer{{Selected: []int{2}}}, map[int]string{0: "蓝"})
-	run("fresh_attach_two_q", true, []protocol.Answer{{Selected: []int{1}}, {Selected: []int{0}}},
-		map[int]string{0: "蓝", 1: "大"})
 }

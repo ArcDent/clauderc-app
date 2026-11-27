@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -55,7 +54,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -74,6 +72,8 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import clauderc.app.data.UiStyle
+import clauderc.app.ui.theme.listRowPress
+import clauderc.app.ui.theme.PressRow
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Lift
 import clauderc.app.ui.theme.MonoFamily
@@ -279,7 +279,7 @@ fun MenuItem(
                 },
             )
             .heightIn(min = if (ui == UiStyle.Plate) 52.dp else 56.dp)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .listRowPress(if (danger) PressRow.Danger else PressRow.Panel, enabled = enabled, onClick = onClick)
             .padding(horizontal = if (ui == UiStyle.Plate) 4.dp else sp.page, vertical = sp.sp2),
         horizontalArrangement = Arrangement.spacedBy(if (ui == UiStyle.Plate) 12.dp else sp.sp4),
         verticalAlignment = Alignment.CenterVertically,
@@ -515,7 +515,7 @@ fun PopMenuItem(text: String, icon: ImageVector, onClick: () -> Unit, enabled: B
             .fillMaxWidth()
             .then(if (ui == UiStyle.Plate && !first) Modifier.drawBehind { drawRect(c.line, size = Size(size.width, 1.dp.toPx())) } else Modifier)
             .heightIn(min = 48.dp)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .listRowPress(PressRow.Panel, enabled = enabled, onClick = onClick)
             .padding(start = sp.sp4, end = sp.sp6, top = 4.dp, bottom = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(sp.sp3),
         verticalAlignment = Alignment.CenterVertically,

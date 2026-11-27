@@ -37,8 +37,8 @@ import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.PressIndication
+import clauderc.app.ui.theme.PressRow
 import clauderc.app.ui.theme.Symbols
-import clauderc.app.ui.theme.pressShrink
 
 /** .appbar: 56dp row; top-level pages indent their title to the page gutter. */
 @Composable
@@ -117,8 +117,7 @@ fun BarSubButton(text: String, onClick: () -> Unit, enabled: Boolean = true, mon
     val press = remember { MutableInteractionSource() }
     Row(
         modifier
-            .pressShrink(press)
-            .clickable(press, PressIndication(c.fg2), enabled = enabled, role = Role.Button, onClick = onClick),
+            .clickable(press, PressIndication(row = PressRow.Title), enabled = enabled, role = Role.Button, onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

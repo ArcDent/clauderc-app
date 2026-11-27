@@ -4,11 +4,11 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -66,8 +66,10 @@ import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
-import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.PressKind
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.theme.pressPose
+import clauderc.app.ui.theme.pressProgress
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
 import clauderc.app.ui.theme.styled
@@ -185,7 +187,7 @@ fun GlassNavBar(
                         .clip(CircleShape)
                         .background(orbBg)
                         .then(if (hasPending) Modifier else Modifier.border(1.dp, c.edge, CircleShape))
-                        .clickable(orbPress, PressIndication(orbFg), role = Role.Button) { orbHandler(orbAnchor.rect) }
+                        .clickable(orbPress, controlPress(PressKind.Icon, fill = if (hasPending) lerp(c.accent, c.bg, 0.14f) else c.surface2), role = Role.Button) { orbHandler(orbAnchor.rect) }
                         .semantics { contentDescription = if (hasPending) "$pendingCount 个待确认" else "切换目标机" }
                         .testTag("inkPendingOrb"),
                     contentAlignment = Alignment.Center,
@@ -333,6 +335,12 @@ private fun NavCells(
     val c = Clauderc.colors
     val ui = Clauderc.style
     val plateNav = Clauderc.plateNav
+    val presses = remember(tabs.size) { List(tabs.size) { MutableInteractionSource() } }
+    val lensPose = if (ui == UiStyle.Clear) {
+        val held = presses.map { it.collectIsPressedAsState().value }.any { it }
+        val progress = animateFloatAsState(if (held) 1f else 0f, Motion.press(ui, PressKind.NavLens, held, transform = true), label = "navLensPress")
+        Modifier.pressPose(ui, PressKind.NavLens, progress)
+    } else Modifier
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val cell = maxWidth / tabs.size
         val indicator = Modifier
@@ -357,6 +365,7 @@ private fun NavCells(
             )
             UiStyle.Clear -> Box(
                 indicator
+                    .then(lensPose)
                     .shadow(6.dp, RoundedCornerShape(26.dp), ambientColor = c.glassShadow, spotColor = c.glassShadow)
                     .clip(RoundedCornerShape(26.dp))
                     .background(c.lens)
@@ -365,13 +374,13 @@ private fun NavCells(
             )
         }
         Row(Modifier.fillMaxSize()) {
-            tabs.forEachIndexed { i, tab -> NavCell(tab, i == selected, Modifier.weight(1f)) { onSelect(i) } }
+            tabs.forEachIndexed { i, tab -> NavCell(tab, i == selected, Modifier.weight(1f), presses[i]) { onSelect(i) } }
         }
     }
 }
 
 @Composable
-private fun NavCell(tab: NavTab, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun NavCell(tab: NavTab, selected: Boolean, modifier: Modifier, press: MutableInteractionSource, onClick: () -> Unit) {
     val c = Clauderc.colors
     val ui = Clauderc.style
     val plateNav = Clauderc.plateNav
@@ -386,17 +395,22 @@ private fun NavCell(tab: NavTab, selected: Boolean, modifier: Modifier, onClick:
         UiStyle.Tile -> c.accent
         UiStyle.Ink, UiStyle.Clear -> c.fg
     }
-    val tint = lerp(c.fg2, picked, on)
-    val press = remember { MutableInteractionSource() }
+    val hit = pressProgress(press, PressKind.Nav).value
+    val restingTint = lerp(c.fg2, picked, on)
+    val tint = if (ui == UiStyle.Ink || ui == UiStyle.Clear) lerp(restingTint, c.fg, hit) else restingTint
     val shape = if (ui == UiStyle.Plate) RectangleShape else RoundedCornerShape(26.dp)
     Box(
         modifier
-            .pressShrink(press, PressKind.Still)
+            .pressShrink(press, PressKind.Nav)
             .fillMaxHeight()
             .clip(shape)
-            .selectable(selected = selected, interactionSource = press, indication = LocalIndication.current, role = Role.Tab, onClick = onClick),
+            .selectable(selected = selected, interactionSource = press, indication = if (ui == UiStyle.Plate && !(selected && plateNav == PlateNavStyle.Float)) controlPress(PressKind.Nav) else null, role = Role.Tab, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
+        if (ui == UiStyle.Tile && !selected && hit > 0f) {
+            Box(Modifier.fillMaxSize().graphicsLayer { scaleX = 1f - 0.04f * hit; scaleY = scaleX; alpha = 0.9f * hit }
+                .background(c.surface, RoundedCornerShape(26.dp)))
+        }
         if (ui == UiStyle.Tile && tilePop > 0.01f) {
             Box(
                 Modifier

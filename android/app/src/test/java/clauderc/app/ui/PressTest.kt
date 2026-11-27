@@ -1,9 +1,33 @@
 package clauderc.app.ui
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.background
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.VectorConverter
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.dp
+import clauderc.app.ui.components.ClaudercSheet
+import clauderc.app.ui.components.GlassNavBar
+import clauderc.app.ui.components.NavTab
+import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.Motion
+import clauderc.app.ui.theme.PressRow
+import clauderc.app.ui.theme.listRowPress
+import clauderc.app.ui.theme.pressShrink
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.luminance
@@ -21,14 +45,20 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.roundToIntRect
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.robolectric.shadows.ShadowDialog
+import org.robolectric.shadows.ShadowLooper
 import clauderc.app.chat.ChatActions
 import clauderc.app.chat.ChatScreen
 import clauderc.app.chat.ChatUiState
+import clauderc.app.chat.ImageViewer
+import clauderc.app.chat.Viewing
 import clauderc.app.chat.TermUiState
 import clauderc.app.chat.TerminalScreen
 import clauderc.app.data.UiStyle
 import clauderc.app.protocol.SessionState
 import clauderc.app.protocol.TermScreen
+import clauderc.app.protocol.ToolImage
+import clauderc.app.sessions.InkPushDrawerHost
 import clauderc.app.sessions.SessionsScreen
 import clauderc.app.sessions.SessionsUiState
 import clauderc.app.sessions.groupSessions
@@ -42,7 +72,6 @@ import clauderc.app.ui.theme.ClaudercMotion
 import clauderc.app.ui.theme.ClaudercTheme
 import clauderc.app.ui.theme.PressKind
 import clauderc.app.ui.theme.Symbols
-import kotlin.math.abs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -120,90 +149,258 @@ class PressTest {
         SessionsScreen(state, {}, {}, {}, { _, _ -> }, {}, {})
     }
 
-    /** Bounds of the pill in [style] at rest, held 150ms, [probe]ms after release and settled. */
-    private fun pillBounds(style: UiStyle, probe: Long): List<Rect> {
+    private fun redBounds(bitmap: Bitmap): IntRect {
+        var left = bitmap.width
+        var top = bitmap.height
+        var right = 0
+        var bottom = 0
+        val row = IntArray(bitmap.width)
+        for (y in 0 until bitmap.height) {
+            bitmap.getPixels(row, 0, bitmap.width, 0, y, bitmap.width, 1)
+        for (x in row.indices) if ((row[x] shr 8 and 0xff) < 128) {
+                left = minOf(left, x); right = maxOf(right, x + 1)
+                top = minOf(top, y); bottom = maxOf(bottom, y + 1)
+            }
+        }
+        return IntRect(left, top, right, bottom)
+    }
+
+    @Test fun transformFollowsStyleAndNeverChangesTouchBounds() {
+        var style by mutableStateOf(UiStyle.Tile)
+        var tier by mutableStateOf(PressKind.Primary)
+        var clicks = 0
         compose.mainClock.autoAdvance = false
-        compose.setContent { ClaudercTheme(darkTheme = false, style = style) { PillButton("允许", onClick = {}, modifier = Modifier.testTag("pill")) } }
-        compose.mainClock.advanceTimeBy(1_000)
-        val node = compose.onNodeWithTag("pill")
-        fun now() = node.fetchSemanticsNode().boundsInRoot
-        val rest = now()
-        node.performTouchInput { down(center) }
-        compose.mainClock.advanceTimeBy(150)
-        val held = now()
-        node.performTouchInput { up() }
-        compose.mainClock.advanceTimeByFrame()
-        compose.mainClock.advanceTimeBy(probe)
-        val after = now()
-        compose.mainClock.advanceTimeBy(1_000)
-        return listOf(rest, held, after, now())
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = style) {
+                Box(Modifier.fillMaxSize().background(Color.White).padding(40.dp)) {
+                    val press = remember { MutableInteractionSource() }
+                Box(Modifier.size(240.dp, 110.dp).pressShrink(press, tier).background(Color.Red)
+                        .clickable(press, null) { clicks++ }.testTag("pose"))
+                }
+            }
+        }
+        val node = compose.onNodeWithTag("pose")
+        val density = compose.density.density
+        val cases = listOf(
+            Triple(UiStyle.Tile, PressKind.Primary, 0.96f to 0.96f),
+            Triple(UiStyle.Ink, PressKind.Primary, 0.95f to 0.95f),
+            Triple(UiStyle.Clear, PressKind.Primary, 1.04f to 0.93f),
+            Triple(UiStyle.Clear, PressKind.Send, 1.06f to 0.90f),
+            Triple(UiStyle.Plate, PressKind.Primary, 1f to 1f),
+        )
+        fun pose() = redBounds(screen())
+        for ((look, kind, scales) in cases) {
+            updateLook { style = look; tier = kind }
+            val bounds = node.fetchSemanticsNode().boundsInRoot
+            val restingBitmap = screen()
+            val rest = pose()
+            node.performTouchInput { down(center) }
+            compose.mainClock.advanceTimeBy(150)
+            val held = pose()
+            assertEquals("$look width", rest.width * scales.first, held.width.toFloat(), 2f)
+            assertEquals("$look height", rest.height * scales.second, held.height.toFloat(), 2f)
+            assertEquals(bounds, node.fetchSemanticsNode().boundsInRoot)
+            if (look == UiStyle.Plate) {
+                assertEquals(rest.left + 2.5f * density, held.left.toFloat(), 1f)
+                assertEquals(rest.top + 2.5f * density, held.top.toFloat(), 1f)
+            }
+            node.performTouchInput { up() }
+            compose.mainClock.advanceTimeByFrame()
+            val releasing = List(18) { compose.mainClock.advanceTimeBy(16L); pose() }
+            when (look) {
+                UiStyle.Tile -> assertTrue(releasing.all { it.width in held.width..rest.width })
+                UiStyle.Ink -> assertTrue("$rest $releasing", releasing.any { it.width > rest.width })
+                UiStyle.Clear -> {
+                    // At this density the button's slight overshoot can round back to its resting pixel.
+                    val spring = Motion.press(look, kind, false, transform = true).vectorize(Float.VectorConverter)
+                    assertTrue(spring.getValueFromNanos(190_000_000L, AnimationVector1D(1f), AnimationVector1D(0f), AnimationVector1D(0f)).value < 0f)
+                }
+                UiStyle.Plate -> assertTrue(releasing.all { it.top in rest.top..held.top })
+            }
+            compose.mainClock.advanceTimeBy(350)
+            assertEquals(rest, pose())
+            assertEquals(0, changed(restingBitmap, screen(), IntRect(0, 0, restingBitmap.width, restingBitmap.height)))
+        }
+        assertEquals(cases.size, clicks)
     }
 
-    /** 印版 sinks a primary button diagonally by 2dp with zero squishy scaling and rebounds cleanly. */
-    @Test fun plateSinksMechanically() {
-        val (rest, held, _, settled) = pillBounds(UiStyle.Plate, 0)
-        val sink = 2f * compose.density.density
-        assertEquals(rest.width, held.width, 0.5f)
-        assertEquals(rest.height, held.height, 0.5f)
-        assertEquals(rest.left + sink, held.left, 1f)
-        assertEquals(rest.top + sink, held.top, 1f)
-        assertEquals(rest, settled)
-    }
-
-    /** 清玻 spreads it like a drop, 104% wide and 93% high, and on release overshoots narrow and tall once. */
-    @Test fun clearSpreadsLikeLiquid() {
-        val (rest, held, mid, settled) = pillBounds(UiStyle.Clear, 160)
-        assertEquals(rest.width * 1.04f, held.width, 1f)
-        assertEquals(rest.height * 0.93f, held.height, 1f)
-        assertTrue("narrower than at rest halfway back: ${mid.width} vs ${rest.width}", mid.width < rest.width)
-        assertTrue("taller than at rest halfway back: ${mid.height} vs ${rest.height}", mid.height > rest.height)
-        assertEquals(rest, settled)
-    }
-
-    /** 素卡 shrinks a pressed primary pill to 96% and springs back. */
-    @Test fun tileShrinksSoftly() {
-        val (rest, held, _, settled) = pillBounds(UiStyle.Tile, 0)
-        assertEquals(rest.width * 0.96f, held.width, 1f)
-        assertEquals(rest.height * 0.96f, held.height, 1f)
-        assertEquals(rest, settled)
-    }
-
-    /** 浮墨 shrinks a pressed primary pill to 95% and springs back. */
-    @Test fun inkShrinksElastically() {
-        val (rest, held, _, settled) = pillBounds(UiStyle.Ink, 0)
-        assertEquals(rest.width * 0.95f, held.width, 1f)
-        assertEquals(rest.height * 0.95f, held.height, 1f)
-        assertEquals(rest, settled)
-    }
-
-    private fun assertBox(what: String, want: Rect, got: Rect) {
-        val off = listOf(want.left - got.left, want.top - got.top, want.right - got.right, want.bottom - got.bottom).maxOf { abs(it) }
-        assertTrue("$what: $got, want $want", off <= 1.5f)
-    }
-
-    /** In 印版, a terminal key sinks 2dp the moment it is hit, turns ink, and comes back up. */
-    @Test fun plateKeySinksAtOnceAndTurnsInk() {
+    @Test fun plateKeySinksSmoothlyAndTurnsInk() {
         val term = TermUiState(session = session("s-work", "修复重连", SessionState.Idle, "default"), loading = false, screen = TermScreen("s-work", listOf("❯ ")))
-        val key = { compose.onNodeWithContentDescription("Esc") }
         compose.mainClock.autoAdvance = false
         compose.setContent { ClaudercTheme(darkTheme = false, style = UiStyle.Plate) { TerminalScreen(term, onBack = {}, onKey = {}) } }
         compose.mainClock.advanceTimeBy(2_000)
-        fun now() = key().fetchSemanticsNode().boundsInRoot
-        val rest = now()
-        val face = IntOffset((rest.left + 4 * compose.density.density).toInt(), rest.center.y.toInt())
+        val key = compose.onNodeWithContentDescription("Esc")
+        val box = key.fetchSemanticsNode().boundsInRoot.roundToIntRect()
+        val face = IntOffset(box.left + (6 * compose.density.density).toInt(), box.center.y)
         val before = screen().getPixel(face.x, face.y)
-        key().performTouchInput { down(center) }
-        compose.mainClock.advanceTimeByFrame()
-        val sink = 2 * compose.density.density
-        assertBox("one frame into the press", rest.translate(0f, sink), now())
-        compose.mainClock.advanceTimeBy(400)
-        assertBox("held", rest.translate(0f, sink), now())
+        key.performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(64)
+        val halfway = screen().getPixel(face.x, face.y)
+        compose.mainClock.advanceTimeBy(140)
         val held = screen().getPixel(face.x, face.y)
-        assertTrue("the key turns ink: ${Integer.toHexString(held)} was ${Integer.toHexString(before)}", Color(held).luminance() < 0.1f && Color(before).luminance() > 0.5f)
-        key().performTouchInput { cancel() }
+        assertTrue("$before $halfway $held", Color(before).luminance() > Color(halfway).luminance())
+        assertTrue(Color(halfway).luminance() > Color(held).luminance())
+        assertTrue(Color(held).luminance() < 0.1f)
+        assertEquals(box, key.fetchSemanticsNode().boundsInRoot.roundToIntRect())
+        key.performTouchInput { cancel() }
+        compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeBy(400)
-        assertEquals(rest, now())
-        assertEquals("back to paper", before, screen().getPixel(face.x, face.y))
+        assertEquals(before, screen().getPixel(face.x, face.y))
+    }
+
+    @Test fun rowHasInsetRoundedFillOrThreeDpRail() {
+        var style by mutableStateOf(UiStyle.Tile)
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = style) {
+                key(style) {
+                    Column(Modifier.fillMaxSize().background(Clauderc.colors.bg).padding(horizontal = 16.dp)) {
+                        for (row in listOf(PressRow.Page, PressRow.Choice, PressRow.Timeline)) {
+                            Box(Modifier.size(220.dp, 50.dp).listRowPress(row) {}.testTag(row.name))
+                        }
+                    }
+                }
+            }
+        }
+        val density = compose.density.density
+        for (look in UiStyle.entries) {
+            updateLook { style = look }
+            for (row in listOf(PressRow.Page, PressRow.Choice, PressRow.Timeline)) {
+                val node = compose.onNodeWithTag(row.name)
+                val box = node.fetchSemanticsNode().boundsInRoot.roundToIntRect()
+                screen()
+                val rest = screen()
+                node.performTouchInput { down(center) }
+                compose.mainClock.advanceTimeBy(150)
+                screen()
+                val held = screen()
+                val y = box.center.y
+                if (look == UiStyle.Plate) {
+                    val x = when (row) {
+                        PressRow.Timeline -> box.right - 1
+                        PressRow.Choice -> box.left - (6f * density).toInt()
+                        else -> box.left
+                    }
+                    val dir = if (row == PressRow.Timeline) -1 else 1
+                    val ink = held.getPixel(x, y)
+                    assertNotEquals(rest.getPixel(x, y), ink)
+                    assertEquals(ink, held.getPixel(x + dir * (2.5f * density).toInt(), y))
+                    assertNotEquals(ink, held.getPixel(x + dir * (3.5f * density).toInt(), y))
+                } else if (row == PressRow.Choice) {
+                    val breath = (6 * density).toInt()
+                    val beyond = (9 * density).toInt()
+                    assertEquals(rest.getPixel(box.left - beyond, y), held.getPixel(box.left - beyond, y))
+                    assertNotEquals(rest.getPixel(box.left - breath, y), held.getPixel(box.left - breath, y))
+                    assertEquals(rest.getPixel(box.right - 1 + beyond, y), held.getPixel(box.right - 1 + beyond, y))
+                    assertNotEquals(rest.getPixel(box.right - 1 + breath, y), held.getPixel(box.right - 1 + breath, y))
+                } else {
+                    val inset = when (look) {
+                        UiStyle.Tile -> 6
+                        UiStyle.Ink -> 8
+                        else -> 12
+                    }
+                    val outside = ((inset - 1) * density).toInt()
+                    val inside = ((inset + 2) * density).toInt()
+                    assertEquals(rest.getPixel(box.left + outside, y), held.getPixel(box.left + outside, y))
+                    assertEquals(rest.getPixel(box.left + inside, box.top), held.getPixel(box.left + inside, box.top))
+                    assertEquals(rest.getPixel(box.right - 1 - outside, y), held.getPixel(box.right - 1 - outside, y))
+                    assertEquals(rest.getPixel(box.right - 1 - inside, box.top), held.getPixel(box.right - 1 - inside, box.top))
+                    assertNotEquals("$look $row interior has a fill", rest.getPixel(box.left + inside, y), held.getPixel(box.left + inside, y))
+                }
+                node.performTouchInput { up() }
+                compose.mainClock.advanceTimeByFrame()
+                compose.mainClock.advanceTimeBy(350)
+                val checkBox = IntRect(box.left - (10 * density).toInt(), box.top, box.right + (10 * density).toInt(), box.bottom)
+                assertEquals(0, changed(rest, screen(), checkBox))
+            }
+        }
+    }
+
+    @Test fun everyNavStyleRespondsAndRestoresAfterRelease() {
+        var style by mutableStateOf(UiStyle.Tile)
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = style) {
+                Box(Modifier.fillMaxSize().background(Clauderc.colors.bg)) {
+                    GlassNavBar(listOf(NavTab("One", Symbols.Forum, Symbols.ForumFilled), NavTab("Two", Symbols.Settings, Symbols.SettingsFilled)), 0, {}, hazeState = null)
+                }
+            }
+        }
+        for (look in UiStyle.entries) {
+            updateLook { style = look }
+            val node = compose.onNodeWithText("Two")
+            val rest = screen()
+            val box = node.fetchSemanticsNode().boundsInRoot.roundToIntRect()
+            node.performTouchInput { down(center) }
+            compose.mainClock.advanceTimeBy(150)
+            assertTrue("$look nav cell", changed(rest, screen(), box) > 0)
+            node.performTouchInput { up() }
+            compose.mainClock.advanceTimeByFrame()
+            compose.mainClock.advanceTimeBy(400)
+            assertEquals("$look nav cell restored", 0, changed(rest, screen(), box))
+        }
+    }
+
+    private fun updateLook(update: () -> Unit) {
+        compose.mainClock.autoAdvance = true
+        compose.runOnIdle(update)
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+    }
+
+    @Test fun drawerAndViewerBackgroundHaveNoPressPixels() {
+        var viewer by mutableStateOf(false)
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            ClaudercTheme(darkTheme = true, style = UiStyle.Ink) {
+                if (viewer) {
+                    ImageViewer(Viewing(ToolImage("press", "image/png"), null), whole = null, failed = true, onClosed = {})
+                } else {
+                    InkPushDrawerHost(open = true, machine = null, dirs = emptyList(), totalSessions = 0,
+                        selectedDir = null, onSelectDir = {}, onScanPairAt = {}, onClose = {}) {}
+                }
+            }
+        }
+        for ((index, tag) in listOf("inkDrawerCloseTap", "imageViewer").withIndex()) {
+            updateLook { viewer = index > 0 }
+            compose.mainClock.advanceTimeBy(1_000)
+            val node = compose.onNodeWithTag(tag)
+            val rest = screen()
+            node.performTouchInput { down(center) }
+            compose.mainClock.advanceTimeBy(150)
+            assertEquals(tag, 0, changed(rest, screen(), IntRect(0, 0, rest.width, rest.height)))
+            node.performTouchInput { cancel() }
+        }
+    }
+
+    @Test fun tileScrimHasNoPressPixels() = assertScrimDoesNotReact(UiStyle.Tile, "tileScrim")
+    @Test fun inkScrimHasNoPressPixels() = assertScrimDoesNotReact(UiStyle.Ink, "morphScrim")
+    @Test fun clearScrimHasNoPressPixels() = assertScrimDoesNotReact(UiStyle.Clear, "clearScrim")
+    @Test fun plateScrimHasNoPressPixels() = assertScrimDoesNotReact(UiStyle.Plate, "plateScrim")
+
+    private fun assertScrimDoesNotReact(style: UiStyle, tag: String) {
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = style) {
+                Box(Modifier.fillMaxSize().background(Clauderc.colors.bg))
+                ClaudercSheet(onDismiss = {}) { Box(Modifier.size(200.dp, 60.dp)) }
+            }
+        }
+        repeat(20) {
+            ShadowLooper.idleMainLooper(50, java.util.concurrent.TimeUnit.MILLISECONDS)
+            compose.mainClock.advanceTimeBy(50)
+        }
+        val node = compose.onNodeWithTag(tag)
+        fun window() = compose.runOnIdle {
+            val view = ShadowDialog.getLatestDialog().window!!.decorView
+            Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(android.graphics.Canvas(it)) }
+        }
+        val rest = window()
+        node.performTouchInput { down(Offset(5f, 5f)) }
+        compose.mainClock.advanceTimeBy(150)
+        val held = window()
+        assertEquals(tag, 0, changed(rest, held, IntRect(0, 0, rest.width, rest.height)))
+        node.performTouchInput { cancel() }
     }
 
     /** Press tiers differentiate buttons, primary actions, small icons, cards and static targets. */

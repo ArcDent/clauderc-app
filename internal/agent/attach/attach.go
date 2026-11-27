@@ -25,8 +25,10 @@ import (
 
 // Terminal geometry and limits of design D7.
 const (
-	Rows = 40
-	Cols = 120
+	Rows    = 40
+	Cols    = 120
+	MinRows = 24
+	MinCols = 80
 	// DefaultQuiet is how long the output must stay quiet before the
 	// attach counts as ready.
 	DefaultQuiet = 500 * time.Millisecond
@@ -45,6 +47,7 @@ const (
 var ErrClosed = errors.New("attach: process ended")
 
 var ErrUnreliableScreen = errors.New("attach: screen is unreliable")
+var ErrScreenTooSmall = errors.New("attach: screen is too small")
 
 // Options configures a Pool.
 type Options struct {
@@ -480,9 +483,13 @@ func (c *Conn) send(ctx context.Context, steps []Step, checkScreen bool) error {
 			c.mu.Lock()
 			c.screen.expireFrame(time.Now())
 			unsafe := c.screen.unreliable()
+			width, height := c.screen.size()
 			c.mu.Unlock()
 			if unsafe {
 				return ErrUnreliableScreen
+			}
+			if width < MinCols || height < MinRows {
+				return ErrScreenTooSmall
 			}
 		}
 		if err := c.write(ctx, st.Keys); err != nil {
@@ -564,7 +571,7 @@ type Term struct {
 	ctx context.Context
 }
 
-// Send types automatic steps only while the screen is reliable.
+// Send types automatic steps only while the screen is reliable and large enough.
 func (t *Term) Send(steps []Step) error { return t.c.send(t.ctx, steps, true) }
 
 // Detached is the attach as the steps that close a panel see it: they go

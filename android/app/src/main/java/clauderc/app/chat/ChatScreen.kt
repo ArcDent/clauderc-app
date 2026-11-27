@@ -1,5 +1,7 @@
 package clauderc.app.chat
 
+import clauderc.app.ui.components.smallPressButton
+import clauderc.app.ui.components.smallButtonTint
 import clauderc.app.ui.components.topHighlight
 import clauderc.app.ui.components.LocalGlassSource
 import androidx.compose.runtime.mutableIntStateOf
@@ -47,20 +49,17 @@ import androidx.compose.ui.unit.Dp
 import clauderc.app.ui.theme.LOOP_FRAME_MILLIS
 import clauderc.app.ui.theme.LocalLoopClock
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -190,6 +189,11 @@ import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.TextTone
 import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.pressProgress
+import clauderc.app.ui.theme.listRowPress
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.theme.PressTone
+import clauderc.app.ui.theme.PressRow
 import clauderc.app.ui.theme.Lift
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
@@ -326,7 +330,7 @@ fun ChatScreen(
                         .size(48.dp)
                         .shadow(if (c.isDark) 0.dp else 8.dp, CircleShape, ambientColor = c.scrim, spotColor = c.scrim)
                         .inkSurface(c.float, c.edge, 24.dp)
-                        .clickable(backPress, PressIndication(c.fg), role = Role.Button, onClick = actions.onBack)
+                        .clickable(backPress, controlPress(PressKind.Icon), role = Role.Button, onClick = actions.onBack)
                         .semantics { contentDescription = "返回" },
                     contentAlignment = Alignment.Center,
                 ) { Icon(Symbols.ArrowBack, contentDescription = null, tint = c.fg, modifier = Modifier.size(20.dp)) }
@@ -338,10 +342,10 @@ fun ChatScreen(
                             .captureAnchor(pillAnchor)
                             .widthIn(max = 246.dp)
                             .height(40.dp)
-                            .pressShrink(pillPress, PressKind.Plain)
+                            .pressShrink(pillPress, PressKind.Title)
                             .shadow(if (c.isDark) 0.dp else 8.dp, RoundedCornerShape(20.dp), ambientColor = c.scrim, spotColor = c.scrim)
                             .inkSurface(c.float, c.edge, 20.dp)
-                            .clickable(pillPress, PressIndication(c.fg), role = Role.Button, onClickLabel = "会话控制") {
+                            .clickable(pillPress, controlPress(PressKind.Title, corner = 100.dp), role = Role.Button, onClickLabel = "会话控制") {
                                 ctlAnchor = pillAnchor.rect
                                 actions.onLoadModels()
                                 sheet = ChatSheet.Control
@@ -377,7 +381,7 @@ fun ChatScreen(
                         .size(48.dp)
                         .shadow(if (c.isDark) 0.dp else 8.dp, CircleShape, ambientColor = c.scrim, spotColor = c.scrim)
                         .inkSurface(c.float, c.edge, 24.dp)
-                        .clickable(termPress, PressIndication(c.fg), enabled = termEnabled, role = Role.Button, onClick = actions.onOpenTerm)
+                        .clickable(termPress, controlPress(PressKind.Icon), enabled = termEnabled, role = Role.Button, onClick = actions.onOpenTerm)
                         .semantics { contentDescription = "打开终端" },
                     contentAlignment = Alignment.Center,
                 ) { Icon(Symbols.Terminal, contentDescription = null, tint = if (termEnabled) c.fg else c.fg3, modifier = Modifier.size(20.dp)) }
@@ -415,8 +419,7 @@ fun ChatScreen(
                     Column(
                         Modifier
                             .weight(1f)
-                            .pressShrink(ctlPress, PressKind.Plain)
-                            .clickable(ctlPress, LocalIndication.current, role = Role.Button, onClickLabel = "会话控制") {
+                            .clickable(ctlPress, PressIndication(row = PressRow.Title), role = Role.Button, onClickLabel = "会话控制") {
                                 actions.onLoadModels()
                                 sheet = ChatSheet.Control
                             }
@@ -481,7 +484,7 @@ fun ChatScreen(
                             Row(
                                 Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .clickable(role = Role.Button, onClickLabel = "会话控制") {
+                                    .listRowPress(PressRow.Title, onClickLabel = "会话控制") {
                                         actions.onLoadModels()
                                         sheet = ChatSheet.Control
                                     }
@@ -1006,12 +1009,7 @@ private fun PlateChatControlSlip(
 private fun PlateCtlChip(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val c = Clauderc.colors
     val press = remember { MutableInteractionSource() }
-    val pressed by press.collectIsPressedAsState()
-    val sweep by animateFloatAsState(
-        targetValue = if (!selected && enabled && pressed) 1f else 0f,
-        animationSpec = tween(if (pressed) 220 else 160, easing = Motion.plateEasePress),
-        label = "plateCtlChipSweep",
-    )
+    val sweep = if (selected) 0f else pressProgress(press, PressKind.Chip, sweep = true).value
     val fg = when {
         selected -> c.bg
         !enabled -> c.fg3
@@ -1019,8 +1017,8 @@ private fun PlateCtlChip(label: String, selected: Boolean, enabled: Boolean, onC
     }
     Box(
         Modifier
-            .pressShrink(press, PressKind.Plain)
-            .background(if (selected) c.fg else c.bg, RectangleShape)
+            .pressShrink(press, if (selected) PressKind.Stamp else PressKind.Chip)
+            .then(if (selected) Modifier.plateStamp(c.fg, c.bg, c.fg, press, enabled) else Modifier.background(c.bg, RectangleShape))
             .plateSweepFill(sweep, c.fg, PlateSweep.LeftToRight)
             .border(1.5.dp, if (enabled || selected) c.fg else c.fg3, RectangleShape)
             .clickable(press, indication = null, enabled = enabled, role = Role.RadioButton, onClick = onClick)
@@ -1133,12 +1131,14 @@ private fun InkChatControlPanel(
 @Composable
 private fun InkCtlChip(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val c = Clauderc.colors
+    val press = remember { MutableInteractionSource() }
     Box(
         Modifier
+            .pressShrink(press, PressKind.Chip)
             .clip(CircleShape)
             .background(if (selected) c.inverse else c.surface2)
             .then(if (selected) Modifier else Modifier.border(1.dp, c.edge, CircleShape))
-            .clickable(enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .clickable(press, controlPress(PressKind.Chip, if (selected) PressTone.Primary else PressTone.Normal, corner = 100.dp), enabled = enabled, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -1168,7 +1168,7 @@ private fun InkCtlActionRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .listRowPress(PressRow.Panel, enabled = enabled, onClick = onClick)
             .padding(horizontal = 22.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1330,11 +1330,11 @@ private fun InkChatIsland(
                                                     Modifier
                                                         .align(Alignment.TopEnd)
                                                         .padding(3.dp)
-                                                        .pressShrink(press)
+                                                        .pressShrink(press, PressKind.Icon)
                                                         .size(20.dp)
                                                         .clip(CircleShape)
                                                         .background(Color.Black.copy(alpha = 0.55f))
-                                                        .clickable(press, PressIndication(Color.White), role = Role.Button, onClickLabel = "移除") { actions.onRemoveImage(a.id) }
+                                                        .clickable(press, controlPress(PressKind.Icon, fill = Color.White.copy(alpha = 0.24f)), role = Role.Button, onClickLabel = "移除") { actions.onRemoveImage(a.id) }
                                                         .semantics { contentDescription = "移除 ${a.name}" },
                                                     contentAlignment = Alignment.Center,
                                                 ) { Icon(Symbols.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp)) }
@@ -1344,12 +1344,12 @@ private fun InkChatIsland(
                                     val press = remember { MutableInteractionSource() }
                                     Box(
                                         Modifier
-                                            .pressShrink(press)
+                                            .pressShrink(press, PressKind.Attach)
                                             .size(60.dp)
                                             .clip(RoundedCornerShape(12.dp))
                                             .background(c.surface2)
                                             .border(1.dp, c.edge, RoundedCornerShape(12.dp))
-                                            .clickable(press, PressIndication(c.fg2), role = Role.Button, onClickLabel = "再添加图片") { onAttach(attachAnchor.rect) },
+                                            .clickable(press, controlPress(PressKind.Attach), role = Role.Button, onClickLabel = "再添加图片") { onAttach(attachAnchor.rect) },
                                         contentAlignment = Alignment.Center,
                                     ) { Icon(Symbols.Add, contentDescription = "再添加图片", tint = c.fg2) }
                                 }
@@ -1373,11 +1373,11 @@ private fun InkChatIsland(
                             Box(
                                 Modifier
                                     .captureAnchor(attachAnchor)
-                                    .pressShrink(attachPress, PressKind.Icon)
+                                    .pressShrink(attachPress, PressKind.Attach)
                                     .size(44.dp)
                                     .clip(CircleShape)
                                     .background(c.surface2)
-                                    .clickable(attachPress, PressIndication(c.fg2), enabled = enabled, role = Role.Button) { onAttach(attachAnchor.rect) },
+                                    .clickable(attachPress, controlPress(PressKind.Attach, corner = 100.dp), enabled = enabled, role = Role.Button) { onAttach(attachAnchor.rect) },
                                 contentAlignment = Alignment.Center,
                             ) { Icon(Symbols.Image, contentDescription = "添加图片", tint = if (enabled) c.fg2 else c.fg3, modifier = Modifier.size(20.dp)) }
                             BasicTextField(
@@ -1426,7 +1426,7 @@ private fun InkChatIsland(
                                     .size(44.dp)
                                     .clip(CircleShape)
                                     .background(sendFill)
-                                    .clickable(sendPress, PressIndication(sendFg), enabled = canSend, role = Role.Button, onClickLabel = "发送") {
+                                    .clickable(sendPress, controlPress(PressKind.Send, PressTone.Primary, corner = 100.dp), enabled = canSend, role = Role.Button, onClickLabel = "发送") {
                                         when {
                                             isModelCommand(text) -> {
                                                 field = TextFieldValue()
@@ -1736,14 +1736,15 @@ internal fun MessageList(
         if (hasOlder) {
             item(key = "older") {
                 if (state.olderFailed && !state.loadingOlder) {
+                    val morePress = remember { MutableInteractionSource() }
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .clickable(role = Role.Button, onClick = actions.onLoadOlder)
+                            .smallPressButton(morePress, onClick = actions.onLoadOlder)
                             .padding(top = sp.sp1, bottom = sp.sp2),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("加载更早消息失败，点此重试", fontSize = Clauderc.fontSizes.caption, color = c.fg3)
+                        Text("加载更早消息失败，点此重试", fontSize = Clauderc.fontSizes.caption, color = smallButtonTint(morePress, c.fg3))
                     }
                 } else {
                     Box(Modifier.fillMaxWidth().padding(top = sp.sp1, bottom = sp.sp2), contentAlignment = Alignment.Center) {
@@ -2425,12 +2426,19 @@ private fun Modifier.inkChunkBorder(color: Color, first: Boolean, last: Boolean)
 /** A 96dp picture, a blank tile while it decodes; [onOpen], when set, opens it from where it sits on screen. */
 @Composable
 private fun ChatPicture(bitmap: ImageBitmap?, onOpen: ((Rect?) -> Unit)? = null) {
+    val ui = Clauderc.style
+    val c = Clauderc.colors
     val placed = remember { Placed() }
+    val press = remember { MutableInteractionSource() }
+    val kind = PressKind.Attachment
+    val hit = if (onOpen != null && ui != UiStyle.Tile) pressProgress(press, kind).value else 0f
+    val fill = if (ui == UiStyle.Plate) lerp(c.bg, c.fg, 0.14f) else c.surface2
     val open = if (onOpen == null) Modifier else Modifier
         .onPlaced { placed.coords = it }
-        .clickable(role = Role.Button, onClickLabel = "查看图片") { onOpen(placed.coords?.takeIf { it.isAttached }?.boundsInRoot()) }
+        .clickable(press, null, role = Role.Button, onClickLabel = "查看图片") { onOpen(placed.coords?.takeIf { it.isAttached }?.boundsInRoot()) }
         .testTag("userPicture")
-    Box(Modifier.size(96.dp).clip(RoundedCornerShape(16.dp)).background(Clauderc.colors.surface).then(open)) {
+    val pose = if (onOpen != null) Modifier.pressShrink(press, kind) else Modifier
+    Box(pose.size(96.dp).clip(RoundedCornerShape(if (ui == UiStyle.Plate) 0.dp else 16.dp)).background(lerp(c.surface, fill, hit)).then(open)) {
         if (bitmap != null) Image(bitmap, contentDescription = "图片", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
     }
 }
@@ -2658,7 +2666,7 @@ private fun ToolGroupRow(tools: List<ToolCall>, working: Boolean, outputs: ToolO
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(Clauderc.radii.sm))
-                .clickable(role = Role.Button, onClickLabel = if (fold.expanded) "收起" else "展开") { fold.toggle(scope, scroll) }
+                .listRowPress(PressRow.Compact, onClickLabel = if (fold.expanded) "收起" else "展开") { fold.toggle(scope, scroll) }
                 .padding(horizontal = toolRowHorizontal(Clauderc.style), vertical = 6.dp)
                 .testTag("toolGroup"),
             verticalAlignment = Alignment.CenterVertically,
@@ -2710,7 +2718,7 @@ private fun AgentRow(agent: Subagent, live: Boolean, onOpen: (Subagent) -> Unit)
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Clauderc.radii.sm))
-            .clickable(enabled = agent.id != null, role = Role.Button, onClickLabel = "打开子代理") { onOpen(agent) }
+            .listRowPress(PressRow.Agent, enabled = agent.id != null, onClickLabel = "打开子代理") { onOpen(agent) }
             .padding(horizontal = toolRowHorizontal(Clauderc.style), vertical = 6.dp)
             .testTag("agentRow"),
         horizontalArrangement = Arrangement.spacedBy(sp.sp2),
@@ -2752,7 +2760,7 @@ private fun FoldRow(verb: String?, arg: String, fold: Fold, status: @Composable 
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(Clauderc.radii.sm))
-                .clickable(role = Role.Button, onClickLabel = if (fold.expanded) "收起" else "展开") { fold.toggle(scope, scroll) }
+                .listRowPress(PressRow.Compact, onClickLabel = if (fold.expanded) "收起" else "展开") { fold.toggle(scope, scroll) }
                 .padding(horizontal = toolRowHorizontal(Clauderc.style), vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(sp.sp2),
             verticalAlignment = Alignment.CenterVertically,
@@ -2800,25 +2808,21 @@ private fun NextPendingBanner(
     val sp = Clauderc.spacing
     val ui = Clauderc.style
     val press = remember { MutableInteractionSource() }
-    val pressed by press.collectIsPressedAsState()
-    val arrowShift by animateDpAsState(
-        targetValue = if (ui == UiStyle.Plate && pressed) 6.dp else 0.dp,
-        animationSpec = tween(160, easing = Motion.plateEasePress),
-        label = "nextArrowShift",
-    )
+    val hit by pressProgress(press, PressKind.Pending)
+    val arrowShift = if (ui == UiStyle.Plate) 6.dp * hit else 0.dp
     val surface = when (ui) {
         UiStyle.Ink -> Modifier.inkSurface(c.float, c.edge, 22.dp)
         UiStyle.Tile -> Modifier.tileSurface(c.card, 20.dp)
         UiStyle.Clear -> Modifier.clip(RoundedCornerShape(22.dp)).glassPane(LocalGlassSource.current)
-        UiStyle.Plate -> Modifier.plateHardShadow(c.fg, 3.dp, pressed).plateBox(c.bg, c.fg, 2.dp)
+        UiStyle.Plate -> Modifier.plateHardShadow(c.fg, 3.dp, hit).plateBox(c.bg, c.fg, 2.dp)
     }
     Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = if (ui == UiStyle.Plate) 18.dp else sp.sp3, vertical = sp.sp1)
-            .pressShrink(press, if (ui == UiStyle.Plate) PressKind.Primary else PressKind.Card)
+            .pressShrink(press, PressKind.Pending)
             .then(surface)
-            .clickable(press, PressIndication(c.fg), role = Role.Button, onClick = onOpen)
+            .clickable(press, if (ui == UiStyle.Plate) null else controlPress(PressKind.Pending, corner = 22.dp), role = Role.Button, onClick = onOpen)
             .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp)
             .testTag("nextPendingBanner"),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -3000,11 +3004,11 @@ private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableSta
                                     Modifier
                                         .align(Alignment.TopEnd)
                                         .padding(3.dp)
-                                        .pressShrink(press)
+                                        .pressShrink(press, PressKind.Icon)
                                         .size(20.dp)
                                         .clip(CircleShape)
                                         .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
-                                        .clickable(press, PressIndication(androidx.compose.ui.graphics.Color.White), role = Role.Button, onClickLabel = "移除") { actions.onRemoveImage(a.id) }
+                                        .clickable(press, controlPress(PressKind.Icon, fill = Color.White.copy(alpha = 0.24f)), role = Role.Button, onClickLabel = "移除") { actions.onRemoveImage(a.id) }
                                         .semantics { contentDescription = "移除 ${a.name}" },
                                     contentAlignment = Alignment.Center,
                                 ) {
@@ -3018,7 +3022,7 @@ private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableSta
                     val tileShape = RoundedCornerShape(if (ui == UiStyle.Plate) 0.dp else 12.dp)
                     Box(
                         Modifier
-                            .pressShrink(press)
+                            .pressShrink(press, PressKind.Attach)
                             .size(60.dp)
                             .clip(tileShape)
                             .background(when (ui) { UiStyle.Tile -> c.card; UiStyle.Ink -> c.float; else -> c.surface })
@@ -3029,7 +3033,7 @@ private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableSta
                                     else -> Modifier
                                 },
                             )
-                            .clickable(press, PressIndication(c.fg2), role = Role.Button, onClickLabel = "再添加图片", onClick = onAttach),
+                            .clickable(press, controlPress(PressKind.Attach), role = Role.Button, onClickLabel = "再添加图片", onClick = onAttach),
                         contentAlignment = Alignment.Center,
                     ) { Icon(Symbols.Add, contentDescription = "再添加图片", tint = c.fg2) }
                 }
@@ -3055,26 +3059,12 @@ private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableSta
                 label = "plateInputFocusRule",
             )
             val attachPress = remember { MutableInteractionSource() }
-            val attachPressed by attachPress.collectIsPressedAsState()
-            val attachSweep by animateFloatAsState(
-                targetValue = if (enabled && attachPressed) 1f else 0f,
-                animationSpec = tween(if (attachPressed) 220 else 160, easing = Motion.plateEasePress),
-                label = "plateAttachSweep",
-            )
-            val attachRot by animateFloatAsState(
-                targetValue = if (enabled && attachPressed) 90f else 0f,
-                animationSpec = tween(if (attachPressed) 220 else 180, easing = Motion.plateEasePress),
-                label = "plateAttachRot",
-            )
+            val attachSweep by pressProgress(attachPress, PressKind.Attach, sweep = true)
+            val attachRot = 90f * pressProgress(attachPress, PressKind.Attach).value
             val attachTint = if (enabled) lerp(c.fg, c.bg, attachSweep) else c.fg3
             val canSend = enabled && !state.sending && !state.rewinding && (text.isNotBlank() || state.attachments.isNotEmpty())
             val sendPress = remember { MutableInteractionSource() }
-            val sendPressed by sendPress.collectIsPressedAsState()
-            val arrowLift by animateDpAsState(
-                targetValue = if (canSend && sendPressed) (-4).dp else 0.dp,
-                animationSpec = tween(160, easing = Motion.plateEasePress),
-                label = "plateSendLift",
-            )
+            val arrowLift = (-4).dp * pressProgress(sendPress, PressKind.Send).value
             val sendFill = if (canSend) c.fg else c.surface2
             val sendFg = if (canSend) c.bg else c.fg3
             Row(
@@ -3086,7 +3076,7 @@ private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableSta
             ) {
                 Box(
                     Modifier
-                        .pressShrink(attachPress, PressKind.Plain)
+                        .pressShrink(attachPress, PressKind.Attach)
                         .size(36.dp)
                         .background(c.bg, RectangleShape)
                         .plateSweepFill(attachSweep, c.fg, PlateSweep.BottomToTop)
@@ -3148,10 +3138,10 @@ private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableSta
                 )
                 Box(
                     Modifier
-                        .pressShrink(sendPress, PressKind.Primary)
+                        .pressShrink(sendPress, PressKind.Send)
                         .size(36.dp)
                         .plateStamp(sendFill, c.bg, c.fg, source = sendPress, enabled = canSend)
-                        .clickable(sendPress, PressIndication(sendFg), enabled = canSend, role = Role.Button, onClickLabel = "发送") {
+                        .clickable(sendPress, null, enabled = canSend, role = Role.Button, onClickLabel = "发送") {
                             when {
                                 isModelCommand(text) -> {
                                     field = TextFieldValue()
@@ -3195,10 +3185,10 @@ private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableSta
                 val attachPress = remember { MutableInteractionSource() }
                 Box(
                     Modifier
-                        .pressShrink(attachPress, PressKind.Icon)
+                        .pressShrink(attachPress, PressKind.Attach)
                         .size(44.dp)
                         .clip(CircleShape)
-                        .clickable(attachPress, PressIndication(c.fg2), enabled = enabled, role = Role.Button, onClick = onAttach),
+                        .clickable(attachPress, controlPress(PressKind.Attach, corner = 100.dp), enabled = enabled, role = Role.Button, onClick = onAttach),
                     contentAlignment = Alignment.Center,
                 ) { Icon(Symbols.Image, contentDescription = "添加图片", tint = if (enabled) c.fg2 else c.fg3) }
                 BasicTextField(
@@ -3254,7 +3244,7 @@ private fun Composer(state: ChatUiState, actions: ChatActions, input: MutableSta
                                 UiStyle.Clear -> Modifier.clip(CircleShape).background(sendFill).then(if (canSend) Modifier.topHighlight(Color.White.copy(alpha = 0.22f)) else Modifier)
                             },
                         )
-                        .clickable(sendPress, PressIndication(sendFg), enabled = canSend, role = Role.Button, onClickLabel = "发送") {
+                        .clickable(sendPress, controlPress(PressKind.Send, PressTone.Primary, corner = 100.dp), enabled = canSend, role = Role.Button, onClickLabel = "发送") {
                             when {
                                 isModelCommand(text) -> {
                                     field = TextFieldValue()
@@ -3336,7 +3326,8 @@ internal fun WorkingRow(sinceMillis: Long?, enabled: Boolean, onInterrupt: (() -
             if (Clauderc.style == UiStyle.Plate) {
                 PlateStopButton(enabled = enabled, onClick = onInterrupt)
             } else {
-                TextAction("中断", onClick = onInterrupt, tone = TextTone.Ink, enabled = enabled)
+                TextAction("中断", onClick = onInterrupt, tone = TextTone.Ink, enabled = enabled,
+                    pressKind = if (Clauderc.style == UiStyle.Ink) PressKind.Attach else PressKind.Button)
             }
         }
     }
@@ -3359,14 +3350,14 @@ private fun PlateStopButton(enabled: Boolean, onClick: () -> Unit) {
         }
     }
     val press = remember { MutableInteractionSource() }
-    val pressed by press.collectIsPressedAsState()
+    val hit by pressProgress(press, PressKind.Stamp)
     val accent = if (enabled) c.danger else c.fg3
-    val boxFill = if (enabled && pressed) c.danger else c.bg
-    val innerFill = if (enabled && pressed) Color.White else accent
+    val boxFill = lerp(c.bg, c.danger, hit)
+    val innerFill = lerp(accent, Color.White, hit)
     Box(
         Modifier
             .padding(vertical = 4.dp, horizontal = 2.dp)
-            .pressShrink(press, PressKind.Primary)
+            .pressShrink(press, PressKind.Stamp)
             .size(32.dp)
             .drawBehind {
                 // Infinite pulsing vermilion outer alert ring.
@@ -3385,7 +3376,7 @@ private fun PlateStopButton(enabled: Boolean, onClick: () -> Unit) {
                     )
                 }
             }
-            .plateHardShadow(accent, 2.dp, pressed = pressed || !enabled)
+            .plateHardShadow(accent, 2.dp, if (enabled) hit else 1f)
             .background(boxFill, RectangleShape)
             .border(1.5.dp, accent, RectangleShape)
             .clickable(press, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
@@ -3578,7 +3569,7 @@ private fun SlashPopup(hits: List<Command>, query: String, onPick: (Command) -> 
         }
         hits.forEach { cmd ->
             Row(
-                Modifier.fillMaxWidth().clickable(role = Role.Button) { onPick(cmd) }.padding(horizontal = sp.sp4, vertical = 10.dp),
+                Modifier.fillMaxWidth().listRowPress(PressRow.CompactPanel) { onPick(cmd) }.padding(horizontal = sp.sp4, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(sp.sp3),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

@@ -11,7 +11,6 @@ import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.InfiniteRepeatableSpec
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.animation.expandVertically
@@ -39,6 +38,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import clauderc.app.data.UiStyle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 
@@ -147,32 +147,25 @@ object Motion {
     val navBarIn: EnterTransition = slideInVertically(tween(t.durL, easing = t.easeSpring)) { it * 7 / 5 }
     val navBarOut: ExitTransition = slideOutVertically(exit()) { it * 7 / 5 }
 
-    /** Pressed small controls shrink in 90ms and spring back on release with the nav bar's curve. */
-    fun <T> pressIn(): FiniteAnimationSpec<T> = tween(90, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f))
-    fun <T> pressOut(): FiniteAnimationSpec<T> = tween(t.durS, easing = t.easeSpring)
+    private val pressEase = CubicBezierEasing(0.2f, 0.9f, 0.25f, 1f)
+    private val inkPressSpring = CubicBezierEasing(0.34f, 1.4f, 0.64f, 1f)
+    private val clearPressEase = CubicBezierEasing(0.25f, 1f, 0.5f, 1f)
+    private val clearPressSpring = CubicBezierEasing(0.34f, 1.3f, 0.64f, 1f)
 
-    /** 清玻 presses like a drop of liquid: it spreads to [LensWide] x [LensFlat] in 120ms. */
-    fun <T> lensIn(): FiniteAnimationSpec<T> = tween(120, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f))
+    fun linkPress(pressed: Boolean): FiniteAnimationSpec<Float> = tween(if (pressed) 70 else 150, easing = pressEase)
 
-    /** On release the drop overshoots once the other way, to [over], and settles, in 320ms all told. */
-    fun lensOut(over: Float): FiniteAnimationSpec<Float> = keyframes {
-        durationMillis = 320
-        over at 160 using LensEasing
-        1f at 320 using LensEasing
+    fun press(style: UiStyle, kind: PressKind, pressed: Boolean, transform: Boolean = false, sweep: Boolean = false): FiniteAnimationSpec<Float> {
+        val row = kind == PressKind.Still
+        return when {
+            style == UiStyle.Plate -> tween(if (pressed) 110 else if (sweep) 260 else 150, easing = plateEasePress)
+            kind == PressKind.DarkIcon -> tween(if (pressed) 70 else 150, easing = pressEase)
+            style == UiStyle.Tile -> tween(if (pressed) { if (row) 60 else 70 } else 160, easing = pressEase)
+            style == UiStyle.Ink -> tween(if (pressed) { if (row) 70 else 80 } else 160, easing = if (!pressed && transform) inkPressSpring else pressEase)
+            else -> if (pressed) tween(if (row) 80 else 100, easing = clearPressEase)
+                else if (transform) tween(280, easing = clearPressSpring)
+                else tween(150, easing = clearPressEase)
+        }
     }
-
-    /** 贴纸 pops the picked nav icon in 460ms on the spring curve (ci-pop). */
-    fun <T> iconPop(): FiniteAnimationSpec<T> = tween(460, easing = t.easeSpring)
-
-    /** 贴纸's press pose comes on and springs back on the spring curve, both in durS. */
-    fun <T> push(): FiniteAnimationSpec<T> = tween(t.durS, easing = t.easeSpring)
-
-    const val LensWide = 1.04f
-    const val LensFlat = 0.93f
-    /** 清玻's overshoot on release: a little narrow and tall. */
-    const val LensBackWide = 0.985f
-    const val LensBackFlat = 1.03f
-    private val LensEasing = CubicBezierEasing(0.25f, 0.8f, 0.4f, 1f)
 
     // Loops: one turn of the spinner and one pulse of the pending beacon, both read off [LoopClock].
     const val SPIN_MILLIS = 900

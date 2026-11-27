@@ -6,7 +6,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"clauderc/internal/agent/attach"
 	"clauderc/internal/agent/transcript"
 	"clauderc/internal/protocol"
 )
@@ -149,7 +148,7 @@ func formatScreenReply(block []string, marked, fenced bool) (string, bool) {
 }
 
 const (
-	replyOverlapWindow  = attach.Rows * attach.Cols
+	replyOverlapWindow  = 200 * 512 // Maximum alternate screen area.
 	replyOverlapLetters = 24
 )
 

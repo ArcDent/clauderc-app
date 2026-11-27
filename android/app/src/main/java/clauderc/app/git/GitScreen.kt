@@ -1,5 +1,7 @@
 package clauderc.app.git
 
+import clauderc.app.ui.components.smallPressButton
+import clauderc.app.ui.components.smallButtonTint
 import clauderc.app.ui.components.CardCorner
 import clauderc.app.ui.components.FieldLabel
 import clauderc.app.ui.components.LocalMorphClose
@@ -28,12 +30,12 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -151,10 +153,16 @@ import clauderc.app.ui.components.captureAnchor
 import clauderc.app.ui.components.rememberAnchorBox
 import androidx.compose.ui.graphics.RectangleShape
 import clauderc.app.ui.components.groupItem
+import clauderc.app.ui.theme.pressPose
+import clauderc.app.ui.theme.pressProgress
+import clauderc.app.ui.theme.listRowPress
+import clauderc.app.ui.theme.pressClickable
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.theme.PressRow
+import clauderc.app.ui.theme.PressTone
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
-import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.PressKind
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
@@ -491,6 +499,7 @@ private fun PlateGitHeader(
 ) {
     val c = Clauderc.colors
     val refPress = remember { MutableInteractionSource() }
+    val refHit by pressProgress(refPress, PressKind.Icon)
     val spin = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     Column(
@@ -510,7 +519,7 @@ private fun PlateGitHeader(
                     .pressShrink(refPress, PressKind.Icon)
                     .size(34.dp)
                     .plateBox(c.bg, if (dir != null) c.fg else c.fg3, 1.5.dp)
-                    .clickable(refPress, PressIndication(c.fg), enabled = dir != null, role = Role.Button) {
+                    .clickable(refPress, controlPress(PressKind.Icon, fill = c.fg), enabled = dir != null, role = Role.Button) {
                         scope.launch {
                             spin.snapTo(0f)
                             spin.animateTo(360f, tween(520, easing = Motion.plateEasePress))
@@ -524,7 +533,7 @@ private fun PlateGitHeader(
                 Icon(
                     Symbols.Refresh,
                     contentDescription = null,
-                    tint = if (dir != null) c.fg else c.fg3,
+                    tint = if (dir != null) lerp(c.fg, c.bg, refHit) else c.fg3,
                     modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = spin.value },
                 )
             }
@@ -541,6 +550,8 @@ private fun PlateGitHeader(
                 overflow = TextOverflow.Ellipsis,
             )
             val wherePress = remember { MutableInteractionSource() }
+            val whereHit by pressProgress(wherePress, PressKind.Title)
+            val whereColor = lerp(c.fg2, c.bg, whereHit)
             val whereLabel = when {
                 dir == null -> "选择目录"
                 !machineName.isNullOrEmpty() -> "$machineName · ${shortPath(dir)}"
@@ -548,12 +559,12 @@ private fun PlateGitHeader(
             }
             Row(
                 Modifier
-                    .pressShrink(wherePress, PressKind.Plain)
+                    .pressShrink(wherePress, PressKind.Title)
                     .drawBehind {
                         val h = 1.dp.toPx()
                         drawRect(c.line, Offset(0f, size.height - h), Size(size.width, h))
                     }
-                    .clickable(wherePress, LocalIndication.current, role = Role.Button, onClick = onPickRepo)
+                    .clickable(wherePress, controlPress(PressKind.Title, fill = c.fg), role = Role.Button, onClick = onPickRepo)
                     .padding(bottom = 3.dp)
                     .testTag("plateGitWhere"),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -563,12 +574,12 @@ private fun PlateGitHeader(
                     whereLabel,
                     fontFamily = MonoFamily,
                     fontSize = 12.sp,
-                    color = c.fg2,
+                    color = whereColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
-                Icon(Symbols.ExpandMore, contentDescription = null, tint = c.fg2, modifier = Modifier.size(16.dp))
+                Icon(Symbols.ExpandMore, contentDescription = null, tint = whereColor, modifier = Modifier.size(16.dp))
             }
         }
     }
@@ -606,10 +617,12 @@ private fun ClearGitHeader(
             SymbolButton(Symbols.Refresh, "刷新", onClick = onRefresh, enabled = dir != null)
         }
         Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 2.dp)) {
+            val wherePress = remember { MutableInteractionSource() }
             Row(
                 Modifier
+                    .pressShrink(wherePress, PressKind.Title)
                     .clip(RoundedCornerShape(12.dp))
-                    .clickable(role = Role.Button, onClick = onPickRepo)
+                    .clickable(wherePress, controlPress(PressKind.Title), role = Role.Button, onClick = onPickRepo)
                     .testTag("clearGitWhere"),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -639,7 +652,7 @@ private fun ClearGitHeader(
                 sub,
                 modifier = Modifier
                     .padding(top = 4.dp)
-                    .clickable(role = Role.Button, onClick = onPickRepo),
+                    .pressClickable(PressKind.Title, onClick = onPickRepo),
                 fontFamily = if (dir != null) MonoFamily else null,
                 fontSize = 13.sp,
                 color = c.fg2,
@@ -702,10 +715,12 @@ private fun TileGitHeader(
                 !machineName.isNullOrEmpty() -> "$machineName · ${shortPath(dir)}"
                 else -> shortPath(dir)
             }
+            val wherePress = remember { MutableInteractionSource() }
             Row(
                 Modifier
+                    .pressShrink(wherePress, PressKind.Title)
                     .clip(RoundedCornerShape(10.dp))
-                    .clickable(role = Role.Button, onClick = onPickRepo)
+                    .clickable(wherePress, controlPress(PressKind.Title), role = Role.Button, onClick = onPickRepo)
                     .testTag("tileGitWhere"),
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -760,6 +775,9 @@ private fun Tabs(state: GitUiState, onTab: (GitTab) -> Unit, clearHaze: HazeStat
         val capsuleShape = RoundedCornerShape(22.dp)
         val lensShape = RoundedCornerShape(18.dp)
         val movingRight = state.tab == GitTab.Status
+        val presses = remember { List(2) { MutableInteractionSource() } }
+        val held = presses.map { it.collectIsPressedAsState().value }.any { it }
+        val lensPress = animateFloatAsState(if (held) 1f else 0f, Motion.press(ui, PressKind.SegmentLens, held, transform = true), label = "segLensPress")
         Box(
             Modifier
                 .padding(start = 24.dp, end = 24.dp, top = 10.dp, bottom = 6.dp)
@@ -787,6 +805,7 @@ private fun Tabs(state: GitUiState, onTab: (GitTab) -> Unit, clearHaze: HazeStat
                         .offset { IntOffset(lensStart, 0) }
                         .width(with(LocalDensity.current) { (lensEnd - lensStart).coerceAtLeast(0).toDp() })
                         .height(36.dp)
+                        .pressPose(ui, PressKind.SegmentLens, lensPress)
                         .clip(lensShape)
                         .background(c.lens)
                         .topHighlight(c.rim)
@@ -795,14 +814,16 @@ private fun Tabs(state: GitUiState, onTab: (GitTab) -> Unit, clearHaze: HazeStat
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                listOf(GitTab.Log to "时间线", GitTab.Status to "改动").forEach { (tab, label) ->
+                listOf(GitTab.Log to "时间线", GitTab.Status to "改动").forEachIndexed { index, (tab, label) ->
                     val on = state.tab == tab
+                    val press = presses[index]
                     Row(
                         Modifier
                             .height(36.dp)
                             .onPlaced { spans[tab] = it.positionInParent().x.roundToInt() to it.size.width }
+                            .pressShrink(press, PressKind.Segment)
                             .clip(lensShape)
-                            .clickable(role = Role.Tab) { onTab(tab) }
+                            .clickable(press, controlPress(PressKind.Segment, corner = 18.dp), role = Role.Tab) { onTab(tab) }
                             .semantics { selected = on }
                             .padding(horizontal = 18.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -845,8 +866,8 @@ private fun Tabs(state: GitUiState, onTab: (GitTab) -> Unit, clearHaze: HazeStat
                     val press = remember { MutableInteractionSource() }
                     Box(
                         Modifier
-                            .pressShrink(press, PressKind.Plain)
-                            .clickable(press, LocalIndication.current, role = Role.Tab) { onTab(tab) }
+                            .pressShrink(press, PressKind.Segment)
+                            .clickable(press, controlPress(PressKind.Segment), role = Role.Tab) { onTab(tab) }
                             .semantics { selected = on }
                             .drawBehind {
                                 if (ruleScale > 0.005f) {
@@ -914,11 +935,22 @@ private fun Tabs(state: GitUiState, onTab: (GitTab) -> Unit, clearHaze: HazeStat
             Row(if (filled) Modifier.fillMaxWidth() else Modifier, horizontalArrangement = Arrangement.spacedBy(if (ui == UiStyle.Tile || ui == UiStyle.Ink) 4.dp else if (filled) 0.dp else sp.sp8)) {
                 listOf(GitTab.Log to "时间线", GitTab.Status to "改动").forEach { (tab, label) ->
                     val on = state.tab == tab
+                    val tabPress = remember { MutableInteractionSource() }
                     Column(
                         Modifier
-                            .then(if (filled) Modifier.weight(1f).clip(if (ui == UiStyle.Plate) RectangleShape else CircleShape) else Modifier.width(IntrinsicSize.Max))
+                            .then(if (filled) Modifier.weight(1f) else Modifier.width(IntrinsicSize.Max))
                             .onPlaced { spans[tab] = it.positionInParent().x.roundToInt() to it.size.width }
-                            .clickable(role = Role.Tab) { onTab(tab) }
+                            .pressShrink(tabPress, PressKind.Segment)
+                            .then(if (filled) Modifier.clip(if (ui == UiStyle.Plate) RectangleShape else CircleShape) else Modifier)
+                            .clickable(
+                                tabPress,
+                                controlPress(
+                                    PressKind.Segment,
+                                    if (on && ui == UiStyle.Ink) PressTone.Primary else PressTone.Normal,
+                                    corner = if (filled && ui != UiStyle.Plate) 100.dp else if (ui == UiStyle.Plate) 0.dp else 12.dp,
+                                ),
+                                role = Role.Tab,
+                            ) { onTab(tab) }
                             .semantics { selected = on },
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
@@ -974,9 +1006,9 @@ private fun BranchBar(state: GitUiState, onBranches: (Rect?) -> Unit) {
             Row(
                 Modifier
                     .captureAnchor(branchAnchor)
-                    .pressShrink(press)
+                    .pressShrink(press, PressKind.Branch)
                     .inkSurface(c.float, c.edge, 999.dp)
-                    .clickable(press, LocalIndication.current, role = Role.Button, onClickLabel = "切换分支") { onBranches(branchAnchor.rect) }
+                    .clickable(press, controlPress(PressKind.Branch), role = Role.Button, onClickLabel = "切换分支") { onBranches(branchAnchor.rect) }
                     .padding(start = 12.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -986,17 +1018,12 @@ private fun BranchBar(state: GitUiState, onBranches: (Rect?) -> Unit) {
                 Icon(Symbols.ExpandMore, contentDescription = null, tint = c.fg2, modifier = Modifier.size(16.dp))
             }
         } else if (ui == UiStyle.Plate) {
-            val pressed by press.collectIsPressedAsState()
-            val sweep by animateFloatAsState(
-                targetValue = if (pressed) 1f else 0f,
-                animationSpec = tween(if (pressed) 220 else 160, easing = Motion.plateEasePress),
-                label = "plateBranchSweep",
-            )
+            val sweep = if (ui == UiStyle.Plate) pressProgress(press, sweep = true).value else 0f
             val tint = lerp(c.fg, c.bg, sweep)
             Row(
                 Modifier
                     .captureAnchor(branchAnchor)
-                    .pressShrink(press, PressKind.Plain)
+                    .pressShrink(press, PressKind.Branch)
                     .background(c.bg, RectangleShape)
                     .plateSweepFill(sweep, c.fg, PlateSweep.LeftToRight)
                     .border(1.5.dp, c.fg, RectangleShape)
@@ -1014,9 +1041,9 @@ private fun BranchBar(state: GitUiState, onBranches: (Rect?) -> Unit) {
             Row(
                 Modifier
                     .captureAnchor(branchAnchor)
-                    .pressShrink(press)
+                    .pressShrink(press, PressKind.Branch)
                     .tileSurface(c.card, 999.dp)
-                    .clickable(press, LocalIndication.current, role = Role.Button, onClickLabel = "切换分支") { onBranches(branchAnchor.rect) }
+                    .clickable(press, controlPress(PressKind.Branch), role = Role.Button, onClickLabel = "切换分支") { onBranches(branchAnchor.rect) }
                     .padding(start = 12.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1029,8 +1056,8 @@ private fun BranchBar(state: GitUiState, onBranches: (Rect?) -> Unit) {
             Row(
                 Modifier
                     .captureAnchor(branchAnchor)
-                    .pressShrink(press)
-                    .clickable(press, LocalIndication.current, role = Role.Button, onClickLabel = "切换分支") { onBranches(branchAnchor.rect) },
+                    .pressShrink(press, PressKind.Branch)
+                    .clickable(press, controlPress(PressKind.Branch), role = Role.Button, onClickLabel = "切换分支") { onBranches(branchAnchor.rect) },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(st?.branch?.ifEmpty { "分离的 HEAD" } ?: "…", fontFamily = MonoFamily, fontSize = 15.sp)
@@ -1075,15 +1102,16 @@ private fun Timeline(state: GitUiState, actions: GitActions, list: LazyListState
         if (state.hasMore || state.loadingMore) {
             item(key = "more") {
                 if (state.moreFailed && !state.loadingMore) {
+                    val morePress = remember { MutableInteractionSource() }
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable(role = Role.Button, onClick = actions.onLoadMore)
+                            .smallPressButton(morePress, onClick = actions.onLoadMore)
                             .padding(top = Clauderc.spacing.sp4, bottom = Clauderc.spacing.sp6),
                         horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp2, Alignment.CenterHorizontally),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("加载失败，点此重试", fontSize = Clauderc.fontSizes.caption, color = c.fg3)
+                        Text("加载失败，点此重试", fontSize = Clauderc.fontSizes.caption, color = smallButtonTint(morePress, c.fg3))
                     }
                 } else {
                     Row(
@@ -1105,7 +1133,7 @@ private fun CommitRow(commit: Commit, g: RowGeometry, textStart: Float, head: St
     val c = Clauderc.colors
     val density = LocalDensity.current
     val anchor = rememberAnchorBox()
-    Box(Modifier.fillMaxWidth().height(64.dp).captureAnchor(anchor).clickable(role = Role.Button) { onClick(anchor.rect) }) {
+    Box(Modifier.fillMaxWidth().height(64.dp).captureAnchor(anchor).listRowPress(PressRow.Timeline) { onClick(anchor.rect) }) {
         Canvas(Modifier.width(textStart.dp).fillMaxHeight()) {
             val k = density.density
             fun o(p: Pt) = Offset(p.x * k, p.y * k)
@@ -1326,7 +1354,7 @@ private fun CommitCapsuleBar(
     val c = Clauderc.colors
     val ui = Clauderc.style
     val press = remember { MutableInteractionSource() }
-    val pressed by press.collectIsPressedAsState()
+    val hit by pressProgress(press, PressKind.Capsule)
     val barAnchor = rememberAnchorBox()
     val shake = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
@@ -1373,7 +1401,7 @@ private fun CommitCapsuleBar(
             .glassPane(clearHaze)
             .border(0.5.dp, c.edge, shape)
         UiStyle.Plate -> Modifier
-            .plateHardShadow(c.fg, 3.dp, pressed = pressed)
+            .plateHardShadow(c.fg, 3.dp, hit, flat = 1.5.dp)
             .plateBox(c.bg, c.fg, 1.5.dp)
     }
 
@@ -1395,10 +1423,10 @@ private fun CommitCapsuleBar(
             .padding(horizontal = sidePad)
             .offset(x = Motion.nudgeDp(shake.value).dp)
             .captureAnchor(barAnchor)
-            .pressShrink(press, if (ui == UiStyle.Plate) PressKind.Plain else PressKind.Card)
+            .pressShrink(press, PressKind.Capsule)
             .heightIn(min = 52.dp)
             .then(surface)
-            .clickable(press, PressIndication(c.fg), role = Role.Button, onClickLabel = "填写提交说明") {
+            .clickable(press, if (ui == UiStyle.Plate) null else controlPress(PressKind.Capsule, corner = 26.dp), role = Role.Button, onClickLabel = "填写提交说明") {
                 if (!hasStaged) {
                     scope.launch {
                         shake.snapTo(0f)
@@ -1427,6 +1455,7 @@ private fun CommitCapsuleBar(
         )
         Box(
             Modifier
+                .then(if (ui != UiStyle.Plate || ready) Modifier.pressShrink(press, if (ui == UiStyle.Plate) PressKind.Button else PressKind.Icon) else Modifier)
                 .size(if (ui == UiStyle.Plate) 36.dp else 40.dp)
                 .then(
                     when {
@@ -1538,12 +1567,7 @@ private fun GitOpButton(
     val c = Clauderc.colors
     val ui = Clauderc.style
     val press = remember { MutableInteractionSource() }
-    val pressed by press.collectIsPressedAsState()
-    val sweep by animateFloatAsState(
-        targetValue = if (ui == UiStyle.Plate && enabled && pressed) 1f else 0f,
-        animationSpec = tween(if (pressed) 220 else 160, easing = Motion.plateEasePress),
-        label = "plateGitOpSweep",
-    )
+    val sweep = if (ui == UiStyle.Plate) pressProgress(press, sweep = true).value else 0f
     val contentFg = when {
         !enabled -> c.fg3
         ui == UiStyle.Plate -> lerp(c.fg, c.bg, sweep)
@@ -1562,10 +1586,10 @@ private fun GitOpButton(
     }
     Row(
         modifier
-            .pressShrink(press, if (ui == UiStyle.Plate) PressKind.Plain else PressKind.Button)
+            .pressShrink(press, PressKind.Button)
             .height(38.dp)
             .then(surface)
-            .clickable(press, if (ui == UiStyle.Plate) null else PressIndication(contentFg), enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(press, if (ui == UiStyle.Plate) null else controlPress(PressKind.Button, corner = 100.dp), enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
@@ -1613,7 +1637,7 @@ private fun FileSectionHeader(
         )
         val actionColor = when {
             !enabled -> c.fg3
-            ui == UiStyle.Plate -> c.fg
+            ui == UiStyle.Plate -> lerp(c.fg, c.bg, pressProgress(press, PressKind.SmallButton).value)
             else -> c.accent
         }
         Box(
@@ -1629,7 +1653,7 @@ private fun FileSectionHeader(
                         Modifier.clip(RoundedCornerShape(8.dp))
                     },
                 )
-                .clickable(press, LocalIndication.current, enabled = enabled, role = Role.Button, onClick = onAction)
+                .clickable(press, controlPress(PressKind.SmallButton, fill = if (ui == UiStyle.Plate) c.fg else Color.Unspecified), enabled = enabled, role = Role.Button, onClick = onAction)
                 .padding(horizontal = 4.dp, vertical = 2.dp),
         ) {
             Text(
@@ -1713,7 +1737,7 @@ private fun FileRow(
         modifier
             .fillMaxWidth()
             .captureAnchor(rowAnchor)
-            .clickable(role = Role.Button) { onOpen(rowAnchor.rect) }
+            .listRowPress { onOpen(rowAnchor.rect) }
             .padding(start = startPad, end = endPad, top = 11.dp, bottom = 11.dp)
             .semantics { isTraversalGroup = true },
         horizontalArrangement = Arrangement.spacedBy(if (ui == UiStyle.Ink || ui == UiStyle.Clear) 12.dp else 10.dp),
@@ -1767,12 +1791,7 @@ private fun FileStageButton(staged: Boolean, enabled: Boolean, onClick: () -> Un
     val c = Clauderc.colors
     val ui = Clauderc.style
     val press = remember { MutableInteractionSource() }
-    val pressed by press.collectIsPressedAsState()
-    val sweep by animateFloatAsState(
-        targetValue = if (ui == UiStyle.Plate && enabled && pressed) 1f else 0f,
-        animationSpec = tween(if (pressed) 180 else 140, easing = Motion.plateEasePress),
-        label = "plateFileActSweep",
-    )
+    val sweep = if (ui == UiStyle.Plate) pressProgress(press, sweep = true).value else 0f
     val label = if (staged) "取消暂存" else "暂存"
     val icon = if (staged) Symbols.Remove else Symbols.Add
     val tint = when {
@@ -1799,7 +1818,7 @@ private fun FileStageButton(staged: Boolean, enabled: Boolean, onClick: () -> Un
         Modifier
             .pressShrink(press, PressKind.Icon)
             .then(boxMod)
-            .clickable(press, if (ui == UiStyle.Plate) null else PressIndication(tint), enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(press, if (ui == UiStyle.Plate) null else controlPress(PressKind.Icon, fill = if (ui == UiStyle.Tile) c.line else c.surface2), enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
@@ -1838,4 +1857,3 @@ fun FilePath(path: String, modifier: Modifier = Modifier, mono: Boolean = false)
         )
     }
 }
-
