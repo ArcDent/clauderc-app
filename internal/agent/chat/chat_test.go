@@ -982,6 +982,59 @@ func TestBlockedButBusyIsWorking(t *testing.T) {
 	}
 }
 
+func TestSetBypassPermissionMode(t *testing.T) {
+	t.Parallel()
+	const manual = "⏸ manual mode on"
+	for _, c := range []struct {
+		name, wantErr string
+		footers       []string
+	}{
+		{"with bypass", "", []string{manual, "⏵⏵ bypass permissions on"}},
+		{"without bypass", "这个会话启动时没开 bypass，切不过去", []string{
+			manual, "⏵⏵ accept edits on", "⏸ plan mode on", "⏵⏵ auto mode on", manual,
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			keys, screen := filepath.Join(dir, "keys.log"), filepath.Join(dir, "status.txt")
+			f := newFixture(t, setup{opts: func(o *chat.Options) {
+				o.Attach = attach.Options{Command: func(string) []string {
+					return append([]string{"/bin/sh", "-c", `stty raw -echo
+keys=$1
+status=$2
+printf '────────────────────────────────────────\r\n❯ \r\n────────────────────────────────────────\r\n  %s' "$3"
+shift 3
+for footer do
+	head -c 4 >> "$keys"
+	printf '\r\033[2K  %s' "$footer"
+	printf '%s' "$footer" > "$status"
+done
+exec cat >> "$keys"`, "sh", keys, screen}, c.footers...)
+				}}
+			}})
+			f.keys = keys
+			res := f.call(t, "c1", protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: shortID, Mode: protocol.PermissionBypass})
+			if c.wantErr != "" {
+				if e := res.Error; e == nil || e.Code != protocol.CodeInvalidParams || e.Message != c.wantErr {
+					t.Fatalf("error = %+v, want invalidParams with message %q", e, c.wantErr)
+				}
+			} else if res.Error != nil {
+				t.Fatalf("setPermissionMode: %+v", res.Error)
+			}
+			if got, want := f.keyLog(), "\x0c"+strings.Repeat("\x1b[Z\x0c", len(c.footers)-1); got != want {
+				t.Errorf("keys = %q, want %q", got, want)
+			}
+			last, err := os.ReadFile(screen)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := c.footers[len(c.footers)-1]; string(last) != want {
+				t.Errorf("last status line = %q, want %q", last, want)
+			}
+		})
+	}
+}
+
 // The phone shows error messages as they are, so they are Chinese.
 func TestErrorMessagesAreChinese(t *testing.T) {
 	t.Parallel()
@@ -1004,7 +1057,8 @@ func TestErrorMessagesAreChinese(t *testing.T) {
 		{"nothing pending", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_x", Decision: protocol.DecisionAllow}, "待确认的内容已变化，请看最新的请求再回答"},
 		{"no model", protocol.MethodChatSetModel, protocol.ChatSetModelRequest{SessionID: shortID}, "缺少要切换的模型"},
 		{"unknown model", protocol.MethodChatSetModel, protocol.ChatSetModelRequest{SessionID: shortID, Model: "sonnet"}, "模型列表里没有这个模型，已取消"},
-		{"bypass mode", protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: shortID, Mode: protocol.PermissionBypass}, "这个权限模式不能从手机切换"},
+		{"bypass mode, screen never changes", protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: shortID, Mode: protocol.PermissionBypass}, "按了 4 次切换键仍没到目标权限模式"},
+		{"dontAsk mode", protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: shortID, Mode: "dontAsk"}, "这个权限模式不能从设备切换"},
 		{"mode never reached", protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: shortID, Mode: protocol.PermissionAuto}, "按了 4 次切换键仍没到目标权限模式"},
 	}
 	for _, c := range cases {

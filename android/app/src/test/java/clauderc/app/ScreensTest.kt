@@ -952,6 +952,43 @@ class ScreensTest {
         }
     }
 
+    /** Permission mode picker across all four styles, light and dark, with bypass unselected and selected. */
+    @Test fun permissionModes() {
+        compose.mainClock.autoAdvance = false
+        val models = listOf(
+            clauderc.app.protocol.ModelOption("claude-opus-5-5", "Opus 5.5", current = true),
+            clauderc.app.protocol.ModelOption("claude-sonnet-5-5", "Sonnet 5.5", current = false),
+        )
+        val base = ChatUiState(
+            session = session("s20", "clauderc 协议", SessionState.Idle, "default", context = SessionContext(28_000, 200_000)).copy(branch = "dev"),
+            loading = false,
+            model = "claude-opus-5-5",
+            models = models,
+            state = SessionState.Idle,
+            hasMore = false,
+            items = listOf(
+                ChatItem(1, ItemKind.USER, text = "给权限模式菜单加上跳过权限检查。"),
+                ChatItem(2, ItemKind.ASSISTANT, text = "好的，我先看一下四套样式里的权限模式入口。"),
+            ),
+        )
+        val auto = base.copy(permissionMode = clauderc.app.protocol.PermissionMode.AUTO)
+        val bypass = base.copy(permissionMode = clauderc.app.protocol.PermissionMode.BYPASS)
+        fun open(s: UiStyle): () -> Unit = {
+            val tag = when (s) {
+                UiStyle.Tile -> "chatModeButton"
+                UiStyle.Ink -> "inkChatCtlPill"
+                UiStyle.Clear -> "clearChatCtl"
+                UiStyle.Plate -> "plateChatCtl"
+            }
+            compose.onNodeWithTag(tag).performClick()
+        }
+        for (s in UiStyle.entries) for (isDark in listOf(false, true)) {
+            val tail = "${s.name.lowercase()}${if (isDark) "-dark" else ""}"
+            shot("28-chat-mode-$tail", isDark, look = s, fresh = true, open = open(s)) { ChatScreen(auto, ChatActions()) }
+            shot("28-chat-mode-bypass-$tail", isDark, look = s, fresh = true, open = open(s)) { ChatScreen(bypass, ChatActions()) }
+        }
+    }
+
     /** Round 10: the task list over the input, folded and unfolded, while the session works. */
     @Test fun taskBar() {
         compose.mainClock.autoAdvance = false

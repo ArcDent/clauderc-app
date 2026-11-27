@@ -228,7 +228,7 @@ func TestAdminCommands(t *testing.T) {
 		t.Errorf("pair output:\n%s", out.String())
 	}
 	out.Reset()
-	if err := adminCmd(ctx, "devices", []string{"--config", cfg}, hs.Client(), &out); err != nil || !strings.Contains(out.String(), "还没有已配对的手机") {
+	if err := adminCmd(ctx, "devices", []string{"--config", cfg}, hs.Client(), &out); err != nil || !strings.Contains(out.String(), "还没有已配对的设备") {
 		t.Errorf("devices: %v %q", err, out.String())
 	}
 	if err := adminCmd(ctx, "revoke", []string{"--config", cfg}, hs.Client(), &out); err == nil {

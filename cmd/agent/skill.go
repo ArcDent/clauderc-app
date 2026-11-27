@@ -16,18 +16,18 @@ const skillMark = "<!-- 由 clauderc skill install 写入，再运行一次会�
 // skillText tells Claude when to send the user a picture.
 const skillText = `---
 name: clauderc-show
-description: 用户在手机上通过 clauderc 看这个会话时，要给用户看图片（截图、图表、生成的图）就运行 clauderc show <图片路径>，图会显示在手机的聊天里。
+description: 用户在手机或电脑上通过 clauderc 看这个会话时，要给用户看图片（截图、图表、生成的图）就运行 clauderc show <图片路径>，图会显示在设备的聊天里。
 ---
 
 ` + skillMark + `
 
-# 给手机上的用户发图
+# 给设备上的用户发图
 
-用户可能在手机上用 clauderc 看这个会话。手机上点不开回复里写的本地路径，所以想让用户看一张图时：
+用户可能在手机或电脑上用 clauderc 看这个会话。设备上点不开回复里写的本地路径，所以想让用户看一张图时：
 
 1. 先把图存成文件，PNG、JPEG、GIF 或 WebP，不超过 10 MB。
 2. 运行 ` + "`clauderc show <图片路径>`" + `，可以一次给多个路径。
-3. 命令每张图输出一行 ` + "`[clauderc show <编号>] <文件名>`" + `，手机就在这条命令的位置显示这张图。
+3. 命令每张图输出一行 ` + "`[clauderc show <编号>] <文件名>`" + `，设备就在这条命令的位置显示这张图。
 
 适合发图的时候：用户要看界面截图、图表、生成或修改过的图片，或者文字说不清、看一眼就明白的结果。
 

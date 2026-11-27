@@ -15,7 +15,7 @@ var (
 	errNoImageID     = &opError{protocol.CodeInvalidParams, "缺少图片编号"}
 	errBadImageID    = &opError{protocol.CodeInvalidParams, "图片编号不对"}
 	errImageNotFound = &opError{protocol.CodeNotFound, "会话记录里找不到这张图片"}
-	errImageTooLarge = &opError{protocol.CodeInvalidParams, "图片太大，超过 10 MB，手机上看不了"}
+	errImageTooLarge = &opError{protocol.CodeInvalidParams, "图片太大，超过 10 MB，设备上看不了"}
 )
 
 // image answers chat.image with a picture as it was: one of a tool result,

@@ -1924,6 +1924,63 @@ class ChatScreenTest {
         compose.onNodeWithText("已复制").assertIsDisplayed()
     }
 
+    @Test fun permissionModePickerOffersBypassAcrossAllStyles() {
+        assertEquals("什么都不再问", permissionModeHint(clauderc.app.protocol.PermissionMode.BYPASS))
+        assertTrue(clauderc.app.protocol.PermissionMode.BYPASS in clauderc.app.protocol.PermissionMode.switchable)
+        val modes = mutableListOf<String>()
+        var style by mutableStateOf(UiStyle.Tile)
+        var mode by mutableStateOf(clauderc.app.protocol.PermissionMode.AUTO)
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = style) {
+                androidx.compose.runtime.key(style, mode) {
+                    ChatScreen(
+                        baseState().copy(
+                            permissionMode = mode,
+                            models = listOf(clauderc.app.protocol.ModelOption("claude-opus-5-5", "Opus 5.5", current = true)),
+                        ),
+                        ChatActions(onSetMode = { modes += it }),
+                    )
+                }
+            }
+        }
+        // Tile: mode sheet list shows hint and selects bypass.
+        compose.onNodeWithTag("chatModeButton").performClick()
+        compose.onNodeWithText("什么都不再问").assertIsDisplayed()
+        compose.onNodeWithText("跳过权限检查").performClick()
+        assertEquals(listOf(clauderc.app.protocol.PermissionMode.BYPASS), modes)
+
+        // Clear: both top-bar mode list and unified control drop offer bypass.
+        style = UiStyle.Clear
+        compose.waitForIdle()
+        compose.onNodeWithTag("chatModeButton").performClick()
+        compose.onNodeWithText("什么都不再问").assertIsDisplayed()
+        compose.onNodeWithText("跳过权限检查").performClick()
+        compose.onNodeWithTag("clearChatCtl").performClick()
+        compose.onNodeWithTag("clearChatCtlDrop").assertIsDisplayed()
+        compose.onNodeWithText("跳过权限检查").performClick()
+
+        // Ink & Plate: control panels offer bypass chip.
+        style = UiStyle.Ink
+        compose.waitForIdle()
+        compose.onNodeWithTag("inkChatCtlPill").performClick()
+        compose.onNodeWithTag("inkChatCtlPanel").assertIsDisplayed()
+        compose.onNodeWithText("跳过权限检查").performClick()
+
+        style = UiStyle.Plate
+        compose.waitForIdle()
+        compose.onNodeWithTag("plateChatCtl").performClick()
+        compose.onNodeWithTag("plateChatCtlSlip").assertIsDisplayed()
+        compose.onNodeWithText("跳过权限检查").performClick()
+        assertEquals(List(5) { clauderc.app.protocol.PermissionMode.BYPASS }, modes)
+
+        // Unswitchable modes like dontAsk still render the disabled entry in the mode sheet.
+        style = UiStyle.Tile
+        mode = clauderc.app.protocol.PermissionMode.DONT_ASK
+        compose.waitForIdle()
+        compose.onNodeWithTag("chatModeButton").performClick()
+        compose.onNodeWithText("不能从手机切换到这个模式").assertIsDisplayed()
+    }
+
     @Test fun emptyCodeBlockInSplitReplyStillRenders() {
         val raw = "```sh\n```\n\n```go\n" + "x := 1\n".repeat(600) + "```\n\n" + "后半段说明。".repeat(520) + "\n\n```py\n```"
         assertTrue("exceeds split threshold: ${raw.length}", raw.length > SPLIT_REPLY_CHARS)

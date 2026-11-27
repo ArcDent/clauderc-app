@@ -17,9 +17,9 @@
 // that custom endpoint instead, for a machine without the account login;
 // TestCreateAuth is then skipped.
 // Every scenario creates its own session through session.create, in a
-// fresh directory under .local/e2e-ws/, launched with
-// --permission-mode manual --effort low, and stops and removes it at the
-// end. Sessions that existed before are never touched, and
+// fresh directory under .local/e2e-ws/, launched with --effort low and
+// --permission-mode manual unless testing the default, and stops and
+// removes it at the end. Sessions that existed before are never touched, and
 // ~/.claude/settings.json must stay unmodified.
 package claude
 
@@ -63,6 +63,11 @@ const (
 	// safe adds --safe-mode, which leaves out every skill, plugin and
 	// custom command: its slash popup holds built-ins only.
 	safe
+	// noMode starts without a permission-mode flag, so the agent's default
+	// applies. Without a custom endpoint it starts on the default profile:
+	// the account login reads no user settings, where Claude Code keeps the
+	// bypassPermissions consent.
+	noMode
 )
 
 // endpoint is the custom endpoint of CLAUDERC_E2E_BASE_URL and
@@ -81,10 +86,12 @@ type harness struct {
 	t    *testing.T
 	src  discovery.Source
 	life *lifecycle.Handler
-	// safeLife launches safe sessions; life serves every other request.
-	safeLife *lifecycle.Handler
-	chats    *chat.Handler
-	root     string // repository root
+	// safeLife and noModeLife launch safe and noMode sessions; life serves
+	// every other request.
+	safeLife   *lifecycle.Handler
+	noModeLife *lifecycle.Handler
+	chats      *chat.Handler
+	root       string // repository root
 	// launch is the handlers' Options.Dir, under the repository.
 	launch string
 
@@ -179,6 +186,7 @@ func newHarness(t *testing.T) *harness {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	x.life = lifecycle.New(lifecycle.Options{Source: x.src, Dir: dir, ExtraFlags: plainFlags, Logger: logger})
 	x.safeLife = lifecycle.New(lifecycle.Options{Source: x.src, Dir: dir, ExtraFlags: append(slices.Clone(plainFlags), "--safe-mode"), Logger: logger})
+	x.noModeLife = lifecycle.New(lifecycle.Options{Source: x.src, Dir: dir, ExtraFlags: []string{"--effort", "low"}, Logger: logger})
 	x.chats = chat.New(chat.Options{
 		Source: x.src,
 		Push:   agent.PusherFunc(x.push),
@@ -221,6 +229,11 @@ func (x *harness) create(t *testing.T, l launchMode, req protocol.SessionCreateR
 	life := x.life
 	if l == safe {
 		life = x.safeLife
+	} else if l == noMode {
+		life = x.noModeLife
+		if endpoint.url == "" && req.Preset == "" && req.FromSession == "" {
+			req.Preset = "default"
+		}
 	}
 	if endpoint.url != "" && req.Preset == "" && req.FromSession == "" {
 		req.BaseURL, req.APIKey = endpoint.url, endpoint.key
@@ -315,7 +328,7 @@ func launchIn(t *testing.T, name string, l launchMode) *session {
 }
 
 // workspace makes a new directory for test name under .local/e2e-ws; the
-// session's cleanup deletes it.
+// test cleans it up even if session creation fails.
 func workspace(t *testing.T, name string) string {
 	t.Helper()
 	tag := make([]byte, 3)
@@ -324,6 +337,7 @@ func workspace(t *testing.T, name string) string {
 	if err := os.MkdirAll(ws, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = os.RemoveAll(ws) })
 	return ws
 }
 
@@ -960,8 +974,8 @@ func TestImage(t *testing.T) {
 
 func TestPermissionMode(t *testing.T) {
 	s := launch(t, "mode_cycle")
-	if _, e := s.x.call(t, protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: s.id, Mode: protocol.PermissionBypass}); e == nil || e.Code != protocol.CodeInvalidParams {
-		t.Errorf("切到 bypassPermissions 返回 %+v，want invalidParams", e)
+	if _, e := s.x.call(t, protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: s.id, Mode: protocol.PermissionBypass}); e == nil || e.Code != protocol.CodeInvalidParams || e.Message != "这个会话启动时没开 bypass，切不过去" {
+		t.Errorf("切到 bypassPermissions 返回 %+v，want invalidParams：这个会话启动时没开 bypass，切不过去", e)
 	}
 	s.x.must(t, protocol.MethodChatSetPermissionMode, protocol.ChatSetPermissionModeRequest{SessionID: s.id, Mode: protocol.PermissionAcceptEdits}, nil)
 	m := s.mark()

@@ -81,6 +81,8 @@ type Options struct {
 // It keeps no per-client state.
 type Handler struct {
 	opts Options
+	// keyMu serializes custom endpoint launches so cleanup cannot remove a shared key.
+	keyMu sync.Mutex
 	// skillsMu lets one create at a time answer the trust prompt of
 	// userSkillsDir.
 	skillsMu sync.Mutex
@@ -177,10 +179,12 @@ func (h *Handler) Handle(ctx context.Context, req protocol.Envelope) protocol.En
 
 // Create starts a background session and returns its short id. Its
 // launch flags and extra environment come from launchConfig; claude gets
-// them plus ExtraFlags, --bg, -n <name> when a name is given, -w
-// <worktree> when a worktree is asked for, and "--" and the first message
-// when one is given. A missing working directory or a request launchConfig
-// refuses fails before claude runs.
+// them plus ExtraFlags, --permission-mode bypassPermissions unless a
+// permission mode or --dangerously-skip-permissions is already set or the
+// launch does not read user settings, --bg, -n <name> when a name is given,
+// -w <worktree> when a worktree is asked for, and "--" and the first
+// message when one is given. A missing working directory or a request
+// launchConfig refuses fails before claude runs.
 func (h *Handler) Create(ctx context.Context, req protocol.SessionCreateRequest) (string, error) {
 	return h.createDedup.Do(ctx, req.ClientReqID, func() (string, error) {
 		return h.createOnce(ctx, req)
@@ -194,11 +198,24 @@ func (h *Handler) createOnce(ctx context.Context, req protocol.SessionCreateRequ
 	if req.Worktree != "" && !worktreeName.MatchString(req.Worktree) {
 		return "", invalid("worktree 名只能用字母、数字、点、横线和下划线，不能以点或横线开头")
 	}
+	var newKeyPath string
+	if req.BaseURL != "" {
+		h.keyMu.Lock()
+		defer h.keyMu.Unlock()
+		path := h.keyPath(req.APIKey)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			newKeyPath = path
+		}
+	}
 	flags, env, err := h.launchConfig(ctx, req)
 	if err != nil {
 		return "", err
 	}
-	args := append(append(flags, h.opts.ExtraFlags...), "--bg")
+	args := append(flags, h.opts.ExtraFlags...)
+	if !hasPermissionMode(args) && readsUserSettings(args) {
+		args = append(args, "--permission-mode", string(protocol.PermissionBypass))
+	}
+	args = append(args, "--bg")
 	if req.Name != "" {
 		args = append(args, "-n", req.Name)
 	}
@@ -214,6 +231,11 @@ func (h *Handler) createOnce(ctx context.Context, req protocol.SessionCreateRequ
 	end := h.startLaunch()
 	defer func() { end(id) }()
 	out, err := h.run(ctx, req.Cwd, env, "--bg", args)
+	defer func() {
+		if newKeyPath != "" && claudeExited(err) {
+			_ = os.Remove(newKeyPath)
+		}
+	}()
 	if err != nil && untrusted(out) && req.Trust {
 		if err := attach.Trust(ctx, req.Cwd, []string{h.opts.Source.ClaudePath}, envList(env)); err != nil {
 			h.opts.Logger.Error("trust prompt", "err", err)
@@ -225,6 +247,9 @@ func (h *Handler) createOnce(ctx context.Context, req protocol.SessionCreateRequ
 		if untrusted(out) {
 			return "", &protocol.Error{Code: protocol.CodeNotTrusted, Message: "这个目录还没被 Claude Code 信任：" + req.Cwd + "。请先在目标机上进入这个目录运行一次 claude，接受信任提示后再试"}
 		}
+		if message := bypassRefusal(out); message != "" {
+			return "", &protocol.Error{Code: protocol.CodeInternal, Message: message}
+		}
 		return "", h.internal(failed, err)
 	}
 	id = parseBackgrounded(out)
@@ -233,6 +258,50 @@ func (h *Handler) createOnce(ctx context.Context, req protocol.SessionCreateRequ
 	}
 	h.opts.Changed()
 	return id, nil
+}
+
+// hasPermissionMode reports whether args set or inherit a permission mode or skip permissions.
+func hasPermissionMode(args []string) bool {
+	for _, arg := range args {
+		if arg == "--permission-mode" || strings.HasPrefix(arg, "--permission-mode=") ||
+			arg == "--inherit-permission-mode" || strings.HasPrefix(arg, "--inherit-permission-mode=") ||
+			arg == "--dangerously-skip-permissions" {
+			return true
+		}
+	}
+	return false
+}
+
+// readsUserSettings reports whether args load user settings, where Claude Code
+// keeps bypassPermissions consent. Restricted launches ignore user settings;
+// otherwise the last --setting-sources controls whether they are read.
+func readsUserSettings(args []string) bool {
+	if slices.Contains(args, "--restricted") {
+		return false
+	}
+	for i := len(args) - 1; i >= 0; i-- {
+		sources, ok := strings.CutPrefix(args[i], "--setting-sources=")
+		if args[i] == "--setting-sources" {
+			if i+1 == len(args) {
+				return true
+			}
+			sources, ok = args[i+1], true
+		}
+		if ok {
+			return slices.ContainsFunc(strings.Split(sources, ","), func(source string) bool {
+				return strings.TrimSpace(source) == "user"
+			})
+		}
+	}
+	return true
+}
+
+// claudeExited reports whether err is claude exiting on its own with a
+// failure code. A timeout, a cancel or a signal kills claude --bg instead, and
+// the background session it was starting may already be running.
+func claudeExited(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.Exited()
 }
 
 // startLaunch notes a launch of a background session under way. The
@@ -402,6 +471,11 @@ func (h *Handler) presetConfig(id string, models map[string]string) ([]string, m
 	return flags, env, nil
 }
 
+func (h *Handler) keyPath(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return filepath.Join(h.opts.Dir, "keys", hex.EncodeToString(sum[:8])+".key")
+}
+
 // endpointFlags points claude at a custom endpoint: the key goes to a file
 // in Options.Dir named after its hash, which apiKeyHelper reads, so it is
 // never on a command line or in a job record.
@@ -413,8 +487,7 @@ func (h *Handler) endpointFlags(baseURL, key string) ([]string, error) {
 	if strings.ContainsFunc(key, blank) {
 		return nil, invalid("API key 不能含空格或换行")
 	}
-	sum := sha256.Sum256([]byte(key))
-	path := filepath.Join(h.opts.Dir, "keys", hex.EncodeToString(sum[:8])+".key")
+	path := h.keyPath(key)
 	if err := keyfile.Write(path, []byte(key)); err != nil {
 		return nil, h.internal("保存 API key 失败，请在目标机上查看日志", err)
 	}
@@ -838,6 +911,18 @@ func (h *Handler) run(ctx context.Context, dir string, env map[string]string, la
 // has not been told to trust.
 func untrusted(out []byte) bool {
 	return bytes.Contains(ansi.ReplaceAll(out, nil), []byte("Workspace not trusted"))
+}
+
+// bypassRefusal returns a user-facing message for a known bypassPermissions refusal.
+func bypassRefusal(out []byte) string {
+	out = ansi.ReplaceAll(out, nil)
+	if bytes.Contains(out, []byte("which this launch does not read")) {
+		return "这个会话的启动方式不读目标机的用户设置，Claude Code 不允许它以 bypass 模式启动"
+	}
+	if bytes.Contains(out, []byte("requires accepting the disclaimer")) {
+		return "目标机上的 Claude Code 还没同意过 bypass 模式的声明，请先在目标机上交互运行一次 claude --dangerously-skip-permissions，接受提示后再试"
+	}
+	return ""
 }
 
 // environ is the agent's environment without the enroll key, with extra

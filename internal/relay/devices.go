@@ -26,7 +26,7 @@ func (s *Server) handleRevokeDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !removed {
-		writeError(w, http.StatusNotFound, protocol.CodeDeviceNotFound, "没有这台手机")
+		writeError(w, http.StatusNotFound, protocol.CodeDeviceNotFound, "没有这台设备")
 		return
 	}
 	s.mu.Lock()

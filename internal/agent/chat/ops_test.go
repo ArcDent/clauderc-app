@@ -235,7 +235,8 @@ func TestSetPermissionMode(t *testing.T) {
 		{"already there", nil, protocol.PermissionDefault, "\x0c", ""},
 		{"two steps", nil, protocol.PermissionPlan, "\x0c\x1b[Z\x0c\x1b[Z\x0c", ""},
 		{"never reached", []string{fakeattach.ModesEnv("default")}, protocol.PermissionAuto, "\x0c" + strings.Repeat("\x1b[Z\x0c", 4), protocol.CodeInternal},
-		{"bypass", nil, protocol.PermissionBypass, "", protocol.CodeInvalidParams},
+		{"bypass, screen never changes", []string{fakeattach.ModesEnv("default")}, protocol.PermissionBypass, "\x0c" + strings.Repeat("\x1b[Z\x0c", 4), protocol.CodeInternal},
+		{"bypass not in the cycle", nil, protocol.PermissionBypass, "\x0c" + strings.Repeat("\x1b[Z\x0c", 4), protocol.CodeInvalidParams},
 		{"dontAsk", nil, "dontAsk", "", protocol.CodeInvalidParams},
 	}
 	for _, c := range cases {

@@ -37,8 +37,11 @@ object PermissionMode {
     const val BYPASS = "bypassPermissions"
     const val DONT_ASK = "dontAsk"
 
-    /** The Shift+Tab cycle; only these can be switched to (design D7). */
-    val switchable = listOf(DEFAULT, ACCEPT_EDITS, PLAN, AUTO)
+    /**
+     * Modes offered in the phone picker. BYPASS only succeeds when the session was started with
+     * bypass enabled; otherwise the agent returns an error.
+     */
+    val switchable = listOf(DEFAULT, ACCEPT_EDITS, PLAN, AUTO, BYPASS)
 }
 
 object PendingKind {
