@@ -86,9 +86,14 @@ func TestUnknownDialogIsFlagged(t *testing.T) {
 		}
 	}
 
-	input := "──────────\n❯\u00a0\n──────────\n  ⏸ manual mode on"
+	rule := strings.Repeat("─", 127)
+	input := "\x1b[?1049h\x1b[?25l\x1b[?2026h\x1b[38;1H" + rule + "\x1b[39;1H❯\u00a0\x1b[40;1H" + rule + "\x1b[41;1H  ⏸ manual mode on\x1b[43;1H\x1b[?2026l"
 	f = newFixture(t, setup{status: "waiting", state: "blocked", screen: input})
 	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
+	term := f.openTerm(t, "c1")
+	if len(term.Lines) != 43 || term.Lines[37] != rule {
+		t.Fatalf("term.open did not return the 127×43 input box: %q", term.Lines)
+	}
 	time.Sleep(2 * time.Second)
 	var res protocol.ChatOpenResponse
 	if err := json.Unmarshal(f.ok(t, "c2", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID}), &res); err != nil {
@@ -137,7 +142,7 @@ func TestUnreliableScreenRefusesKeys(t *testing.T) {
 		res := f.call(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{
 			SessionID: shortID, ToolUseID: p.ToolUseID, Answers: []protocol.Answer{{Selected: []int{1}}},
 		})
-		if res.Error == nil || res.Error.Code != protocol.CodePendingChanged || f.keyLog() != "" {
+		if res.Error == nil || res.Error.Code != protocol.CodeNotDelivered || f.keyLog() != "" {
 			t.Fatalf("dialog: error = %+v, keys = %q", res.Error, f.keyLog())
 		}
 	})

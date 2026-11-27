@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -74,6 +75,12 @@ import clauderc.app.ui.components.tileSurface
 import clauderc.app.ui.components.SymbolButton
 import clauderc.app.ui.components.TextAction
 import clauderc.app.ui.components.UnderlineField
+import clauderc.app.ui.theme.PressKind
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.theme.listRowPress
+import clauderc.app.ui.theme.pressShrink
+import clauderc.app.ui.theme.PressIndication
+import clauderc.app.ui.theme.PressRow
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Lift
@@ -284,7 +291,7 @@ private fun CreateSessionFields(
                             Text(
                                 "全部 ${state.recent.size} 个",
                                 modifier = Modifier
-                                    .clickable(role = Role.Button, onClick = onShowAllDirs)
+                                    .listRowPress(PressRow.Title, onClick = onShowAllDirs)
                                     .padding(start = 40.dp, top = sp.sp2),
                                 fontSize = Clauderc.fontSizes.label,
                                 color = c.fg2,
@@ -357,7 +364,7 @@ private fun ModelsField(state: CreateUiState, field: Modifier, onToggle: () -> U
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(Clauderc.radii.sm))
-                .clickable(role = Role.Button, onClickLabel = if (state.modelsOpen) "收起模型" else "展开模型", onClick = onToggle)
+                .listRowPress(PressRow.Panel, onClickLabel = if (state.modelsOpen) "收起模型" else "展开模型", onClick = onToggle)
                 .padding(vertical = 2.dp)
                 .testTag("modelsFold"),
             horizontalArrangement = Arrangement.spacedBy(sp.sp2),
@@ -434,14 +441,16 @@ private fun NoteCard(note: FormNote?, onDismiss: () -> Unit, modifier: Modifier 
                 .background(tint)
                 .border(1.dp, c.danger.copy(alpha = 0.3f), shape)
         }
+        val notePress = remember { MutableInteractionSource() }
         Row(
             Modifier
                 .padding(start = sp.sp3, end = sp.sp3, top = sp.sp2, bottom = 14.dp)
                 .offset(x = Motion.nudgeDp(shake.value).dp)
+                .pressShrink(notePress, PressKind.Card)
                 .fillMaxWidth()
                 .heightIn(min = 52.dp)
                 .then(ground)
-                .clickable(onClickLabel = "关闭提示", onClick = onDismiss)
+                .clickable(notePress, controlPress(PressKind.Card, corner = if (style == UiStyle.Plate) 0.dp else 16.dp), onClickLabel = "关闭提示", onClick = onDismiss)
                 .padding(horizontal = sp.sp4, vertical = sp.sp3)
                 .semantics { liveRegion = LiveRegionMode.Polite }
                 .testTag("formNote"),
@@ -510,7 +519,7 @@ private fun ChoiceRow(title: String, sub: String, checked: Boolean, titleMono: B
     Row(
         Modifier
             .fillMaxWidth()
-            .selectable(selected = checked, role = Role.RadioButton, onClick = onClick)
+            .selectable(selected = checked, interactionSource = null, indication = PressIndication(row = PressRow.Choice), role = Role.RadioButton, onClick = onClick)
             .padding(vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp4),
         verticalAlignment = Alignment.CenterVertically,

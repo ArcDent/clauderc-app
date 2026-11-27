@@ -3,7 +3,6 @@ package clauderc.app.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.InteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,6 +24,7 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.pressProgress
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -103,9 +103,9 @@ fun Modifier.plateSweepFill(progress: Float, fillColor: Color, direction: PlateS
 }
 
 /** Draws a single solid offset shadow for 印版 cards/badges that collapses cleanly on press. */
-fun Modifier.plateHardShadow(color: Color, offsetDp: Dp = 3.dp, pressed: Boolean = false): Modifier = drawBehind {
-    if (!pressed) {
-        val o = offsetDp.toPx()
+fun Modifier.plateHardShadow(color: Color, offsetDp: Dp = 3.dp, press: Float = 0f, flat: Dp = 0.dp): Modifier = drawBehind {
+    val o = offsetDp.toPx() + (flat.toPx() - offsetDp.toPx()) * press
+    if (o > 0f) {
         drawRect(color, Offset(o, o), size)
     }
 }
@@ -122,11 +122,12 @@ fun Modifier.plateStamp(
     source: InteractionSource? = null,
     enabled: Boolean = true,
 ): Modifier {
-    val pressed = if (source != null) source.collectIsPressedAsState().value else false
+    val progress = if (source != null) pressProgress(source) else null
     return drawBehind {
-        if (enabled && !pressed) {
-            val gap = 2.5.dp.toPx()
-            val outer = 4.dp.toPx()
+        val lift = 1f - (progress?.value ?: 0f)
+        if (enabled && lift > 0f) {
+            val gap = 2.5.dp.toPx() * lift
+            val outer = 4.dp.toPx() * lift
             drawRect(ink, Offset(outer, outer), size)
             drawRect(paper, Offset(gap, gap), size)
         }

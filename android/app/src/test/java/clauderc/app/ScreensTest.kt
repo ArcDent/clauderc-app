@@ -2,14 +2,20 @@ package clauderc.app
 
 import clauderc.app.ui.theme.page
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Rect
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -19,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -41,20 +48,24 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToKey
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.unit.roundToIntRect
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.chat.ChatActions
 import clauderc.app.chat.ChatScreen
 import clauderc.app.chat.ChatUiState
 import clauderc.app.chat.ImageViewer
+import clauderc.app.chat.ToolThumb
 import clauderc.app.chat.Viewing
 import clauderc.app.data.AccentChoice
 import clauderc.app.data.Appearance
@@ -125,10 +136,25 @@ import clauderc.app.testing.sampleSessions
 import clauderc.app.testing.session
 import clauderc.app.ui.components.GlassNavBar
 import clauderc.app.ui.components.NavTab
+import clauderc.app.ui.components.MenuItem
+import clauderc.app.ui.components.PillButton
 import clauderc.app.ui.components.tileSurface
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercTheme
+import clauderc.app.ui.theme.PressKind
 import clauderc.app.ui.theme.Symbols
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.theme.pressProgress
+import clauderc.app.ui.theme.pressShrink
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.lerp
+import clauderc.app.ui.components.PlateSweep
+import clauderc.app.ui.components.plateSweepFill
 import java.io.File
 import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.buildJsonObject
@@ -150,6 +176,82 @@ class ScreensTest {
     private val out: File? = System.getProperty("clauderc.screens")?.let(::File)
 
     @Before fun onlyWhenAsked() = assumeTrue(out != null)
+
+    @Test fun pressedTile() = pressBoard(UiStyle.Tile)
+    @Test fun pressedInk() = pressBoard(UiStyle.Ink)
+    @Test fun pressedClear() = pressBoard(UiStyle.Clear)
+    @Test fun pressedPlate() = pressBoard(UiStyle.Plate)
+
+    private fun pressBoard(look: UiStyle) {
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            ClaudercTheme(darkTheme = look == UiStyle.Ink, style = look) {
+                Column(Modifier.fillMaxSize().page().testTag("pressBoard").padding(top = 32.dp)) {
+                    MenuItem("打开子代理", onClick = {}, icon = Symbols.Forum, modifier = Modifier.testTag("pressRow"))
+                    Column(Modifier.padding(horizontal = 20.dp)) {
+                        Spacer(Modifier.height(16.dp))
+                        PillButton("允许", onClick = {}, modifier = Modifier.testTag("pressPill"))
+                        Box(Modifier.padding(top = 16.dp, bottom = 16.dp)) {
+                            val c = Clauderc.colors
+                            val chipPress = remember { MutableInteractionSource() }
+                            val plate = look == UiStyle.Plate
+                            val sweep = if (plate) pressProgress(chipPress, PressKind.Chip, sweep = true).value else 0f
+                            val chipShape = if (plate) RectangleShape else CircleShape
+                            Box(
+                                Modifier
+                                    .pressShrink(chipPress, PressKind.Chip)
+                                    .clip(chipShape)
+                                    .background(if (plate) c.bg else if (look == UiStyle.Ink) c.surface2 else c.surface)
+                                    .then(if (plate) Modifier.plateSweepFill(sweep, c.fg, PlateSweep.LeftToRight).border(1.5.dp, c.fg, RectangleShape) else Modifier)
+                                    .clickable(chipPress, if (plate) null else controlPress(PressKind.Chip, corner = 100.dp)) {}
+                                    .padding(horizontal = 14.dp, vertical = 7.dp)
+                                    .testTag("pressChip"),
+                            ) {
+                                Text("时间线", color = if (plate) lerp(c.fg, c.bg, sweep) else c.fg)
+                            }
+                        }
+                        ToolThumb(ToolImage("press", "image/png", name = "chat.png"), 96.dp, 1f, onOpen = {})
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Box(Modifier.fillMaxWidth().height(280.dp)) {
+                        ChatScreen(ChatUiState(loading = false), ChatActions(onSend = { false }))
+                    }
+                    GlassNavBar(
+                        listOf(NavTab("会话", Symbols.Forum, Symbols.ForumFilled), NavTab("设置", Symbols.Settings, Symbols.SettingsFilled)),
+                        selected = 0, onSelect = {}, hazeState = null,
+                    )
+                }
+            }
+        }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.onNodeWithTag("composer").performTextInput("继续")
+        compose.mainClock.advanceTimeBy(400)
+        val board = compose.onNodeWithTag("pressBoard")
+        val result = board.captureToImage().asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(result)
+        val margin = with(compose.density) { 7.dp.roundToPx() }
+        val targets = listOf(
+            compose.onNodeWithTag("pressRow"), compose.onNodeWithTag("pressPill"),
+            compose.onNodeWithTag("pressChip"), compose.onNodeWithTag("toolThumb"),
+            compose.onNodeWithContentDescription("发送"), compose.onNodeWithText("设置"),
+        )
+        for (node in targets) {
+            val root = board.fetchSemanticsNode().boundsInRoot.topLeft
+            val bounds = node.fetchSemanticsNode().boundsInRoot.translate(-root).roundToIntRect()
+            node.performTouchInput { down(center) }
+            compose.mainClock.advanceTimeBy(150)
+            board.captureToImage()
+            val held = board.captureToImage().asAndroidBitmap()
+            // Take the full band so the moved shadow and the adjacent glass lens stay in the shot.
+            val band = Rect(0, (bounds.top - margin).coerceAtLeast(0), result.width, (bounds.bottom + margin).coerceAtMost(result.height))
+            canvas.drawBitmap(held, band, band, null)
+            node.performTouchInput { cancel() }
+            compose.mainClock.advanceTimeByFrame()
+            compose.mainClock.advanceTimeBy(400)
+        }
+        out!!.mkdirs()
+        File(out, "28-press-${look.name.lowercase()}.png").outputStream().use { result.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
 
     private var content by mutableStateOf<(@Composable () -> Unit)?>(null)
     private var dark by mutableStateOf(false)

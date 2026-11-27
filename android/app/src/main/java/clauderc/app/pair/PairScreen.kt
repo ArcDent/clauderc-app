@@ -136,6 +136,7 @@ fun PairScreen(
             onClick = onBack,
             modifier = Modifier.statusBarsPadding().padding(start = sp.sp1, top = sp.sp1),
             tint = c.onCamera,
+            darkPressAlpha = 0.22f,
         )
         AnimatedVisibility(
             visible = failed,

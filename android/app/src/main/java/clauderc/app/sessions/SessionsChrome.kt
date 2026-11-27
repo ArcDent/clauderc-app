@@ -2,11 +2,9 @@ package clauderc.app.sessions
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.graphics.lerp
 import clauderc.app.ui.components.PlateSweep
 import clauderc.app.ui.components.plateSweepFill
+import clauderc.app.ui.components.plateHardShadow
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -95,10 +94,13 @@ import clauderc.app.ui.components.tileSurface
 import clauderc.app.ui.components.glassPane
 import dev.chrisbanes.haze.HazeState
 import clauderc.app.ui.needsYou
+import clauderc.app.ui.theme.pressProgress
+import clauderc.app.ui.theme.listRowPress
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.theme.PressRow
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
-import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.PressKind
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
@@ -153,7 +155,7 @@ fun InkTopBar(
                 .pressShrink(drawerPress, PressKind.Icon)
                 .size(48.dp)
                 .inkSurface(c.float, c.edge, 24.dp)
-                .clickable(drawerPress, PressIndication(c.fg), role = Role.Button, onClick = onOpenDrawer)
+                .clickable(drawerPress, controlPress(PressKind.Icon), role = Role.Button, onClick = onOpenDrawer)
                 .semantics { contentDescription = "打开目录抽屉" }
                 .testTag("inkDrawerButton"),
             contentAlignment = Alignment.Center,
@@ -178,9 +180,9 @@ fun InkTopBar(
                     .captureAnchor(pillAnchor)
                     .widthIn(max = 244.dp)
                     .height(40.dp)
-                    .pressShrink(pillPress, PressKind.Plain)
+                    .pressShrink(pillPress, PressKind.Title)
                     .inkSurface(c.float, c.edge, 20.dp)
-                    .clickable(pillPress, PressIndication(c.fg), role = Role.Button) { onPillClick(pillAnchor.rect) }
+                    .clickable(pillPress, controlPress(PressKind.Title, corner = 100.dp), role = Role.Button) { onPillClick(pillAnchor.rect) }
                     .padding(start = 14.dp, end = 10.dp)
                     .testTag("inkMachinePill"),
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -214,7 +216,7 @@ fun InkTopBar(
                         .pressShrink(addPress, PressKind.Icon)
                         .size(48.dp)
                         .inkSurface(c.float, c.edge, 24.dp)
-                        .clickable(addPress, PressIndication(c.fg), enabled = rightEnabled, role = Role.Button) {
+                        .clickable(addPress, controlPress(PressKind.Icon), enabled = rightEnabled, role = Role.Button) {
                             if (rightAction == InkTopRight.Refresh) {
                                 scope.launch {
                                     spin.snapTo(0f)
@@ -350,7 +352,7 @@ fun InkPushDrawerHost(
                         .size(56.dp)
                         .shadow(if (c.isDark) 0.dp else 10.dp, CircleShape, ambientColor = c.scrim, spotColor = c.scrim)
                         .inkSurface(c.float, c.edge, 28.dp)
-                        .clickable(scanPress, PressIndication(c.fg), role = Role.Button) { onScanPairAt(scanAnchor.rect) }
+                        .clickable(scanPress, controlPress(PressKind.Icon), role = Role.Button) { onScanPairAt(scanAnchor.rect) }
                         .semantics { contentDescription = "扫码配对" }
                         .testTag("inkDrawerScanOrb"),
                     contentAlignment = Alignment.Center,
@@ -410,7 +412,7 @@ private fun DrawerRow(
             .clip(shape)
             .background(if (selected) c.card else Color.Transparent)
             .then(if (selected) Modifier.border(1.dp, c.edge, shape) else Modifier)
-            .clickable(role = Role.Button, onClick = onClick)
+            .listRowPress(PressRow.Panel, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -477,12 +479,15 @@ fun InkBrushTabs(
         ) {
             labels.forEachIndexed { idx, (text, badge) ->
                 val on = idx == selected
+                val press = remember { MutableInteractionSource() }
+                val hit by pressProgress(press, PressKind.Segment)
                 Row(
                     Modifier
                         .onGloballyPositioned { coords ->
                             slots[idx] = coords.positionInParent().x to coords.size.width.toFloat()
                         }
-                        .clickable(remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(idx) }
+                        .pressShrink(press, PressKind.Segment)
+                        .clickable(press, indication = null, role = Role.Tab) { onSelect(idx) }
                         .padding(vertical = 2.dp)
                         .testTag("brushTab:$idx"),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -492,7 +497,7 @@ fun InkBrushTabs(
                         text,
                         fontSize = 30.sp,
                         fontWeight = FontWeight.Medium,
-                        color = if (on) c.fg else c.fg3,
+                        color = if (on) c.fg else lerp(c.fg3, c.fg, hit),
                         lineHeight = 36.sp,
                     )
                     if (!badge.isNullOrEmpty()) {
@@ -555,9 +560,9 @@ internal fun TileSessionsBento(
                     )
                     Row(
                         Modifier
-                            .pressShrink(press, PressKind.Button)
+                            .pressShrink(press, PressKind.Card)
                             .tileSurface(c.card, 18.dp)
-                            .clickable(press, LocalIndication.current, role = Role.Button) { onSelectMachine(m) }
+                            .clickable(press, controlPress(PressKind.Card, corner = 14.dp), role = Role.Button) { onSelectMachine(m) }
                             .padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -589,9 +594,9 @@ internal fun TileSessionsBento(
                     val press = remember { MutableInteractionSource() }
                     Row(
                         Modifier
-                            .pressShrink(press, PressKind.Button)
+                            .pressShrink(press, PressKind.Card)
                             .tileSurface(c.surface, 18.dp)
-                            .clickable(press, LocalIndication.current, role = Role.Button, onClick = onPair)
+                            .clickable(press, controlPress(PressKind.Card, fill = c.line, corner = 14.dp), role = Role.Button, onClick = onPair)
                             .padding(horizontal = 14.dp, vertical = 14.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -639,7 +644,7 @@ internal fun TileSessionsBento(
                     .height(142.dp)
                     .pressShrink(leftPress, PressKind.Card)
                     .tileSurface(c.card, CardCorner)
-                    .clickable(leftPress, LocalIndication.current, role = Role.Button) {
+                    .clickable(leftPress, controlPress(PressKind.Card, corner = CardCorner), role = Role.Button) {
                         if (first != null) onOpenPending(first) else onCreate()
                     }
                     .padding(14.dp)
@@ -803,11 +808,12 @@ internal fun PlateMasthead(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val wmPress = remember { MutableInteractionSource() }
+            val wmHit by pressProgress(wmPress, PressKind.Title)
             Row(
                 Modifier
                     .weight(1f)
                     .pressShrink(wmPress, PressKind.Plain)
-                    .clickable(wmPress, LocalIndication.current, role = Role.Button, onClick = onOpenMachines)
+                    .clickable(wmPress, controlPress(PressKind.Title), role = Role.Button, onClick = onOpenMachines)
                     .padding(vertical = 2.dp)
                     .testTag("plateMachineTrigger"),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -815,11 +821,11 @@ internal fun PlateMasthead(
             ) {
                 Box(
                     Modifier
-                        .background(c.fg, RectangleShape)
+                        .background(lerp(c.fg, c.bg, wmHit), RectangleShape)
                         .padding(horizontal = 6.dp, vertical = 3.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(shortMark, fontSize = 11.sp, fontFamily = MonoFamily, fontWeight = FontWeight.ExtraBold, color = c.bg)
+                    Text(shortMark, fontSize = 11.sp, fontFamily = MonoFamily, fontWeight = FontWeight.ExtraBold, color = lerp(c.bg, c.fg, wmHit))
                 }
                 Text(
                     machine.name,
@@ -833,14 +839,18 @@ internal fun PlateMasthead(
             }
 
             val refPress = remember { MutableInteractionSource() }
+            val refSweep by pressProgress(refPress, PressKind.Stamp, sweep = true)
+            val refHit by pressProgress(refPress, PressKind.Stamp)
             val refSpin = remember { Animatable(0f) }
             val mastScope = rememberCoroutineScope()
             Box(
                 Modifier
-                    .pressShrink(refPress, PressKind.Icon)
+                    .pressShrink(refPress, PressKind.Stamp)
                     .size(34.dp)
+                    .plateHardShadow(c.fg, 2.dp, refHit)
                     .plateBox(c.bg, c.fg, 1.5.dp)
-                    .clickable(refPress, PressIndication(c.fg), role = Role.Button) {
+                    .plateSweepFill(refSweep, c.fg, PlateSweep.LeftToRight)
+                    .clickable(refPress, null, role = Role.Button) {
                         mastScope.launch {
                             refSpin.snapTo(0f)
                             refSpin.animateTo(360f, tween(520, easing = Motion.plateEasePress))
@@ -854,31 +864,22 @@ internal fun PlateMasthead(
                 Icon(
                     Symbols.Refresh,
                     contentDescription = null,
-                    tint = c.fg,
+                    tint = lerp(c.fg, c.bg, refHit),
                     modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = refSpin.value },
                 )
             }
 
-            // Differentiated button A: bottom-to-top ink sweep + 90° + rotation on press (demo.html .mast .plus).
             val addPress = remember { MutableInteractionSource() }
-            val addPressed by addPress.collectIsPressedAsState()
-            val addSweep by animateFloatAsState(
-                targetValue = if (online && addPressed) 1f else 0f,
-                animationSpec = tween(if (addPressed) 220 else 160, easing = Motion.plateEasePress),
-                label = "plateMastAddSweep",
-            )
-            val addRot by animateFloatAsState(
-                targetValue = if (online && addPressed) 90f else 0f,
-                animationSpec = tween(if (addPressed) 220 else 180, easing = Motion.plateEasePress),
-                label = "plateMastAddRot",
-            )
-            val addTint = if (online) lerp(c.fg, c.bg, addSweep) else c.fg3
+            val addSweep by pressProgress(addPress, PressKind.Stamp, sweep = true)
+            val addHit by pressProgress(addPress, PressKind.Stamp)
+            val addTint = if (online) lerp(c.fg, c.bg, addHit) else c.fg3
             Box(
                 Modifier
-                    .pressShrink(addPress, PressKind.Plain)
+                    .pressShrink(addPress, PressKind.Stamp)
                     .size(34.dp)
+                    .plateHardShadow(c.fg, 2.dp, if (online) addHit else 1f)
                     .background(if (online) c.bg else c.surface, RectangleShape)
-                    .plateSweepFill(addSweep, c.fg, PlateSweep.BottomToTop)
+                    .plateSweepFill(addSweep, c.fg, PlateSweep.LeftToRight)
                     .border(1.5.dp, if (online) c.fg else c.fg3, RectangleShape)
                     .clickable(addPress, indication = null, enabled = online, role = Role.Button, onClick = onCreate)
                     .semantics { contentDescription = "新建会话" }
@@ -889,7 +890,7 @@ internal fun PlateMasthead(
                     Symbols.Add,
                     contentDescription = null,
                     tint = addTint,
-                    modifier = Modifier.size(19.dp).graphicsLayer { rotationZ = addRot },
+                    modifier = Modifier.size(19.dp).graphicsLayer { rotationZ = 90f * addHit },
                 )
             }
         }
@@ -898,17 +899,12 @@ internal fun PlateMasthead(
 
         // Row 2: Giant mono numeral pending headline with forward-nudging arrow on press
         val headPress = remember { MutableInteractionSource() }
-        val headPressed by headPress.collectIsPressedAsState()
-        val headArrowShift by animateDpAsState(
-            targetValue = if (headPressed) 6.dp else 0.dp,
-            animationSpec = tween(160, easing = Motion.plateEasePress),
-            label = "plateHeadArrowShift",
-        )
+        val headArrowShift = 7.dp * pressProgress(headPress, PressKind.Title).value
         Row(
             Modifier
                 .fillMaxWidth()
-                .pressShrink(headPress, PressKind.Card)
-                .clickable(headPress, LocalIndication.current, role = Role.Button) {
+                .pressShrink(headPress, PressKind.Title)
+                .clickable(headPress, controlPress(PressKind.Title), role = Role.Button) {
                     if (first != null) onOpenPending(first) else onCreate()
                 }
                 .padding(vertical = 2.dp)

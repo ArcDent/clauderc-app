@@ -305,7 +305,7 @@ func checkInput(t *attach.Term) error {
 }
 
 func inputWriteError(err error) error {
-	if errors.Is(err, attach.ErrUnreliableScreen) {
+	if errors.Is(err, attach.ErrUnreliableScreen) || errors.Is(err, attach.ErrScreenTooSmall) {
 		return err
 	}
 	return &opError{protocol.CodeInternal, "向会话输入消息失败，请重试"}

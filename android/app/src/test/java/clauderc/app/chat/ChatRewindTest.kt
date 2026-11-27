@@ -9,6 +9,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.test.assertIsDisplayed
@@ -359,18 +360,18 @@ class ChatRewindTest {
         val (h, f) = l.leftHalves()
         val grown = l.half.tallest(h[0], h[1], h[2], h[3], c.bg, 0.15f).toFloat() / l.full.tallest(f[0], f[1], f[2], f[3], c.bg, 0.15f)
         assertTrue("half open it is ~0.8 of its size: $grown", grown in 0.72f..0.88f)
-        assertNear("pressed, the fill is the accent", c.accent, l.pressed.at(l.cx, l.cy - l.dp(13f)))
-        assertNear("pressed, the icon is on-accent", c.onAccent, l.pressed.strongest(l.cx - l.dp(9f), l.cx + l.dp(9f), l.cy - l.dp(9f), l.cy + l.dp(9f), c.accent), 0.1f)
+        assertNear("pressed, the fill deepens to the line color", c.line, l.pressed.at(l.cx, l.cy - l.dp(13f)))
+        assertNear("pressed, the icon stays ink", c.fg, l.pressed.strongest(l.cx - l.dp(9f), l.cx + l.dp(9f), l.cy - l.dp(9f), l.cy + l.dp(9f), c.line), 0.1f)
     }
 
-    @Test fun platesButtonIsAnEmptySquareInAThinLineThatOnlySlidesIn() {
+    @Test fun platesButtonSlidesInAndItsSquareSinksOnPress() {
         val l = looks(UiStyle.Plate)
         val c = l.colors
         // A square as tall as the one-line bubble beside it, its 1.5dp grey line reaching into the corners.
         val half = (l.bottom - l.top) / 2
         val tall = l.full.tallest(l.cx - half, l.cx - half + l.dp(2f), l.top - l.dp(4f), l.bottom + l.dp(4f), c.bg, 0.06f)
         val wide = l.full.tallest(l.cx - half - l.dp(4f), l.cx + half + l.dp(4f), l.top, l.top + l.dp(2f), c.bg, 0.06f, across = true)
-        assertTrue("as tall as the bubble: $tall against ${2 * half}", abs(tall - 2 * half) <= l.dp(1f))
+        assertTrue("the square and its shadow: $tall against ${2 * half}", abs(tall - 2 * half) <= l.dp(2f))
         assertTrue("as wide as tall: $wide against $tall", abs(wide - tall) <= l.dp(1f))
         val corner = l.full.strongest(l.cx + half - l.dp(2.5f), l.cx + half, l.cy + half - l.dp(2.5f), l.cy + half, c.bg)
         assertNear("the line in the corner", c.surface2, corner)
@@ -381,10 +382,12 @@ class ChatRewindTest {
         val (h, f) = l.leftHalves()
         val faded = distance(l.half.strongest(h[0], h[1], h[2], h[3], c.bg), c.bg) / distance(l.full.strongest(f[0], f[1], f[2], f[3], c.bg), c.bg)
         assertTrue("half open it does not fade: $faded", faded > 0.9f)
-        // Round 12: a press fills the square with the text colour under an icon in the page colour.
-        assertNear("pressed, the square fills with the text colour", c.fg, l.pressed.at(l.cx + l.dp(15f), l.cy))
-        assertNear("pressed, the line is the text colour too", c.fg, l.pressed.at(l.cx + half - l.dp(0.75f), l.cy))
-        assertNear("pressed, the icon is the page colour", c.bg, l.pressed.strongest(l.cx - l.dp(10f), l.cx + l.dp(10f), l.cy - l.dp(10f), l.cy + l.dp(10f), c.fg), 0.06f)
+        val sink = l.dp(1.5f)
+        val x = l.cx + sink
+        val y = l.cy + sink
+        assertNear("pressed, the square fills with the text colour", c.fg, l.pressed.at(x + l.dp(15f), y))
+        assertNear("pressed, the left edge sinks to the right", c.bg, l.pressed.at(l.cx - half + l.dp(0.5f), y))
+        assertNear("pressed, the antialiased icon is the page colour", c.bg, l.pressed.strongest(x - l.dp(10f), x + l.dp(10f), y - l.dp(10f), y + l.dp(10f), c.fg), 0.09f)
     }
 
     @Test fun clearsButtonIsTheBareGreyIconFadingInWithTheSlide() {
@@ -398,9 +401,8 @@ class ChatRewindTest {
         val (h, f) = l.leftHalves()
         val faded = distance(l.half.strongest(h[0], h[1], h[2], h[3], c.bg), c.bg) / distance(l.full.strongest(f[0], f[1], f[2], f[3], c.bg), c.bg)
         assertTrue("half open it is half faded: $faded", faded in 0.3f..0.75f)
-        // Round 12: a press turns the icon the text colour on a round 10% tint of it, 8dp past the icon.
         assertNear("pressed, the icon is the text colour", c.fg, l.pressed.strongest(l.cx - l.dp(11f), l.cx + l.dp(11f), l.cy - l.dp(11f), l.cy + l.dp(11f), c.bg), 0.06f)
-        val tint = c.fg.copy(alpha = 0.1f).compositeOver(c.bg)
+        val tint = lerp(c.lens, c.fg, 0.08f).compositeOver(c.bg)
         for ((dx, dy) in listOf(15f to 0f, -15f to 0f, 0f to 15f, 0f to -15f)) {
             assertNear("pressed, the tint at ($dx, $dy)", tint, l.pressed.at(l.cx + l.dp(dx), l.cy + l.dp(dy)), 0.02f)
         }

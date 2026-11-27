@@ -9,7 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,7 +56,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -81,6 +80,8 @@ import clauderc.app.protocol.GitShowRequest
 import clauderc.app.protocol.GitShowResponse
 import clauderc.app.protocol.Method
 import clauderc.app.ui.baseName
+import clauderc.app.ui.components.smallPressButton
+import clauderc.app.ui.components.smallButtonTint
 import clauderc.app.ui.components.AppBar
 import clauderc.app.ui.components.BarTitle
 import clauderc.app.ui.components.CardCorner
@@ -99,6 +100,10 @@ import clauderc.app.ui.components.plateBox
 import clauderc.app.ui.components.rememberAnchorBox
 import clauderc.app.ui.components.tileSurface
 import androidx.compose.ui.text.style.TextOverflow
+import clauderc.app.ui.theme.listRowPress
+import clauderc.app.ui.theme.PressKind
+import clauderc.app.ui.theme.PressRow
+import clauderc.app.ui.theme.pressShrink
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercColors
 import clauderc.app.ui.theme.MonoFamily
@@ -258,17 +263,19 @@ fun CommitMorphPanel(
                                         Text("父提交", Modifier.width(56.dp), fontSize = Clauderc.fontSizes.label, color = c.fg3)
                                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                             show.parents.forEach { ph ->
+                                                val parentPress = remember { MutableInteractionSource() }
                                                 Text(
                                                     ph.take(7),
                                                     modifier = Modifier
+                                                        .pressShrink(parentPress, PressKind.SmallButton)
                                                         .clip(RoundedCornerShape(8.dp))
                                                         .background(c.surface2)
-                                                        .clickable(role = Role.Button) { onOpenParent(ph) }
+                                                        .smallPressButton(parentPress, shrink = false) { onOpenParent(ph) }
                                                         .padding(horizontal = 8.dp, vertical = 4.dp)
                                                         .testTag("commitParent:${ph.take(7)}"),
                                                     fontFamily = MonoFamily,
                                                     fontSize = Clauderc.fontSizes.monoSm,
-                                                    color = c.fg,
+                                                    color = smallButtonTint(parentPress, c.fg),
                                                 )
                                             }
                                         }
@@ -457,7 +464,7 @@ private fun CommitFileRow(f: CommitFile, modifier: Modifier = Modifier, onClick:
     Row(
         modifier
             .fillMaxWidth()
-            .clickable(enabled = !f.binary, role = Role.Button, onClick = onClick)
+            .listRowPress(PressRow.Panel, enabled = !f.binary, onClick = onClick)
             .padding(start = Clauderc.look.rowStart, end = if (Clauderc.look.cards) sp.sp4 else sp.sp4 + sp.sp2, top = 10.dp, bottom = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(sp.sp4),
         verticalAlignment = Alignment.CenterVertically,

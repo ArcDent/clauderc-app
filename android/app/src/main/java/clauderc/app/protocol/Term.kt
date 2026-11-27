@@ -4,7 +4,8 @@ import kotlinx.serialization.Serializable
 
 /**
  * The terminal of a running session as its hidden attach shows it: one line per row of
- * the 40 by 120 screen, trailing spaces removed. [cursorCol] counts the characters of
+ * the screen, trailing spaces removed. Rows and columns follow the session's
+ * current layout. [cursorCol] counts the characters of
  * the cursor's line before it and may lie past the line's end; [cursor] is false while
  * Claude Code hides it, as in a panel. The answer to term.open and the body of
  * term.screen, which comes at most 5 times a second.

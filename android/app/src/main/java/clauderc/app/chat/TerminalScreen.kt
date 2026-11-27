@@ -74,13 +74,12 @@ import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.Lift
 import clauderc.app.ui.theme.MonoFamily
-import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.PressKind
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
-import clauderc.app.ui.theme.snapPressed
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.ui.graphics.graphicsLayer
+import clauderc.app.ui.theme.pressProgress
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.components.plateHardShadow
 import androidx.compose.ui.graphics.lerp
 
 /** One key of the key bar: what term.key sends, and its label or symbol. */
@@ -340,12 +339,11 @@ private fun androidx.compose.foundation.layout.RowScope.KeyCap(k: BarKey, height
     val ui = Clauderc.style
     val press = remember { MutableInteractionSource() }
     val plate = ui == UiStyle.Plate
-    // 印版 hits a key like a typewriter's: sinks 2dp and turns solid ink on press.
-    val sink by snapPressed(press, Clauderc.motion.easeSpring)
-    val hit by snapPressed(press, LinearEasing)
+    val hit = if (plate) pressProgress(press, PressKind.Key).value else 0f
+    val ink = c.fg
     val face = if (plate) lerp(c.fg, c.bg, hit) else c.fg
     val cap = when (ui) {
-        UiStyle.Plate -> Modifier.plateBox(lerp(c.bg, c.fg, hit), c.fg, 1.5.dp)
+        UiStyle.Plate -> Modifier.plateHardShadow(ink, 2.5.dp, if (enabled) hit else 1f).plateBox(lerp(c.bg, ink, hit), ink, 1.5.dp)
         UiStyle.Ink -> Modifier.inkSurface(c.float, c.edge, 10.dp)
         UiStyle.Tile -> Modifier.tileSurface(c.card, 10.dp)
         UiStyle.Clear -> Modifier.clip(RoundedCornerShape(Clauderc.radii.sm)).background(c.surface)
@@ -353,11 +351,10 @@ private fun androidx.compose.foundation.layout.RowScope.KeyCap(k: BarKey, height
     Box(
         Modifier
             .weight(1f)
-            .pressShrink(press, PressKind.Still)
-            .then(if (plate) Modifier.graphicsLayer { translationY = 2.dp.toPx() * sink } else Modifier)
+            .pressShrink(press, PressKind.Key)
             .height(height)
             .then(cap)
-            .clickable(press, PressIndication(c.fg2), enabled = enabled, role = Role.Button) { onKey(k.key) }
+            .clickable(press, if (plate) null else controlPress(PressKind.Key, corner = 10.dp), enabled = enabled, role = Role.Button) { onKey(k.key) }
             .alpha(if (enabled) 1f else 0.4f)
             .semantics { contentDescription = k.label },
         contentAlignment = Alignment.Center,

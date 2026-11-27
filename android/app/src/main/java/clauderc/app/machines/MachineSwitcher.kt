@@ -1,14 +1,12 @@
 package clauderc.app.machines
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +25,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import clauderc.app.ui.components.plateStamp
+import clauderc.app.ui.theme.pressProgress
+import clauderc.app.ui.theme.listRowPress
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.theme.PressRow
 import clauderc.app.ui.theme.Motion
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -80,7 +82,6 @@ import clauderc.app.ui.needsYou
 import clauderc.app.ui.sessionStateText
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
-import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.PressKind
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
@@ -180,13 +181,13 @@ fun ClearPendingStrip(
                 scaleY = 0.30f + 0.70f * p
                 alpha = p.coerceIn(0f, 1f)
             }
-            .pressShrink(press, PressKind.Card)
+            .pressShrink(press, PressKind.Pending)
             .shadow(10.dp, shape, ambientColor = c.glassShadow, spotColor = c.glassShadow)
             .clip(shape)
             .then(glass)
             .topHighlight(c.rim)
             .border(0.5.dp, c.edge, shape)
-            .clickable(press, PressIndication(c.fg), role = Role.Button, onClickLabel = "前往下一个待确认") { onOpenNext(first) }
+            .clickable(press, controlPress(PressKind.Pending, corner = 23.dp), role = Role.Button, onClickLabel = "前往下一个待确认") { onOpenNext(first) }
             .padding(start = 18.dp, end = 12.dp, top = 11.dp, bottom = 11.dp)
             .testTag("clearPendingStrip"),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -265,7 +266,7 @@ fun InkHubSheet(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clickable(role = Role.Button) { dismissThen { onOpenPending(entry) } }
+                        .listRowPress(PressRow.Panel) { dismissThen { onOpenPending(entry) } }
                         .padding(start = 22.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -309,7 +310,7 @@ fun InkHubSheet(
         Row(
             Modifier
                 .fillMaxWidth()
-                .clickable(role = Role.Button) { dismissThen(onPair) }
+                .listRowPress(PressRow.Panel) { dismissThen(onPair) }
                 .padding(start = 18.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -434,7 +435,7 @@ private fun InkStatusRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = onClick)
+            .listRowPress(PressRow.Panel, onClick = onClick)
             .padding(horizontal = 22.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -567,11 +568,11 @@ fun PendingJumpBadge(
     when (Clauderc.style) {
         UiStyle.Tile -> Box(
             modifier
-                .pressShrink(press, PressKind.Icon)
+                .pressShrink(press, PressKind.Badge)
                 .size(38.dp)
                 .clip(CookieShape)
                 .background(c.accent)
-                .clickable(press, PressIndication(c.onAccent), role = Role.Button, onClick = onClick)
+                .clickable(press, null, role = Role.Button, onClick = onClick)
                 .semantics { contentDescription = "$count 个待确认" }
                 .testTag("pendingJumpBadge"),
             contentAlignment = Alignment.Center,
@@ -579,17 +580,12 @@ fun PendingJumpBadge(
             Text(count.toString(), color = c.onAccent, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
         }
         UiStyle.Plate -> {
-            val pressed by press.collectIsPressedAsState()
-            val arrowShift by animateDpAsState(
-                targetValue = if (pressed) 6.dp else 0.dp,
-                animationSpec = tween(160, easing = Motion.plateEasePress),
-                label = "stampArrowShift",
-            )
+            val arrowShift = 6.dp * pressProgress(press, PressKind.Badge).value
             Row(
                 modifier
                     .pressShrink(press, PressKind.Primary)
                     .plateStamp(c.fg, c.bg, c.fg, source = press)
-                    .clickable(press, PressIndication(c.bg), role = Role.Button, onClick = onClick)
+                    .clickable(press, null, role = Role.Button, onClick = onClick)
                     .padding(horizontal = 9.dp, vertical = 5.dp)
                     .semantics { contentDescription = "$count 个待确认" }
                     .testTag("pendingJumpBadge"),

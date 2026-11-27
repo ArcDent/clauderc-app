@@ -195,9 +195,8 @@ class SwipeRowTest {
         compose.mainClock.autoAdvance = false
         val rest = compose.onRoot().captureToImage().toPixelMap()
         button.performTouchInput { down(center) }
-        // In the scrolling list the press lands 100ms late; a few frames after that it shows in full, with no
-        // transition in (a durS one would be less than half way).
-        compose.mainClock.advanceTimeBy(160)
+        // Allow for clickable's delay in a scrollable list and the style's press-in tween.
+        compose.mainClock.advanceTimeBy(250)
         val held = compose.onRoot().captureToImage().toPixelMap()
         button.performTouchInput { cancel() }
         compose.mainClock.advanceTimeBy(400)
@@ -237,7 +236,7 @@ class SwipeRowTest {
         }
     }
 
-    /** 清玻: the bare red symbol, 24dp, no circle; pressed it shrinks to 82% and turns, and comes back. */
+    /** The glass stop button has a bare icon at rest and a tinted, flattened face when held. */
     @Test fun clearsStopButtonIsTheBareRedSymbol() {
         val s = stopShots(UiStyle.Clear)
         val c = s.c
@@ -245,7 +244,8 @@ class SwipeRowTest {
         for ((dx, dy) in listOf(16f to 0f, -16f to 0f, 0f to 16f, 0f to -16f)) assertNear("no circle at ($dx, $dy)", c.bg, s.rest.at(s.cx + s.dp(dx), s.cy + s.dp(dy)), 0.02f)
         val red = s.count(s.rest, 14f, c.danger)
         val pressed = s.count(s.held, 14f, c.danger)
-        assertTrue("pressed, the symbol shrinks at once: $pressed of $red red pixels", red > 0 && pressed < red * 0.85f)
+        assertTrue("the red symbol still shows while held", red > 0 && pressed > 0)
+        assertTrue("a tint appears behind it when held", distance(s.held.at(s.cx + s.dp(10f), s.cy), c.bg) > 0.02f)
         s.assertBackAtRest()
     }
 
@@ -257,19 +257,20 @@ class SwipeRowTest {
         assertNear("nothing fills it", c.bg, s.rest.at(s.cx - s.dp(15f), s.cy), 0.02f)
         assertNear("square corners", c.danger, s.rest.at(s.cx - s.dp(19.25f), s.cy - s.dp(19.25f)))
         assertNear("the symbol is red", c.danger, s.strongest(s.rest, 10f, c.bg))
-        assertNear("pressed, it fills red at once", c.danger, s.held.at(s.cx - s.dp(15f), s.cy))
-        assertNear("pressed, the symbol is white", Color.White, s.strongest(s.held, 10f, c.danger), 0.1f)
+        assertNear("pressed, it fills red", c.danger, s.held.at(s.cx - s.dp(15f), s.cy))
+        val icon = s.strongest(s.held, 13f, c.danger)
+        assertTrue("pressed, the antialiased symbol turns white: $icon", distance(Color.White, icon) < distance(c.danger, icon))
         s.assertBackAtRest()
     }
 
-    /** 素卡: a white circle round a red symbol; pressed it fills red under a white symbol. */
+    /** The soft-card stop button darkens the face and keeps its red symbol. */
     @Test fun tilesStopButtonIsACardCircle() {
         val s = stopShots(UiStyle.Tile)
         val c = s.c
         assertNear("the card inside", c.card, s.rest.at(s.cx - s.dp(15f), s.cy))
         assertNear("the symbol is red", c.danger, s.strongest(s.rest, 10f, c.card))
-        assertNear("pressed, it fills red at once", c.danger, s.held.at(s.cx - s.dp(12f), s.cy))
-        assertNear("pressed, the symbol is white", Color.White, s.strongest(s.held, 9f, c.danger), 0.1f)
+        assertNear("pressed, the face darkens", c.line, s.held.at(s.cx - s.dp(12f), s.cy))
+        assertNear("pressed, the symbol is red", c.danger, s.strongest(s.held, 9f, c.line), 0.1f)
         s.assertBackAtRest()
     }
 

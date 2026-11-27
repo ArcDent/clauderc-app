@@ -3,6 +3,7 @@ package clauderc.app.chat
 import android.content.ClipData
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -79,7 +80,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -98,8 +98,12 @@ import clauderc.app.data.UiStyle
 import clauderc.app.ui.components.LocalSnack
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercMotion
+import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.MonoFamily
-import clauderc.app.ui.theme.PressIndication
+import clauderc.app.ui.theme.PressKind
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.theme.pressProgress
+import androidx.compose.ui.graphics.lerp
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
 import clauderc.app.ui.theme.styled
@@ -209,7 +213,7 @@ private const val CODE_ANNOTATION_TAG = "code"
 
 /**
  * [runs] styled in [color]: `code` in mono a size down, **bold** at 600, both keeping the colour; a
- * link opens [links]' menu when tapped, its stretch shaded 12% while pressed. A formula is inline
+ * link opens [links]' menu when tapped. A formula is inline
  * content written as its LaTeX (ReplyMath.kt) when [drawn] has its id, else that LaTeX in mono and [muted].
  */
 internal fun styled(runs: List<MdRun>, color: Color, muted: Color, links: TextLinks, drawn: Set<String>): AnnotatedString = buildAnnotatedString {
@@ -225,7 +229,7 @@ internal fun styled(runs: List<MdRun>, color: Color, muted: Color, links: TextLi
             RunKind.BOLD -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(r.text) }
             RunKind.LINK -> {
                 val url = r.url.orEmpty()
-                val link = LinkAnnotation.Clickable(url, TextLinkStyles(pressedStyle = SpanStyle(background = color.copy(alpha = 0.12f)))) { links.tapped(url) }
+                val link = LinkAnnotation.Clickable(url) { links.tapped(url) }
                 withLink(link) { append(r.text) }
             }
         }
@@ -415,12 +419,19 @@ private fun InlineRunsText(
     // A formula the library gave no content for shows as written, not as plain text.
     val full = remember(runs, color, muted, math.keys) { styled(runs, color, muted, links, math.keys) }
     val cut = visibleLength(runs, shown)
+    val linkPress = animateFloatAsState(if (links.held) 1f else 0f, Motion.linkPress(links.held), label = "linkPress")
+    val visible = if (cut == 0) AnnotatedString("") else if (cut >= full.length) full else full.subSequence(0, cut)
+    val range = links.pressedRange
+    val displayed = if (linkPress.value > 0f && range != null && range.first < visible.length) buildAnnotatedString {
+        append(visible)
+        addStyle(SpanStyle(color = color.copy(alpha = color.alpha * (1f - 0.35f * linkPress.value))), range.first, minOf(range.last + 1, visible.length))
+    } else visible
     val density = LocalDensity.current
     val fontSizePx = with(density) { fontSize.toPx() }
     Box(modifier) {
         Text(
             // A zero-length slice can retain a formula placeholder that Android never measures.
-            if (cut == 0) AnnotatedString("") else if (cut >= full.length) full else full.subSequence(0, cut),
+            displayed,
             Modifier
                 .drawBehind {
                     val boxes = codeSpots.spots
@@ -453,7 +464,7 @@ private fun InlineRunsText(
                         }
                     }
                 }
-                .links(links, color),
+                .links(links, color, linkPress),
             color = color,
             style = style,
             softWrap = softWrap,
@@ -639,13 +650,15 @@ private fun CopyCodeButton(code: String) {
             swap.back(m)
         }
     }
-    val tint = if (done) c.fg else c.fg2
+    val plate = Clauderc.style == UiStyle.Plate
+    val icon = if (done) c.fg else c.fg2
+    val tint = if (plate) lerp(icon, c.bg, pressProgress(press, PressKind.Icon).value) else icon
     Box(
         Modifier
-            .pressShrink(press)
+            .pressShrink(press, PressKind.Icon)
             .size(30.dp)
             .clip(shape)
-            .clickable(press, PressIndication(tint), role = Role.Button) { taps++ }
+            .clickable(press, controlPress(PressKind.Icon, fill = if (plate) c.fg else Color.Unspecified), role = Role.Button) { taps++ }
             .semantics { contentDescription = "复制代码" },
         contentAlignment = Alignment.Center,
     ) {

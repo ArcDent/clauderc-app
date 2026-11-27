@@ -10,8 +10,8 @@ import (
 	"clauderc/internal/protocol"
 )
 
-// recorded replays the output of a real `claude attach` (Claude Code
-// 2.1.323, 120x40) up to the named mark of testdata/recorded.marks.json
+// recorded replays the output of a real `claude attach` with changing sizes
+// up to the named mark of testdata/recorded.marks.json
 // and returns the screen text.
 func recorded(t *testing.T, mark string) string {
 	t.Helper()
@@ -47,6 +47,11 @@ func TestRecordedAfterEscIsReliable(t *testing.T) {
 	if recordedScreen(t, "after-esc").View().Unreliable {
 		t.Error("screen after Esc is unreliable")
 	}
+}
+
+func TestRecordedSize(t *testing.T) {
+	checkRecordedSize(t, recordedScreen(t, "mode-default").View(), 127, 43)
+	checkRecordedSize(t, recordedScreen(t, "mode-acceptEdits").View(), 120, 40)
 }
 
 func TestParseModeFromRecordedScreens(t *testing.T) {

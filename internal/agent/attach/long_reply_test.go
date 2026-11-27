@@ -20,22 +20,21 @@ func TestLongReplyReplayReliability(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := attach.NewScreen(attach.Rows, attach.Cols)
-	const beforeRedraw, afterWrap, afterSync = 35408, 35992, 40822
+	const beforeRedraw, midRedraw, afterSync = 35408, 35992, 40822
 	s.Write(raw[:beforeRedraw])
 	before := s.View()
-	if before.Unreliable {
-		t.Fatal("screen before oversized redraw is unreliable")
-	}
-	s.Write(raw[beforeRedraw:afterWrap])
+	checkRecordedSize(t, before, 120, 40)
+	s.Write(raw[beforeRedraw:midRedraw])
 	if v := s.View(); !v.Unreliable || !reflect.DeepEqual(v.Lines, before.Lines) {
-		t.Error("oversized redraw exposed the in-progress grid")
+		t.Error("resize exposed the in-progress grid")
 	}
-	s.Write(raw[afterWrap:afterSync])
-	if v := s.View(); !v.Unreliable || !reflect.DeepEqual(v.Lines, before.Lines) {
-		t.Error("oversized redraw was published at the end of synchronized output")
-	}
+	s.Write(raw[midRedraw:afterSync])
+	checkRecordedSize(t, s.View(), 149, 43)
+	const backToOriginalSize = 77136
+	s.Write(raw[afterSync:backToOriginalSize])
+	checkRecordedSize(t, s.View(), 120, 40)
 	beforeExit := bytes.Index(raw, []byte("\x1b[?1049l"))
-	s.Write(raw[afterSync:beforeExit])
+	s.Write(raw[backToOriginalSize:beforeExit])
 	if s.View().Unreliable {
 		t.Error("screen before leaving the alternate screen is unreliable")
 	}
@@ -43,6 +42,19 @@ func TestLongReplyReplayReliability(t *testing.T) {
 	if s.View().Unreliable {
 		t.Error("screen after replaying all output is unreliable")
 	}
+}
+
+func checkRecordedSize(t *testing.T, v attach.View, width, height int) {
+	t.Helper()
+	if v.Unreliable || v.Width != width || v.Height != height || len(v.Lines) != height {
+		t.Fatalf("size %d×%d, %d lines, unreliable=%v; want %d×%d", v.Width, v.Height, len(v.Lines), v.Unreliable, width, height)
+	}
+	for _, line := range v.Lines {
+		if line == strings.Repeat("─", width) {
+			return
+		}
+	}
+	t.Fatalf("no full-width rule at %d columns", width)
 }
 
 func TestLongReplyReplay(t *testing.T) {

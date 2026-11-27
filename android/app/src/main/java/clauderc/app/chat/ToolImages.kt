@@ -12,6 +12,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -66,6 +67,13 @@ import clauderc.app.ui.components.SymbolButtonFrame
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
+import clauderc.app.ui.theme.PressKind
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.theme.pressProgress
+import clauderc.app.ui.theme.pressShrink
+import clauderc.app.data.UiStyle
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.Color
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.styled
 import java.util.Base64
@@ -93,13 +101,18 @@ private fun rememberThumb(image: ToolImage): ImageBitmap? {
 fun ToolThumb(image: ToolImage, maxHeight: Dp, widthShare: Float, onOpen: OpenImage, modifier: Modifier = Modifier) {
     val c = Clauderc.colors
     val placed = remember { Placed() }
-    val shape = RoundedCornerShape(12.dp)
+    val ui = Clauderc.style
+    val shape = RoundedCornerShape(if (ui == UiStyle.Plate) 0.dp else 12.dp)
+    val press = remember { MutableInteractionSource() }
+    val edge = if (Clauderc.look.cards) c.ink else c.line
+    val hit = pressProgress(press, PressKind.ToolImage).value
     val tile = Modifier
         .onPlaced { placed.coords = it }
+        .pressShrink(press, PressKind.ToolImage)
         .clip(shape)
         .background(if (Clauderc.look.cards) c.panel else c.surface)
-        .border(if (Clauderc.look.cards) 1.5.dp else 1.dp, if (Clauderc.look.cards) c.ink else c.line, shape)
-        .clickable(role = Role.Button, onClickLabel = "查看 ${image.name ?: "图片"}") { onOpen(Viewing(image, placed.coords?.takeIf { it.isAttached }?.boundsInRoot())) }
+        .border(if (Clauderc.look.cards) 1.5.dp else 1.dp, if (ui == UiStyle.Ink) lerp(edge, c.fg3, hit) else edge, shape)
+        .clickable(press, if (ui == UiStyle.Ink) null else controlPress(PressKind.ToolImage, fill = c.surface, corner = if (ui == UiStyle.Plate) 0.dp else 12.dp), role = Role.Button, onClickLabel = "查看 ${image.name ?: "图片"}") { onOpen(Viewing(image, placed.coords?.takeIf { it.isAttached }?.boundsInRoot())) }
         .testTag("toolThumb")
     if (image.thumb == null) {
         Column(modifier.then(tile).size(148.dp, 96.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -198,7 +211,7 @@ fun ImageViewer(
                 horizontalArrangement = Arrangement.spacedBy(sp.sp2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                SymbolButton(Symbols.Close, "关闭", onClick = close, tint = c.onCamera)
+                SymbolButton(Symbols.Close, "关闭", onClick = close, tint = c.onCamera, darkPressAlpha = 0.24f)
                 // Without a file name the format is the title, so the line under it leaves the format out.
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(img.name ?: imageType(img.mediaType), fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.mono, color = c.onCamera, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -288,9 +301,10 @@ private fun SaveButton(ready: Boolean, saving: Boolean, saved: Boolean, onSave: 
             if (saved) stateDescription = "已保存"
         },
         enabled = ready && !saving && !saved,
-        tint = c.onCamera,
-    ) {
-        swap.Icons(Symbols.Download.styled, tint, iconSize = 24.dp, tickSize = 24.dp)
+        darkPressAlpha = 0.24f,
+    ) { hit ->
+        val iconTint = if (Clauderc.style == UiStyle.Plate) lerp(tint, Color.Black, hit.value) else tint
+        swap.Icons(Symbols.Download.styled, iconTint, iconSize = 24.dp, tickSize = 24.dp)
         AnimatedVisibility(saving, enter = fadeIn(tween(m.durS, late, m.easeEmph)), exit = fadeOut(tween(m.durS, easing = m.easeEmphIn))) {
             Spinner(size = 18.dp, color = tint)
         }

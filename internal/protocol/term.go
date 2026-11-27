@@ -43,8 +43,8 @@ type TermOpenRequest struct {
 // term.open and the body of term.screen.
 type TermScreen struct {
 	SessionID string `json:"sessionId"`
-	// Lines has one entry per row of the 40 by 120 terminal, trailing
-	// spaces removed.
+	// Lines has one entry per row, with trailing spaces removed. The number
+	// of rows and columns follows the session's current layout.
 	Lines []string `json:"lines"`
 	// CursorRow and CursorCol place the cursor, 0-based; CursorCol counts
 	// the characters of Lines[CursorRow] before it, a wide one being one,

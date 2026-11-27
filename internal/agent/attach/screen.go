@@ -17,6 +17,10 @@ type Screen struct {
 	r, c       int
 	rowOutside bool
 	pending    []byte // an incomplete sequence or UTF-8 character
+	// Another client can resize the session without resizing this attach's PTY.
+	alternate                bool
+	width, height, parkedRow int
+	lastWidth, lastHeight    int
 	// hidden is set while the program hides the cursor; Claude Code hides
 	// it while it draws and shows it again at the input.
 	hidden               bool
@@ -25,15 +29,16 @@ type Screen struct {
 	frameUntil           time.Time
 }
 
-const frameTimeout = time.Second
+const (
+	frameTimeout = time.Second
+	maxRows      = 200
+	maxCols      = 512
+)
 
 // NewScreen returns a blank screen of the given size.
 func NewScreen(rows, cols int) *Screen {
 	s := &Screen{rows: rows, cols: cols}
-	s.cells = make([][]rune, rows)
-	for i := range s.cells {
-		s.cells[i] = blankRow(cols)
-	}
+	s.clearScreen()
 	return s
 }
 
@@ -55,8 +60,25 @@ func (s *Screen) Text() string {
 }
 
 func (s *Screen) text() string {
-	lines := make([]string, s.rows)
-	for i, row := range s.cells {
+	_, height := s.size()
+	return strings.Join(s.lines(height), "\n")
+}
+
+func (s *Screen) size() (int, int) {
+	if !s.alternate {
+		return s.cols, s.rows
+	}
+	// The input rule spans the full width. Claude parks at column 1 on the
+	// last row before moving the cursor back to the input.
+	if s.width == 0 {
+		return s.lastWidth, s.lastHeight
+	}
+	return s.width, max(s.height, s.parkedRow)
+}
+
+func (s *Screen) lines(height int) []string {
+	lines := make([]string, height)
+	for i, row := range s.cells[:min(height, len(s.cells))] {
 		var b strings.Builder
 		for _, r := range row {
 			if r != 0 {
@@ -65,11 +87,12 @@ func (s *Screen) text() string {
 		}
 		lines[i] = strings.TrimRight(b.String(), " ")
 	}
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 // View is the screen as text with its cursor.
 type View struct {
+	Width, Height int
 	// Lines has one entry per row, trailing spaces removed.
 	Lines []string
 	// Row and Col place the cursor, 0-based; Col counts the characters of
@@ -95,13 +118,15 @@ func (s *Screen) View() View {
 }
 
 func (s *Screen) currentView() View {
-	col := 0
-	for _, r := range s.cells[s.r][:min(s.c, s.cols)] {
-		if r != 0 {
-			col++
+	width, height := s.size()
+	row, col := min(s.r, height-1), s.c
+	cells := s.row(row)
+	for _, r := range cells[:min(col, len(cells))] {
+		if r == 0 {
+			col--
 		}
 	}
-	return View{Lines: strings.Split(s.text(), "\n"), Row: s.r, Col: col, Cursor: !s.hidden, Unreliable: s.unreliable()}
+	return View{Width: width, Height: height, Lines: s.lines(height), Row: row, Col: col, Cursor: !s.hidden, Unreliable: s.unreliable()}
 }
 
 func (s *Screen) unreliable() bool { return s.frame != nil || s.syncOutput || s.badFrame }
@@ -112,6 +137,9 @@ func (s *Screen) freezeFrame() {
 		if !s.badFrame {
 			v := s.currentView()
 			s.frame = &v
+			if s.alternate {
+				s.lastWidth, s.lastHeight = v.Width, v.Height
+			}
 		}
 	}
 }
@@ -131,7 +159,16 @@ func (s *Screen) resetFrame() {
 
 func (s *Screen) finishFrame() {
 	if !s.syncOutput && !s.badFrame {
+		s.height = max(s.height, s.parkedRow)
+		s.parkedRow = 0
 		s.frame, s.frameUntil = nil, time.Time{}
+	}
+}
+
+func (s *Screen) markBadFrame() {
+	if !s.badFrame {
+		s.freezeFrame()
+		s.badFrame = true
 	}
 }
 
@@ -161,7 +198,11 @@ func (s *Screen) Write(p []byte) (int, error) {
 			s.c = max(s.c-1, 0)
 			i++
 		case b == '\t':
-			s.c = min((s.c/8+1)*8, s.cols-1)
+			s.c = (s.c/8 + 1) * 8
+			s.clampCursor(true)
+			if !s.alternate {
+				s.c = min(s.c, s.cols-1)
+			}
 			i++
 		case b < 0x20 || b == 0x7f:
 			i++
@@ -179,6 +220,11 @@ func (s *Screen) Write(p []byte) (int, error) {
 }
 
 func (s *Screen) lineFeed() {
+	if s.alternate {
+		s.r++
+		s.clampCursor(false)
+		return
+	}
 	if s.r < s.rows-1 {
 		s.r++
 		return
@@ -187,6 +233,10 @@ func (s *Screen) lineFeed() {
 }
 
 func (s *Screen) scrollUp(n int) {
+	if s.alternate {
+		s.cells = s.cells[min(n, len(s.cells)):]
+		return
+	}
 	for ; n > 0; n-- {
 		s.cells = append(s.cells[1:], blankRow(s.cols))
 	}
@@ -197,18 +247,34 @@ func (s *Screen) put(r rune) {
 	if wide(r) {
 		w = 2
 	}
-	wrap := s.c+w > s.cols
-	// Claude parks the cursor below the grid without writing. Only a write
-	// there or an implicit wrap can corrupt the layout it already drew, and
-	// only inside a synchronized frame, where Claude lays out every row for
-	// its own width: plain output outside one wraps at the edge as usual.
-	if !s.badFrame && s.syncOutput && (s.rowOutside || wrap) {
-		s.freezeFrame()
-		s.badFrame = true
-	}
-	if wrap {
-		s.c = 0
-		s.lineFeed()
+	if s.alternate {
+		end := s.c + w
+		if end > maxCols {
+			s.markBadFrame()
+			return
+		}
+		if s.r >= len(s.cells) {
+			s.cells = append(s.cells, make([][]rune, s.r+1-len(s.cells))...)
+		}
+		row := s.cells[s.r]
+		if end > len(row) {
+			s.cells[s.r] = append(row, blankRow(end-len(row))...)
+		}
+		s.width, s.height = max(s.width, end), max(s.height, s.r+1)
+		s.parkedRow = 0
+	} else {
+		wrap := s.c+w > s.cols
+		// Claude parks the cursor below the grid without writing. Only a write
+		// there or an implicit wrap can corrupt the layout it already drew, and
+		// only inside a synchronized frame, where Claude lays out every row for
+		// its own width: plain output outside one wraps at the edge as usual.
+		if s.syncOutput && (s.rowOutside || wrap) {
+			s.markBadFrame()
+		}
+		if wrap {
+			s.c = 0
+			s.lineFeed()
+		}
 	}
 	s.cells[s.r][s.c] = r
 	if w == 2 {
@@ -250,7 +316,7 @@ func (s *Screen) escape(data []byte) (int, bool) {
 		return 3, true
 	case 'c':
 		s.resetFrame()
-		s.clear(0, s.rows)
+		s.clearScreen()
 		s.r, s.c = 0, 0
 		return 2, true
 	default:
@@ -262,7 +328,10 @@ func (s *Screen) csi(params string, final byte) {
 	if strings.HasPrefix(params, "?") {
 		// Entering or leaving the alternate screen starts from blank.
 		if (final == 'h' || final == 'l') && (params == "?1049" || params == "?47" || params == "?1047") {
-			s.clear(0, s.rows)
+			s.alternate = final == 'h'
+			s.width, s.height, s.parkedRow = 0, 0, 0
+			s.lastWidth, s.lastHeight = s.cols, s.rows
+			s.clearScreen()
 			s.r, s.c = 0, 0
 			s.resetFrame()
 		}
@@ -294,6 +363,9 @@ func (s *Screen) csi(params string, final byte) {
 	}
 	arg := func(i, def int) int {
 		if i < len(args) && args[i] > 0 {
+			if s.alternate {
+				return min(args[i], max(maxRows, maxCols)+1)
+			}
 			return args[i]
 		}
 		return def
@@ -320,75 +392,117 @@ func (s *Screen) csi(params string, final byte) {
 		s.r = arg(0, 1) - 1
 		s.rowOutside = s.r >= s.rows
 	case 'K':
-		s.clampCursor()
-		row := s.cells[s.r]
-		from, to := s.c, s.cols
+		row := s.row(s.r)
+		from, to := s.c, len(row)
 		switch arg(0, 0) {
 		case 1:
 			from, to = 0, s.c+1
 		case 2:
 			from = 0
 		}
-		for j := from; j < min(to, s.cols); j++ {
+		for j := from; j < min(to, len(row)); j++ {
 			row[j] = ' '
 		}
 	case 'J':
-		s.clampCursor()
+		row := s.row(s.r)
 		switch arg(0, 0) {
 		case 0:
-			for j := s.c; j < s.cols; j++ {
-				s.cells[s.r][j] = ' '
+			for j := s.c; j < len(row); j++ {
+				row[j] = ' '
 			}
-			s.clear(s.r+1, s.rows)
+			s.clear(s.r+1, len(s.cells))
 		case 1:
 			s.clear(0, s.r)
-			for j := 0; j <= s.c && j < s.cols; j++ {
-				s.cells[s.r][j] = ' '
+			for j := 0; j <= s.c && j < len(row); j++ {
+				row[j] = ' '
 			}
 		default:
-			s.clear(0, s.rows)
 			if arg(0, 0) == 2 {
+				s.clearScreen()
 				s.badFrame = false
 				if !s.hidden {
 					s.finishFrame()
 				}
+			} else {
+				s.clear(0, len(s.cells))
 			}
 		}
 	case 'X':
-		s.clampCursor()
-		for j := s.c; j < min(s.c+arg(0, 1), s.cols); j++ {
-			s.cells[s.r][j] = ' '
+		row := s.row(s.r)
+		for j := s.c; j < min(s.c+arg(0, 1), len(row)); j++ {
+			row[j] = ' '
 		}
 	case 'P':
-		s.clampCursor()
-		row := s.cells[s.r]
-		n := min(arg(0, 1), s.cols-s.c)
-		copy(row[s.c:], row[s.c+n:])
-		for j := s.cols - n; j < s.cols; j++ {
-			row[j] = ' '
+		row := s.row(s.r)
+		if s.c < len(row) {
+			n := min(arg(0, 1), len(row)-s.c)
+			copy(row[s.c:], row[s.c+n:])
+			for j := len(row) - n; j < len(row); j++ {
+				row[j] = ' '
+			}
 		}
 	case '@':
-		s.clampCursor()
-		row := s.cells[s.r]
-		n := min(arg(0, 1), s.cols-s.c)
-		copy(row[s.c+n:], row[s.c:s.cols-n])
-		for j := s.c; j < s.c+n; j++ {
-			row[j] = ' '
+		row := s.row(s.r)
+		if s.c < len(row) {
+			width := s.cols
+			if s.alternate {
+				width = s.width
+			}
+			n := min(arg(0, 1), width-s.c)
+			row = append(row, blankRow(min(n, width-len(row)))...)
+			s.cells[s.r] = row
+			copy(row[s.c+n:], row[s.c:len(row)-n])
+			for j := s.c; j < s.c+n; j++ {
+				row[j] = ' '
+			}
 		}
 	case 'S':
 		s.scrollUp(arg(0, 1))
 	}
-	s.clampCursor()
+	s.clampCursor(strings.ContainsRune("HfCaG`", rune(final)))
+	if s.alternate && (final == 'H' || final == 'f') && s.c == 0 && !s.badFrame {
+		s.parkedRow = s.r + 1
+	}
 }
 
-func (s *Screen) clampCursor() {
+func (s *Screen) clampCursor(movedCol bool) {
+	if s.alternate {
+		if s.r >= maxRows || movedCol && s.c >= maxCols {
+			s.r, s.c = min(s.r, maxRows-1), min(s.c, maxCols-1)
+			s.markBadFrame()
+		}
+		s.r, s.c = max(s.r, 0), max(s.c, 0)
+		return
+	}
 	s.r = min(max(s.r, 0), s.rows-1)
 	s.c = min(max(s.c, 0), s.cols)
 }
 
-func (s *Screen) clear(from, to int) {
-	for i := from; i < to; i++ {
+func (s *Screen) row(i int) []rune {
+	if i < len(s.cells) {
+		return s.cells[i]
+	}
+	return nil
+}
+
+func (s *Screen) clearScreen() {
+	if s.alternate {
+		if !s.badFrame {
+			s.lastWidth, s.lastHeight = s.size()
+		}
+		s.cells = nil
+		s.width, s.height, s.parkedRow = 0, 0, 0
+		return
+	}
+	s.cells = make([][]rune, s.rows)
+	for i := range s.cells {
 		s.cells[i] = blankRow(s.cols)
+	}
+}
+
+func (s *Screen) clear(from, to int) {
+	for i := from; i < min(to, len(s.cells)); i++ {
+		s.cells[i] = blankRow(len(s.cells[i]))
 	}
 }
 

@@ -7,7 +7,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
@@ -25,6 +24,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.PressKind
+import clauderc.app.ui.theme.pressProgress
+import clauderc.app.ui.theme.pressShrink
 
 /**
  * .switch in each of the four looks:
@@ -37,36 +39,37 @@ import clauderc.app.ui.theme.Clauderc
 fun Switch(on: Boolean, press: MutableInteractionSource) {
     val c = Clauderc.colors
     val m = Clauderc.motion
-    val pressed by press.collectIsPressedAsState()
+    val pose = Modifier.pressShrink(press, PressKind.Switch)
     when (Clauderc.style) {
         UiStyle.Plate -> {
             val p by animateFloatAsState(if (on) 1f else 0f, tween(m.durS, easing = { t -> kotlin.math.floor(t * 3f) / 3f }), label = "knob")
-            Box(Modifier.size(44.dp, 24.dp).background(if (on) c.fg else Color.Transparent).border(2.dp, c.fg)) {
+            Box(pose.size(44.dp, 24.dp).background(if (on) c.fg else Color.Transparent).border(2.dp, c.fg)) {
                 Box(Modifier.offset(x = 5.dp + 20.dp * p, y = 5.dp).size(14.dp).background(if (on) c.bg else c.fg))
             }
         }
         UiStyle.Ink -> {
             val track by animateColorAsState(if (on) c.accent else c.surface2, tween(m.durS, easing = m.easeEmph), label = "track")
             val x by animateDpAsState(if (on) 20.dp else 0.dp, tween(m.durM, easing = m.easeSpring), label = "knob")
-            Box(Modifier.size(48.dp, 28.dp).clip(RoundedCornerShape(14.dp)).background(track).border(1.dp, c.edge, RoundedCornerShape(14.dp))) {
+            Box(pose.size(48.dp, 28.dp).clip(RoundedCornerShape(14.dp)).background(track).border(1.dp, c.edge, RoundedCornerShape(14.dp))) {
                 Box(Modifier.offset(x = 3.dp + x, y = 3.dp).size(22.dp).clip(CircleShape).background(Color.White))
             }
         }
         UiStyle.Tile -> {
             val track by animateColorAsState(if (on) c.accent else c.surface2, tween(m.durS, easing = m.easeEmph), label = "track")
             val x by animateDpAsState(if (on) 20.dp else 0.dp, tween(m.durM, easing = m.easeSpring), label = "knob")
-            Box(Modifier.size(48.dp, 28.dp).clip(RoundedCornerShape(14.dp)).background(track)) {
+            Box(pose.size(48.dp, 28.dp).clip(RoundedCornerShape(14.dp)).background(track)) {
                 Box(Modifier.offset(x = 3.dp + x, y = 3.dp).size(22.dp).knobShadow().clip(CircleShape).background(Color.White))
             }
         }
         UiStyle.Clear -> {
             val track by animateColorAsState(if (on) c.accent else c.fg.copy(alpha = 0.18f), tween(m.durS, easing = m.easeEmph), label = "track")
-            val wide by animateDpAsState(if (pressed) 28.dp else 22.dp, tween(m.durS, easing = m.easeEmph), label = "knobWidth")
-            val x by animateDpAsState(if (on) (if (pressed) 14.dp else 20.dp) else 0.dp, tween(m.durM, easing = m.easeSpring), label = "knob")
-            Box(Modifier.size(48.dp, 28.dp).clip(RoundedCornerShape(14.dp)).background(track)) {
+            val hit by pressProgress(press, PressKind.Switch)
+            val wide = 22.dp + 6.dp * hit
+            val x by animateDpAsState(if (on) 20.dp else 0.dp, tween(m.durM, easing = m.easeSpring), label = "knob")
+            Box(pose.size(48.dp, 28.dp).clip(RoundedCornerShape(14.dp)).background(track)) {
                 Box(
                     Modifier
-                        .offset(x = 3.dp + x, y = 3.dp)
+                        .offset(x = 3.dp + x - if (on) 6.dp * hit else 0.dp, y = 3.dp)
                         .size(wide, 22.dp)
                         .knobShadow()
                         .background(Color.White, RoundedCornerShape(11.dp)),

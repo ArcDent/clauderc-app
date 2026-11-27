@@ -651,6 +651,29 @@ func TestAnswerAfterThePromptLeftTheScreen(t *testing.T) {
 	}
 }
 
+func TestAnswerUnreliableScreen(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, setup{screen: "\x1b[?1049h\x1b[201;1H"})
+	f.blockedOn(t, "toolu_p1", "Bash", `{"command":"echo hi"}`)
+	res := f.call(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_p1", Decision: protocol.DecisionAllow})
+	if res.Error == nil || res.Error.Code != protocol.CodeNotDelivered || f.keyLog() != "" {
+		t.Fatalf("answer: error = %+v, keys = %q", res.Error, f.keyLog())
+	}
+}
+
+// A computer window smaller than 80×24 may cut a panel short: the answer is
+// refused with the reason, and no key goes out.
+func TestAnswerScreenTooSmall(t *testing.T) {
+	t.Parallel()
+	rule := strings.Repeat("─", 100)
+	f := newFixture(t, setup{screen: "\x1b[?1049h\x1b[1;1H" + rule + "\x1b[3;1HDo you want to proceed?\x1b[5;1H❯ 1. Yes\x1b[20;1H"})
+	f.blockedOn(t, "toolu_p1", "Bash", `{"command":"echo hi"}`)
+	res := f.call(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{SessionID: shortID, ToolUseID: "toolu_p1", Decision: protocol.DecisionAllow})
+	if res.Error == nil || res.Error.Code != protocol.CodeNotDelivered || !strings.Contains(res.Error.Message, "窗口太小") || f.keyLog() != "" {
+		t.Fatalf("answer: error = %+v, keys = %q", res.Error, f.keyLog())
+	}
+}
+
 // Answers to more than one question go question by question, each looked
 // for on the screen first: one closed elsewhere would leave the rest of the
 // keys to the input box or to whatever came up.
@@ -718,6 +741,8 @@ func TestAnswerWaitsForTheNextQuestion(t *testing.T) {
 			"\x1b[B\r\x1b[B\r\r", "", 3 * time.Second, 0},
 		{"never drawn", 0, []string{q1},
 			"\x1b[B\r\x1b", "回答到一半，电脑上的题目变了，已按 Esc 退出这次提问", 3 * time.Second, 0},
+		{"unreliable redraw", 0, []string{q1, "\x1b[?1049h\x1b[201;1H"},
+			"\x1b[B\r", "暂时无法确认电脑上的画面，操作没有完成", 3 * time.Second, 0},
 		// The keys of the first question take a second: waiting out the
 		// 3 seconds would take 4.
 		{"prompt closed", 0, []string{q1, inputScreen},
@@ -734,6 +759,9 @@ func TestAnswerWaitsForTheNextQuestion(t *testing.T) {
 			took := time.Since(start)
 			if c.err == "" && res.Error != nil || c.err != "" && (res.Error == nil || res.Error.Message != c.err) {
 				t.Errorf("error %+v, want %q", res.Error, c.err)
+			}
+			if c.name == "unreliable redraw" && (res.Error == nil || res.Error.Code != protocol.CodeNotDelivered) {
+				t.Errorf("error %+v, want notDelivered", res.Error)
 			}
 			if got := f.keyLog(); got != c.keys {
 				t.Errorf("keys %q, want %q", got, c.keys)
@@ -784,7 +812,10 @@ func TestAnswerClaude21331Screens(t *testing.T) {
 		q1 := "────────\n←  ☐ 非常长的数据库迁移与历史 ☒ 非常长的失败回滚与数据保护 ✔       →\n  兼容…                      策略…                      Submit\n\n│ 针对 `store.go` 的 **SQLite** 迁移：\n│ 第一行说明包含 `v1 -> v2`\n│ 细节，且超过终端宽度自动折行？\n\n❯ 1. 方案一\n  2. 方案二"
 		q2 := "────────\n←  ☒ 非常长的数据库迁移与历史 ☐ 非常长的失败回滚与数据保护 ✔       →\n  兼容…                      策略…                      Submit\n\n│ 失败时是否\n│ 回滚备份？\n\n❯ 1. 是\n  2. 否"
 		review := "────────\n←  ☒ 非常长的数据库迁移与历史 ☒ 非常长的失败回滚与数据保护 ✔       →\n  兼容…                      策略…                      Submit\n\nReview your answers\n❯ 1. Submit answers\n  2. Cancel"
-		f := newFixture(t, setup{opts: stepAttach(t, q1, q2, review)})
+		frame := func(page string) string {
+			return "\x1b[?1049h\x1b[?2026h\x1b[31;1H" + strings.Replace(page, "────────", strings.Repeat("─", 127), 1) + "\x1b[43;1H\x1b[?2026l"
+		}
+		f := newFixture(t, setup{opts: stepAttach(t, frame(q1), frame(q2), frame(review))})
 		f.blockedOn(t, "toolu_q1", "AskUserQuestion", input)
 		f.ok(t, "c1", protocol.MethodChatAnswer, protocol.ChatAnswerRequest{
 			SessionID: shortID, ToolUseID: "toolu_q1",

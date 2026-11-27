@@ -1,16 +1,12 @@
 package clauderc.app.chat
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -72,6 +68,10 @@ import androidx.compose.ui.draw.clip
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
+import clauderc.app.ui.theme.PressKind
+import clauderc.app.ui.theme.pressProgress
+import clauderc.app.ui.theme.pressShrink
+import clauderc.app.ui.components.plateHardShadow
 import clauderc.app.ui.theme.Symbols
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
@@ -179,24 +179,21 @@ internal fun Modifier.rewindBand(): Modifier = layout { measurable, constraints 
  * The rewind button, no word under it, as the style picked it (round 11), at [progress] of the slide
  * from 0 shut to 1 open: 贴纸 a 36dp card-white circle in an ink line, no hard shadow, growing from 0.6
  * as it fades in; 格栅 an empty square as tall as a one-line bubble in a thin grey line, only sliding
- * in with the row; 清玻 the bare icon, turning back 120° like a clock's hand as it fades in. A press only
- * changes colours, in durS, since the slide already drives the size and turn: 贴纸 fills with the accent
- * under an on-accent icon; 格栅 fills with the text colour under an icon in the page colour; 清玻's icon
- * turns the text colour on a round 10% tint of it.
+ * in with the row; 清玻 the bare icon, turning back 120° like a clock's hand as it fades in.
  */
 @Composable
 private fun RewindButton(onClick: () -> Unit, progress: () -> Float, modifier: Modifier) {
     val c = Clauderc.colors
     val press = remember { MutableInteractionSource() }
-    val pressed by press.collectIsPressedAsState()
-    val on by animateFloatAsState(if (pressed) 1f else 0f, tween(Clauderc.motion.durS, easing = LinearEasing), label = "rewindPress")
+    val ui = Clauderc.style
+    val on by pressProgress(press, PressKind.Stage)
     Box(
-        modifier.clickable(press, null, onClick = onClick).semantics { contentDescription = "回溯" }.testTag("rewindAction"),
+        modifier.pressShrink(press, PressKind.Stage).clickable(press, null, onClick = onClick).semantics { contentDescription = "回溯" }.testTag("rewindAction"),
         contentAlignment = Alignment.Center,
     ) {
-        when (Clauderc.style) {
+        when (ui) {
             UiStyle.Tile, UiStyle.Ink -> {
-                val fill = lerp(if (Clauderc.style == UiStyle.Ink) c.float else c.card, c.accent, on)
+                val fill = if (ui == UiStyle.Ink) lerp(c.float, c.surface2, on) else lerp(c.card, c.line, on)
                 Box(
                     Modifier
                         .graphicsLayer {
@@ -211,13 +208,13 @@ private fun RewindButton(onClick: () -> Unit, progress: () -> Float, modifier: M
                         .then(if (Clauderc.style == UiStyle.Ink) Modifier.border(1.dp, c.edge, androidx.compose.foundation.shape.CircleShape) else Modifier),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Symbols.HistoryRegular, contentDescription = null, tint = lerp(c.fg, c.onAccent, on), modifier = Modifier.size(20.dp))
+                    Icon(Symbols.HistoryRegular, contentDescription = null, tint = c.fg, modifier = Modifier.size(20.dp))
                 }
             }
             UiStyle.Plate -> {
                 val side = with(LocalDensity.current) { (15 * 1.55f).sp.toDp() } + 20.dp
                 val square = Modifier.heightIn(max = side).fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true)
-                Box(square.background(c.fg.copy(alpha = on)).border(1.5.dp, lerp(c.surface2, c.fg, on)), contentAlignment = Alignment.Center) {
+                Box(square.plateHardShadow(c.fg, 1.5.dp, on).background(lerp(c.bg, c.fg, on)).border(1.5.dp, lerp(c.surface2, c.fg, on)), contentAlignment = Alignment.Center) {
                     Icon(Symbols.History, contentDescription = null, tint = lerp(c.fg2, c.bg, on), modifier = Modifier.size(20.dp))
                 }
             }
@@ -231,7 +228,7 @@ private fun RewindButton(onClick: () -> Unit, progress: () -> Float, modifier: M
                         alpha = p
                         rotationZ = 120f * (1f - p)
                     }
-                    .drawBehind { drawCircle(c.fg.copy(alpha = 0.1f * on), radius = size.minDimension / 2 + 8.dp.toPx()) }
+                    .drawBehind { drawCircle(lerp(c.lens, c.fg, 0.08f).let { it.copy(alpha = it.alpha * on) }, radius = size.minDimension / 2 + 8.dp.toPx()) }
                     .size(22.dp),
             )
         }

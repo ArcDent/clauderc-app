@@ -18,6 +18,12 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.semantics.customActions
+import clauderc.app.ui.theme.pressProgress
+import clauderc.app.ui.theme.pressClickable
+import clauderc.app.ui.theme.listRowPress
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.theme.PressKind
+import clauderc.app.ui.theme.PressRow
 import clauderc.app.ui.theme.styled
 import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedVisibility
@@ -27,7 +33,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -169,8 +174,9 @@ import clauderc.app.ui.theme.MonoFamily
 import clauderc.app.ui.theme.Motion
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.pressShrink
-import clauderc.app.ui.theme.snapPressed
-import androidx.compose.ui.graphics.GraphicsLayerScope
+import clauderc.app.ui.components.plateHardShadow
+import clauderc.app.ui.components.PlateSweep
+import clauderc.app.ui.components.plateSweepFill
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.foundation.border
 import clauderc.app.ui.theme.stillLayer
@@ -434,14 +440,16 @@ fun SessionsScreen(
                                                     fontSize = 12.5.sp,
                                                     color = c.fg2,
                                                 )
+                                                val clearPress = remember { MutableInteractionSource() }
                                                 Icon(
                                                     Symbols.Close,
                                                     contentDescription = "清除目录筛选",
                                                     tint = c.fg3,
                                                     modifier = Modifier
+                                                        .pressShrink(clearPress, PressKind.Icon)
                                                         .size(22.dp)
                                                         .clip(CircleShape)
-                                                        .clickable(role = Role.Button) { onSelectDirFilter(null) }
+                                                        .clickable(clearPress, controlPress(PressKind.Icon), role = Role.Button) { onSelectDirFilter(null) }
                                                         .padding(3.dp),
                                                 )
                                             }
@@ -487,7 +495,7 @@ fun SessionsScreen(
                                         Column(
                                             Modifier
                                                 .fillMaxWidth()
-                                                .then(if (machines.isNotEmpty()) Modifier.clickable(role = Role.Button) { machineSheetOpen = true } else Modifier),
+                                                .then(if (machines.isNotEmpty()) Modifier.pressClickable(PressKind.Title) { machineSheetOpen = true } else Modifier),
                                             verticalArrangement = Arrangement.spacedBy(5.dp),
                                         ) {
                                             Text(
@@ -550,13 +558,15 @@ fun SessionsScreen(
                                             label = "clearMachineChev",
                                         )
                                         Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 2.dp, bottom = 6.dp)) {
+                                            val triggerPress = remember { MutableInteractionSource() }
                                             Row(
                                                 Modifier
                                                     .then(
                                                         if (canSwitch) {
                                                             Modifier
+                                                                .pressShrink(triggerPress, PressKind.Title)
                                                                 .clip(RoundedCornerShape(12.dp))
-                                                                .clickable(role = Role.Button) { machineSheetOpen = true }
+                                                                .clickable(triggerPress, controlPress(PressKind.Title), role = Role.Button) { machineSheetOpen = true }
                                                                 .testTag("clearMachineTrigger")
                                                         } else {
                                                             Modifier
@@ -655,11 +665,13 @@ fun SessionsScreen(
                                     ) {
                                         Text("当前没有活跃的会话", fontSize = 15.sp, color = c.fg2)
                                         if (totalSessions > 0) {
+                                            val allPress = remember { MutableInteractionSource() }
                                             Text(
                                                 "查看全部 $totalSessions 个会话",
                                                 modifier = Modifier
+                                                    .pressShrink(allPress, PressKind.SmallButton)
                                                     .clip(RoundedCornerShape(10.dp))
-                                                    .clickable(role = Role.Button) { selectInkTab(InkListTab.All) }
+                                                    .clickable(allPress, controlPress(PressKind.SmallButton, corner = 10.dp), role = Role.Button) { selectInkTab(InkListTab.All) }
                                                     .padding(vertical = 4.dp),
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Medium,
@@ -1080,11 +1092,10 @@ private fun GroupHeader(group: SessionGroup, onRename: () -> Unit, onToggle: () 
         horizontalArrangement = Arrangement.spacedBy(sp.sp2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val press = remember { MutableInteractionSource() }
         Row(
             Modifier.then(
                 if (group.canRename) {
-                    Modifier.pressShrink(press).clickable(press, LocalIndication.current, role = Role.Button, onClickLabel = "改档位名", onClick = onRename)
+                    Modifier.listRowPress(PressRow.Title, onClickLabel = "改档位名", onClick = onRename)
                 } else {
                     Modifier
                 },
@@ -1153,7 +1164,7 @@ private fun DirRow(dir: DirGroup, onToggle: () -> Unit, modifier: Modifier = Mod
     Row(
         modifier
             .fillMaxWidth()
-            .clickable(role = Role.Button, onClickLabel = if (dir.collapsed) "展开目录" else "折叠目录", onClick = onToggle)
+            .listRowPress(onClickLabel = if (dir.collapsed) "展开目录" else "折叠目录", onClick = onToggle)
             .padding(start = Clauderc.look.rowStart, end = sp.sp4, top = 10.dp, bottom = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(sp.sp3),
         verticalAlignment = Alignment.CenterVertically,
@@ -1165,18 +1176,24 @@ private fun DirRow(dir: DirGroup, onToggle: () -> Unit, modifier: Modifier = Mod
             if (branch != null) {
                 // The button's touch area reaches 8dp left and 4dp right of its 8dp and 4dp padding, so the text sits 16dp after the name.
                 val on = dir.branchFilter != null
+                val plate = Clauderc.style == UiStyle.Plate
+                val press = remember { MutableInteractionSource() }
+                val sweep = if (plate) pressProgress(press, PressKind.Branch, sweep = true).value else 0f
+                val flip = if (plate) pressProgress(press, PressKind.Branch).value else 0f
                 Row(
                     Modifier
                         .captureAnchor(branchAnchor)
                         .padding(start = sp.sp2, end = sp.sp1)
+                        .pressShrink(press, PressKind.Branch)
                         .clip(RoundedCornerShape(Clauderc.radii.sm))
-                        .clickable(role = Role.Button, onClickLabel = "${dir.title} 的分支") { onBranches(branchAnchor.rect) }
+                        .then(if (plate) Modifier.plateSweepFill(sweep, c.fg, PlateSweep.LeftToRight) else Modifier)
+                        .clickable(press, if (plate) null else controlPress(PressKind.Branch), role = Role.Button, onClickLabel = "${dir.title} 的分支") { onBranches(branchAnchor.rect) }
                         .padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(1.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(branch, fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm, color = if (on) c.accent else c.fg2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                    Icon(Symbols.ExpandMore, contentDescription = null, tint = if (on) c.accent else c.fg3, modifier = Modifier.size(16.dp))
+                    Text(branch, fontFamily = MonoFamily, fontSize = Clauderc.fontSizes.monoSm, color = lerp(if (on) c.accent else c.fg2, c.bg, flip), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Icon(Symbols.ExpandMore, contentDescription = null, tint = lerp(if (on) c.accent else c.fg3, c.bg, flip), modifier = Modifier.size(16.dp))
                 }
             }
             Text(
@@ -1342,7 +1359,7 @@ private fun AgentRows(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable(enabled = enabled, role = Role.Button, onClickLabel = "打开子代理") { onOpen(a) }
+                            .listRowPress(PressRow.Agent, enabled = enabled, onClickLabel = "打开子代理") { onOpen(a) }
                             .drawBehind {
                                 val x = spot.x.toPx()
                                 val midY = size.height / 2f
@@ -1675,7 +1692,7 @@ private fun SessionRow(
             Row(
                 Modifier
                     .weight(1f)
-                    .clickable(enabled = enabled, role = Role.Button) {
+                    .listRowPress(enabled = enabled) {
                         if (hub.open != null) hub.open = null else onOpen()
                     }
                     // Without the fold button the time keeps the page margin from the right edge.
@@ -1798,39 +1815,33 @@ private fun SwipeAction(
 ) {
     val c = Clauderc.colors
     val press = remember { MutableInteractionSource() }
-    val turn by snapPressed(press, Clauderc.motion.easeSpring)
-    val fill by snapPressed(press, LinearEasing)
+    val fill by pressProgress(press, PressKind.Stage)
+    val ui = Clauderc.style
     val symbol = @Composable { size: Dp, tint: Color -> Icon(icon.styled, contentDescription = null, tint = tint, modifier = Modifier.size(size)) }
     Box(
         modifier
+            .pressShrink(press, PressKind.Stage)
             .clickable(press, null, enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = text }
             .testTag(testTag),
         contentAlignment = Alignment.Center,
     ) {
-        when (Clauderc.style) {
-            UiStyle.Clear -> Box(Modifier.graphicsLayer { turned(turn, 0.82f, -24f) }) { symbol(size / 2 + 4.dp, c.danger) }
+        when (ui) {
+            UiStyle.Clear -> Box(Modifier.background(lerp(c.lens, c.fg, 0.08f).let { it.copy(alpha = it.alpha * fill) }, CircleShape)) { symbol(size / 2 + 4.dp, c.danger) }
             UiStyle.Plate -> Box(
-                Modifier.size(size).background(c.danger.copy(alpha = fill)).border(1.5.dp, c.danger),
+                Modifier.size(size).plateHardShadow(c.danger, 1.5.dp, fill).background(lerp(c.bg, c.danger, fill)).border(1.5.dp, c.danger),
                 contentAlignment = Alignment.Center,
             ) { symbol(size / 2, lerp(c.danger, Color.White, fill)) }
             UiStyle.Tile -> Box(
-                Modifier.graphicsLayer { turned(turn, 0.92f, 0f) }.size(size).tileSurface(lerp(base ?: c.card, c.danger, fill), size / 2),
+                Modifier.size(size).tileSurface(lerp(base ?: c.card, c.line, fill), size / 2),
                 contentAlignment = Alignment.Center,
-            ) { symbol(size / 2, lerp(c.danger, Color.White, fill)) }
+            ) { symbol(size / 2, c.danger) }
             UiStyle.Ink -> Box(
-                Modifier.graphicsLayer { turned(turn, 0.90f, 0f) }.size(size).inkSurface(lerp(base ?: c.float, c.danger, fill), c.edge, size / 2),
+                Modifier.size(size).inkSurface(lerp(base ?: c.float, c.surface2, fill), c.edge, size / 2),
                 contentAlignment = Alignment.Center,
-            ) { symbol(size / 2, lerp(c.danger, Color.White, fill)) }
+            ) { symbol(size / 2, c.danger) }
         }
     }
-}
-
-/** Scales the layer toward [scale] and turns it toward [turn]° as [p] goes from 0 to 1. */
-private fun GraphicsLayerScope.turned(p: Float, scale: Float, turn: Float) {
-    scaleX = 1f + (scale - 1f) * p
-    scaleY = scaleX
-    rotationZ = turn * p
 }
 
 private const val WorktreeMark = "worktree"

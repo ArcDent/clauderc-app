@@ -3,10 +3,8 @@ package clauderc.app.settings
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -98,6 +96,10 @@ import clauderc.app.ui.components.ClaudercSheet
 import clauderc.app.ui.components.Glyph
 import clauderc.app.ui.components.Hero
 import clauderc.app.ui.components.PlateRule
+import clauderc.app.ui.components.PlateSweep
+import clauderc.app.ui.components.plateStamp
+import clauderc.app.ui.components.plateSweepFill
+import androidx.compose.ui.graphics.lerp
 import clauderc.app.ui.components.SheetHead
 import clauderc.app.ui.components.Spinner
 import clauderc.app.ui.components.StatusGlyph
@@ -110,9 +112,13 @@ import clauderc.app.ui.components.rememberAnchorBox
 import clauderc.app.ui.components.tileSurface
 import clauderc.app.ui.components.topLine
 import clauderc.app.ui.theme.Clauderc
+import clauderc.app.ui.theme.pressProgress
+import clauderc.app.ui.theme.listRowPress
+import clauderc.app.ui.theme.controlPress
+import clauderc.app.ui.theme.PressTone
+import clauderc.app.ui.theme.PressRow
 import clauderc.app.ui.theme.ClaudercColors
 import clauderc.app.ui.theme.MonoFamily
-import clauderc.app.ui.theme.PressIndication
 import clauderc.app.ui.theme.PressKind
 import clauderc.app.ui.theme.Symbols
 import clauderc.app.ui.theme.accentColor
@@ -507,13 +513,14 @@ private fun RowScope.TileMiniStyleOption(
     val c = Clauderc.colors
     var center by remember { mutableStateOf(Offset.Zero) }
     val press = remember { MutableInteractionSource() }
+    val edge = previewPressEdge(press, selected)
     Column(
         Modifier
             .weight(1f)
             .onGloballyPositioned { center = it.boundsInRoot().center }
-            .pressShrink(press, PressKind.Card)
+            .pressShrink(press, PressKind.Preview)
             .clip(RoundedCornerShape(14.dp))
-            .selectable(selected, press, PressIndication(c.fg), role = Role.RadioButton) { onPick(style, center) }
+            .selectable(selected, press, null, role = Role.RadioButton) { onPick(style, center) }
             .padding(2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -522,7 +529,7 @@ private fun RowScope.TileMiniStyleOption(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(0.66f)
-                .border(if (selected) 2.dp else 1.dp, if (selected) c.accent else c.line, RoundedCornerShape(12.dp))
+                .border(if (selected) 2.dp else 1.dp, if (selected) c.accent else edge, RoundedCornerShape(12.dp))
                 .padding(2.dp),
         ) {
             MiniPhone(style, dark, cardAccent, plateInk)
@@ -549,11 +556,10 @@ private fun TileSettingsRow(
     onClick: () -> Unit,
 ) {
     val c = Clauderc.colors
-    val press = remember { MutableInteractionSource() }
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(press, LocalIndication.current, role = Role.Button, onClick = onClick)
+            .listRowPress(if (danger) PressRow.Danger else PressRow.Page, onClick = onClick)
             .padding(start = 16.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
             .testTag(tag),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -740,11 +746,10 @@ private fun ClearSettingsRow(
     onClick: () -> Unit,
 ) {
     val c = Clauderc.colors
-    val press = remember { MutableInteractionSource() }
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(press, LocalIndication.current, role = Role.Button, onClick = onClick)
+            .listRowPress(if (danger) PressRow.Danger else PressRow.Page, onClick = onClick)
             .padding(start = 24.dp, end = 20.dp, top = 8.dp, bottom = 8.dp)
             .testTag(tag),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -867,9 +872,9 @@ private fun PlateSettingsContent(
                             Modifier
                                 .weight(1f)
                                 .onGloballyPositioned { center = it.boundsInRoot().center }
-                                .pressShrink(press, PressKind.Plain)
+                                .pressShrink(press, PressKind.Swatch)
                                 .semantics { contentDescription = ink.label }
-                                .selectable(selected, press, LocalIndication.current, role = Role.RadioButton) { onPlateInk(ink, center) }
+                                .selectable(selected, press, controlPress(PressKind.Swatch), role = Role.RadioButton) { onPlateInk(ink, center) }
                                 .padding(horizontal = 2.dp, vertical = 5.dp),
                             horizontalArrangement = Arrangement.spacedBy(7.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -886,7 +891,7 @@ private fun PlateSettingsContent(
                                 fontSize = 12.5.sp,
                                 fontFamily = MonoFamily,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = if (selected) c.fg else c.fg2,
+                                color = if (selected) c.fg else lerp(c.fg2, c.fg, pressProgress(press, PressKind.Swatch).value),
                                 maxLines = 1,
                             )
                         }
@@ -989,12 +994,13 @@ private fun RowScope.PlateMiniStyleOption(
     val c = Clauderc.colors
     var center by remember { mutableStateOf(Offset.Zero) }
     val press = remember { MutableInteractionSource() }
+    val edge = previewPressEdge(press, selected)
     Column(
         Modifier
             .weight(1f)
             .onGloballyPositioned { center = it.boundsInRoot().center }
-            .pressShrink(press, PressKind.Plain)
-            .selectable(selected, press, LocalIndication.current, role = Role.RadioButton) { onPick(style, center) },
+            .pressShrink(press, PressKind.Preview)
+            .selectable(selected, press, null, role = Role.RadioButton) { onPick(style, center) },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -1002,7 +1008,7 @@ private fun RowScope.PlateMiniStyleOption(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(0.66f)
-                .border(if (selected) 2.dp else 1.dp, if (selected) c.fg else c.line, RectangleShape)
+                .border(if (selected) 2.dp else 1.dp, if (selected) c.fg else edge, RectangleShape)
                 .padding(2.dp),
         ) {
             MiniPhone(style, dark, cardAccent, plateInk)
@@ -1035,8 +1041,8 @@ private fun PlateUnderlineOption(
     Box(
         Modifier
             .onGloballyPositioned { center = it.boundsInRoot().center }
-            .pressShrink(press, PressKind.Plain)
-            .selectable(selected, press, LocalIndication.current, role = Role.RadioButton) { onClick(center) }
+            .pressShrink(press, PressKind.Segment)
+            .selectable(selected, press, controlPress(PressKind.Segment), role = Role.RadioButton) { onClick(center) }
             .drawBehind {
                 if (lineScale > 0.005f) {
                     val h = 2.5.dp.toPx()
@@ -1071,7 +1077,6 @@ private fun PlateSettingsRow(
     onClick: () -> Unit,
 ) {
     val c = Clauderc.colors
-    val press = remember { MutableInteractionSource() }
     Row(
         Modifier
             .fillMaxWidth()
@@ -1086,8 +1091,7 @@ private fun PlateSettingsRow(
                     Modifier
                 },
             )
-            .pressShrink(press, PressKind.Plain)
-            .clickable(press, LocalIndication.current, role = Role.Button, onClick = onClick)
+            .listRowPress(if (danger) PressRow.Danger else PressRow.Page, onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 12.dp)
             .testTag(tag),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1219,7 +1223,7 @@ private fun InkSettingsContent(
                     Modifier
                         .fillMaxWidth()
                         .captureAnchor(relayAnchor)
-                        .clickable(role = Role.Button) { onOpenRelay(relayAnchor.rect) }
+                        .listRowPress(PressRow.Panel) { onOpenRelay(relayAnchor.rect) }
                         .padding(horizontal = 18.dp, vertical = 10.dp)
                         .testTag("settingsRelayRow"),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -1248,7 +1252,7 @@ private fun InkSettingsContent(
                     Modifier
                         .fillMaxWidth()
                         .captureAnchor(pairAnchor)
-                        .clickable(role = Role.Button) { onPairAt(pairAnchor.rect) }
+                        .listRowPress(PressRow.Panel) { onPairAt(pairAnchor.rect) }
                         .padding(horizontal = 18.dp, vertical = 10.dp)
                         .testTag("settingsPairRow"),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -1266,7 +1270,7 @@ private fun InkSettingsContent(
                         Modifier
                             .fillMaxWidth()
                             .captureAnchor(clearAnchor)
-                            .clickable(role = Role.Button) { onRequestClear(clearAnchor.rect) }
+                            .listRowPress(PressRow.Danger) { onRequestClear(clearAnchor.rect) }
                             .padding(horizontal = 18.dp, vertical = 10.dp)
                             .testTag("settingsClearPairingsRow"),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -1290,7 +1294,7 @@ private fun InkSettingsContent(
                     Modifier
                         .fillMaxWidth()
                         .captureAnchor(aboutAnchor)
-                        .clickable(role = Role.Button) { onOpenAbout(aboutAnchor.rect) }
+                        .listRowPress(PressRow.Panel) { onOpenAbout(aboutAnchor.rect) }
                         .padding(horizontal = 18.dp, vertical = 10.dp)
                         .testTag("settingsAboutRow"),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -1338,13 +1342,14 @@ private fun RowScope.InkMiniStyleOption(
     val c = Clauderc.colors
     var center by remember { mutableStateOf(Offset.Zero) }
     val press = remember { MutableInteractionSource() }
+    val edge = previewPressEdge(press, selected)
     Column(
         Modifier
             .weight(1f)
             .onGloballyPositioned { center = it.boundsInRoot().center }
-            .pressShrink(press, PressKind.Card)
+            .pressShrink(press, PressKind.Preview)
             .clip(RoundedCornerShape(14.dp))
-            .selectable(selected, press, PressIndication(c.fg), role = Role.RadioButton) { onPick(style, center) }
+            .selectable(selected, press, null, role = Role.RadioButton) { onPick(style, center) }
             .padding(2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1355,7 +1360,7 @@ private fun RowScope.InkMiniStyleOption(
                 .aspectRatio(0.68f)
                 .border(
                     if (selected) 2.dp else 1.dp,
-                    if (selected) c.fg else c.edge,
+                    if (selected) c.fg else edge,
                     RoundedCornerShape(12.dp),
                 )
                 .padding(2.dp),
@@ -1412,9 +1417,10 @@ private fun ModeSegmentRow(
                 Modifier
                     .then(if (compact) Modifier else Modifier.weight(1f))
                     .onGloballyPositioned { center = it.boundsInRoot().center }
+                    .pressShrink(press, PressKind.Segment)
                     .clip(shape)
                     .background(pillBg)
-                    .selectable(on, press, null, role = Role.RadioButton) { onPick(mode, center) }
+                    .selectable(on, press, controlPress(PressKind.Segment, if (on && ui == UiStyle.Ink) PressTone.Primary else PressTone.Normal, corner = if (ui == UiStyle.Plate) 0.dp else 100.dp), role = Role.RadioButton) { onPick(mode, center) }
                     .padding(horizontal = if (compact) 10.dp else 12.dp, vertical = if (compact) 5.dp else 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -1444,7 +1450,7 @@ private fun CompactSwatch(choice: AccentChoice, selected: Boolean, dark: Boolean
             .size(36.dp)
             .onGloballyPositioned { center = it.boundsInRoot().center }
             .semantics { contentDescription = choice.label }
-            .pressShrink(press, PressKind.Icon)
+            .pressShrink(press, PressKind.Swatch)
             .selectable(selected, press, indication = null, role = Role.RadioButton) { onPick(choice, center) },
         contentAlignment = Alignment.Center,
     ) {
@@ -1488,7 +1494,7 @@ private fun ConnectionRows(
                 Modifier
                     .fillMaxWidth()
                     .captureAnchor(relayAnchor)
-                    .clickable(role = Role.Button) { onOpenRelay(relayAnchor.rect) }
+                    .listRowPress(PressRow.Panel) { onOpenRelay(relayAnchor.rect) }
                     .padding(horizontal = inset, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
@@ -1507,20 +1513,18 @@ private fun ConnectionRows(
                     link,
                     Modifier
                         .captureAnchor(relayAnchor)
-                        .clickable(role = Role.Button) { onOpenRelay(relayAnchor.rect) }
+                        .listRowPress(PressRow.Panel) { onOpenRelay(relayAnchor.rect) }
                         .padding(horizontal = inset, vertical = 10.dp),
                 )
             }
         }
         HorizontalDivider(Modifier.padding(horizontal = inset), thickness = 1.dp, color = c.line)
-        val pairPress = remember { MutableInteractionSource() }
         val pairAnchor = rememberAnchorBox()
         Row(
             Modifier
                 .fillMaxWidth()
                 .captureAnchor(pairAnchor)
-                .pressShrink(pairPress, PressKind.Plain)
-                .clickable(pairPress, LocalIndication.current, role = Role.Button) { onPair(pairAnchor.rect) }
+                .listRowPress() { onPair(pairAnchor.rect) }
                 .padding(horizontal = inset, vertical = 12.dp)
                 .testTag("settingsPairRow"),
             horizontalArrangement = Arrangement.spacedBy(sp.sp3),
@@ -1532,14 +1536,12 @@ private fun ConnectionRows(
         }
         if (relays.isNotEmpty()) {
             HorizontalDivider(Modifier.padding(horizontal = inset), thickness = 1.dp, color = c.line)
-            val clearPress = remember { MutableInteractionSource() }
             val clearAnchor = rememberAnchorBox()
             Row(
                 Modifier
                     .fillMaxWidth()
                     .captureAnchor(clearAnchor)
-                    .pressShrink(clearPress, PressKind.Plain)
-                    .clickable(clearPress, LocalIndication.current, role = Role.Button) { onRequestClear(clearAnchor.rect) }
+                    .listRowPress(PressRow.Danger) { onRequestClear(clearAnchor.rect) }
                     .padding(horizontal = inset, vertical = 12.dp)
                     .testTag("settingsClearPairingsRow"),
                 horizontalArrangement = Arrangement.spacedBy(sp.sp3),
@@ -1605,13 +1607,15 @@ private fun PlateNavToggle(picked: PlateNavStyle, onPick: (PlateNavStyle) -> Uni
         for (option in PlateNavStyle.entries) {
             val selected = option == picked
             val press = remember { MutableInteractionSource() }
+            val sweep = if (selected) 0f else pressProgress(press, PressKind.Chip, sweep = true).value
             Box(
                 Modifier
                     .weight(1f)
-                    .pressShrink(press, PressKind.Button)
-                    .background(if (selected) c.fg else c.bg)
+                    .pressShrink(press, if (selected) PressKind.Stamp else PressKind.Chip)
+                    .then(if (selected) Modifier.plateStamp(c.fg, c.bg, c.fg, press) else Modifier.background(c.bg))
+                    .plateSweepFill(sweep, c.fg, PlateSweep.LeftToRight)
                     .border(1.5.dp, c.fg)
-                    .selectable(selected, press, PressIndication(if (selected) c.bg else c.fg), role = Role.RadioButton) { onPick(option) }
+                    .selectable(selected, press, null, role = Role.RadioButton) { onPick(option) }
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -1620,7 +1624,7 @@ private fun PlateNavToggle(picked: PlateNavStyle, onPick: (PlateNavStyle) -> Uni
                     fontSize = 13.sp,
                     fontFamily = MonoFamily,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (selected) c.bg else c.fg,
+                    color = if (selected) c.bg else lerp(c.fg, c.bg, sweep),
                 )
             }
         }
@@ -1710,14 +1714,15 @@ private fun RowScope.Option(
     val corner = miniCorner(Clauderc.style)
     var center by remember { mutableStateOf(Offset.Zero) }
     val press = remember { MutableInteractionSource() }
+    val edge = previewPressEdge(press, selected)
     Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .onGloballyPositioned { center = it.boundsInRoot().center }
-                .pressShrink(press, PressKind.Card)
+                .pressShrink(press, PressKind.Preview)
                 .clip(RoundedCornerShape(if (plate) 0.dp else Clauderc.radii.md))
-                .selectable(selected, press, PressIndication(c.fg), role = Role.RadioButton) { onClick(center) }
+                .selectable(selected, press, null, role = Role.RadioButton) { onClick(center) }
                 .padding(Clauderc.spacing.sp1),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(Clauderc.spacing.sp2),
@@ -1727,7 +1732,7 @@ private fun RowScope.Option(
                 when {
                     selected && plate -> c.fg
                     selected -> c.accent
-                    else -> c.line
+                    else -> edge
                 },
                 RoundedCornerShape(corner),
             )
@@ -1749,6 +1754,19 @@ private fun miniCorner(style: UiStyle) = when (style) {
     UiStyle.Plate -> 0.dp
     UiStyle.Tile, UiStyle.Ink -> 14.dp
     UiStyle.Clear -> 12.dp
+}
+
+@Composable
+private fun previewPressEdge(source: MutableInteractionSource, selected: Boolean): Color {
+    val c = Clauderc.colors
+    val ui = Clauderc.style
+    val hit = if (selected) 0f else pressProgress(source, PressKind.Preview).value
+    val edge = if (ui == UiStyle.Ink) c.edge else c.line
+    return lerp(edge, when (ui) {
+        UiStyle.Tile -> c.line
+        UiStyle.Ink, UiStyle.Clear -> c.fg3
+        UiStyle.Plate -> c.fg
+    }, hit)
 }
 
 @Composable
@@ -1877,7 +1895,7 @@ private fun Swatch(choice: AccentChoice, selected: Boolean, dark: Boolean, onPic
             .size(52.dp)
             .onGloballyPositioned { center = it.boundsInRoot().center }
             .semantics { contentDescription = choice.label }
-            .pressShrink(press, PressKind.Icon)
+            .pressShrink(press, PressKind.Swatch)
             .selectable(selected, press, indication = null, role = Role.RadioButton) { onPick(choice, center) },
         contentAlignment = Alignment.Center,
     ) {
@@ -1917,11 +1935,11 @@ private fun PlateInkSwatches(picked: PlateInk, dark: Boolean, onPick: (PlateInk,
                         Modifier
                             .weight(1f)
                             .onGloballyPositioned { center = it.boundsInRoot().center }
-                            .pressShrink(press, PressKind.Button)
+                            .pressShrink(press, PressKind.Swatch)
                             .background(if (selected) c.fg else c.bg)
                             .border(if (selected) 2.dp else 1.dp, c.fg)
                             .semantics { contentDescription = ink.label }
-                            .selectable(selected, press, PressIndication(if (selected) c.bg else c.fg), role = Role.RadioButton) { onPick(ink, center) }
+                            .selectable(selected, press, if (selected) null else controlPress(PressKind.Swatch), role = Role.RadioButton) { onPick(ink, center) }
                             .padding(horizontal = 8.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,

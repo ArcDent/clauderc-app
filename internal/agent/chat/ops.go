@@ -58,6 +58,8 @@ func failWith(req protocol.Envelope, err error) protocol.Envelope {
 		return agent.Fail(req, protocol.CodeInternal, "电脑上的会话接入断开了，请重试")
 	case errors.Is(err, attach.ErrUnreliableScreen):
 		return agent.Fail(req, protocol.CodeNotDelivered, "暂时无法确认电脑上的画面，操作没有完成")
+	case errors.Is(err, attach.ErrScreenTooSmall):
+		return agent.Fail(req, protocol.CodeNotDelivered, "电脑上的窗口太小，画面显示不全，请把窗口放大到至少 80 列、24 行再试")
 	case errors.Is(err, context.DeadlineExceeded):
 		return agent.Fail(req, protocol.CodeInternal, "操作超时，请稍后重试")
 	case errors.Is(err, context.Canceled):
@@ -179,19 +181,28 @@ func (h *Handler) answer(ctx context.Context, req protocol.Envelope) protocol.En
 		if p := h.currentPending(target); p == nil || p.ToolUseID != body.ToolUseID {
 			return errPendingChanged
 		}
+		v := t.View()
+		if v.Unreliable {
+			return attach.ErrUnreliableScreen
+		}
 		if err := checkNoPicker(t); err != nil {
 			return err
 		}
 		// The transcript keeps a permission prompt pending until the tool's
 		// result is written, also while the tool runs once allowed on the
 		// computer; only the screen tells the prompt is still up.
-		if strings.TrimSpace(t.Screen()) == "" {
+		screen := strings.Join(v.Lines, "\n")
+		if strings.TrimSpace(screen) == "" {
 			t.WaitFor(func(s string) bool { return strings.TrimSpace(s) != "" }, questionWait)
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			screen = t.Screen()
+			if strings.TrimSpace(screen) == "" {
+				return attach.ErrUnreliableScreen
+			}
 		}
-		if !promptShown(t.Screen()) {
+		if !promptShown(screen) {
 			return errPendingChanged
 		}
 		return typeAnswer(ctx, t, p.Questions, groups)
@@ -256,9 +267,15 @@ func typeAnswer(ctx context.Context, t *attach.Term, questions []protocol.Questi
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if screen := t.Screen(); !questionShown(screen, questions, i) {
+			screen := t.Screen()
+			if strings.TrimSpace(screen) == "" {
+				return attach.ErrUnreliableScreen
+			}
+			if !questionShown(screen, questions, i) {
 				if i > 0 && promptShown(screen) && questionTabs(strings.Split(screen, "\n")) >= 0 {
-					_ = closePanel(t)
+					if err := closePanel(t); err != nil {
+						return err
+					}
 					return errAnswerCut
 				}
 				return errPendingChanged
@@ -275,7 +292,7 @@ func typeAnswer(ctx context.Context, t *attach.Term, questions []protocol.Questi
 const reviewTitle = "Review your answers"
 
 // questionTabMaxWrap is the most continuation lines a wrapped question tab bar
-// can span below the "←" line when 3-4 long headers exceed 120 columns.
+// can span below the "←" line when 3-4 long headers exceed the screen width.
 const questionTabMaxWrap = 3
 
 // questionTabs is the index of the lowest line of the tab bar of a question
