@@ -208,7 +208,7 @@ func TestCreateCustomEndpoint(t *testing.T) {
 		"env":          map[string]string{"ANTHROPIC_BASE_URL": "https://anyrouter.example/v1"},
 		"apiKeyHelper": "cat '" + keys[0] + "'",
 	})
-	wantEqual(t, "args", c.Args, []string{"--settings", string(settings), "--bg", "-n", "check tests", "--", "检查测试是否通过"})
+	wantEqual(t, "args", c.Args, []string{"--settings", string(settings), "--permission-mode", "bypassPermissions", "--bg", "-n", "check tests", "--", "检查测试是否通过"})
 	for _, a := range c.Args {
 		if strings.Contains(a, key) {
 			t.Errorf("argument %q carries the key", a)
@@ -559,11 +559,70 @@ func TestCreateFromSession(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("claude ran %d times, want once", len(calls))
 	}
-	wantEqual(t, "args", calls[0].Args, []string{"--settings", anySettings, "--model", "opus", "--bg", "-w", "wt-1", "--", "先跑测试"})
+	wantEqual(t, "args", calls[0].Args, []string{"--settings", anySettings, "--model", "opus", "--permission-mode", "bypassPermissions", "--bg", "-w", "wt-1", "--", "先跑测试"})
 	for _, kv := range []string{"ANTHROPIC_MODEL=claude-opus-test", "CLAUDE_CONFIG_DIR=/x"} {
 		if !slices.Contains(calls[0].Env, kv) {
 			t.Errorf("env %q lacks %s", calls[0].Env, kv)
 		}
+	}
+}
+
+// A copied session gets no bypassPermissions if its source already sets
+// permissions in any form or does not read user settings.
+func TestCreateFromSessionPermissionMode(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		flags []string
+	}{
+		{"auto", []string{"--permission-mode", "auto"}},
+		{"auto with equals", []string{"--permission-mode=auto"}},
+		{"inherit plan", []string{"--inherit-permission-mode", "plan"}},
+		{"inherit plan with equals", []string{"--inherit-permission-mode=plan"}},
+		{"skip permissions", []string{"--dangerously-skip-permissions"}},
+		{"restricted", []string{"--restricted"}},
+		{"without user settings", []string{"--setting-sources", "project,local", "--settings", "/x/account-settings.json"}},
+		{"without user settings with equals", []string{"--setting-sources=project,local"}},
+		{"last setting sources exclude user", []string{"--setting-sources", "user", "--setting-sources", "project,local"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.job(t, "src00001", tc.flags, nil, "2026-11-13T08:00:00.000Z")
+			req := protocol.SessionCreateRequest{Cwd: t.TempDir(), FromSession: "src00001"}
+			if _, err := f.h.Create(context.Background(), req); err != nil {
+				t.Fatal(err)
+			}
+			calls := f.calls(t)
+			if len(calls) != 1 {
+				t.Fatalf("claude ran %d times, want once", len(calls))
+			}
+			wantEqual(t, "args", calls[0].Args, append(slices.Clone(tc.flags), "--bg"))
+		})
+	}
+}
+
+// A copied session without a permission mode gets bypassPermissions if it reads user settings.
+func TestCreateFromSessionAddsBypass(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		flags []string
+	}{
+		{"user with whitespace", []string{"--setting-sources", "project, user"}},
+		{"user with equals", []string{"--setting-sources=user"}},
+		{"last setting sources include user", []string{"--setting-sources", "project,local", "--setting-sources", "user"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.job(t, "src00001", tc.flags, nil, "2026-11-13T08:00:00.000Z")
+			req := protocol.SessionCreateRequest{Cwd: t.TempDir(), FromSession: "src00001"}
+			if _, err := f.h.Create(context.Background(), req); err != nil {
+				t.Fatal(err)
+			}
+			calls := f.calls(t)
+			if len(calls) != 1 {
+				t.Fatalf("claude ran %d times, want once", len(calls))
+			}
+			wantEqual(t, "args", calls[0].Args, append(slices.Clone(tc.flags), "--permission-mode", "bypassPermissions", "--bg"))
+		})
 	}
 }
 
@@ -595,8 +654,8 @@ func TestCreatePreset(t *testing.T) {
 	if len(calls) != 3 {
 		t.Fatalf("claude ran %d times, want 3", len(calls))
 	}
-	wantEqual(t, "anyrouter.top args", calls[0].Args, []string{"--settings", anySettings, "--bg"})
-	wantEqual(t, "default args", calls[1].Args, []string{"--bg"})
+	wantEqual(t, "anyrouter.top args", calls[0].Args, []string{"--settings", anySettings, "--permission-mode", "bypassPermissions", "--bg"})
+	wantEqual(t, "default args", calls[1].Args, []string{"--permission-mode", "bypassPermissions", "--bg"})
 	wantEqual(t, "api.anthropic.com args", calls[2].Args, append(f.accountFlags(), "--bg"))
 	for i, c := range calls {
 		if !slices.Contains(c.Env, "ANTHROPIC_DEFAULT_HAIKU_MODEL=hy-4-flash[1M]") {
@@ -691,6 +750,80 @@ func writeScript(t *testing.T, body string) string {
 	return path
 }
 
+// A key file written for a launch goes only when claude itself exits with a
+// failure; one that was there before, or a launch whose outcome is unknown,
+// keeps it.
+func TestCreateCustomEndpointKeyCleanup(t *testing.T) {
+	for _, c := range []struct {
+		name, script string
+		preexisting  bool
+		wantKeys     int
+		wantCode     protocol.ErrorCode
+	}{
+		{"new key on failure", "exit 1\n", false, 0, protocol.CodeInternal},
+		{"existing key on failure", "exit 1\n", true, 1, protocol.CodeInternal},
+		{"new key on success", "echo 'backgrounded · 1234abcd'\n", false, 1, ""},
+		{"new key without session id", "echo started\n", false, 1, protocol.CodeInternal},
+		// Killed as a timeout or a cancel kills it: the session may be running.
+		{"new key when claude is killed", "kill -9 $$\n", false, 1, protocol.CodeInternal},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			req := protocol.SessionCreateRequest{Cwd: t.TempDir(), BaseURL: "https://anyrouter.example/v1", APIKey: "test-key"}
+			if c.preexisting {
+				if _, err := f.h.Create(t.Context(), req); err != nil {
+					t.Fatal(err)
+				}
+			}
+			src := f.src
+			src.ClaudePath = writeScript(t, c.script)
+			h := lifecycle.New(lifecycle.Options{Source: src, Dir: f.dir})
+			id, err := h.Create(t.Context(), req)
+			if c.wantCode == "" && (err != nil || id != "1234abcd") || c.wantCode != "" && codeOf(err) != c.wantCode {
+				t.Fatalf("Create = %q, %v; want error code %q", id, err, c.wantCode)
+			}
+			if keys, _ := filepath.Glob(filepath.Join(f.dir, "keys", "*.key")); len(keys) != c.wantKeys {
+				t.Errorf("found %d key files, want %d", len(keys), c.wantKeys)
+			}
+		})
+	}
+}
+
+// Custom endpoint creates with the same new key run one after the other, so
+// the first failing does not take away the key the second launched with.
+func TestCreateCustomEndpointConcurrentKeyCleanup(t *testing.T) {
+	f := newFixture(t)
+	src := f.src
+	src.ClaudePath = writeScript(t, `if mkdir first-launch 2>/dev/null; then
+	sleep 0.5
+	exit 1
+fi
+echo 'backgrounded · 1234abcd'
+`)
+	h := lifecycle.New(lifecycle.Options{Source: src, Dir: f.dir})
+	req := protocol.SessionCreateRequest{Cwd: t.TempDir(), BaseURL: "https://anyrouter.example/v1", APIKey: "test-key"}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			_, err := h.Create(t.Context(), req)
+			results <- err
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	if first == nil {
+		first, second = second, first
+	}
+	if codeOf(first) != protocol.CodeInternal || second != nil {
+		t.Fatalf("Create errors = %v, %v; want one failed launch and one success", first, second)
+	}
+	if keys, _ := filepath.Glob(filepath.Join(f.dir, "keys", "*.key")); len(keys) != 1 {
+		t.Errorf("found %d key files after both launches, want one", len(keys))
+	}
+}
+
 func TestCreateClaudeFailures(t *testing.T) {
 	cases := map[string]string{
 		"exit status":   "echo 'Error: bad flag' >&2; exit 1\n",
@@ -714,6 +847,46 @@ func TestCreateClaudeFailures(t *testing.T) {
 				if strings.Contains(script, raw) && !strings.Contains(logged.String(), raw) {
 					t.Errorf("log %q lacks claude's output %q", logged.String(), raw)
 				}
+			}
+		})
+	}
+}
+
+// Create returns a distinct message for each bypassPermissions disclaimer refusal.
+func TestCreateBypassRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{
+			"disclaimer not accepted",
+			"--bg with bypassPermissions requires accepting the disclaimer first. Run `claude --dangerously-skip-permissions` once interactively.",
+			"目标机上的 Claude Code 还没同意过 bypass 模式的声明，请先在目标机上交互运行一次 claude --dangerously-skip-permissions，接受提示后再试",
+		},
+		{
+			"user settings not read",
+			"--bg with bypassPermissions requires accepting the disclaimer first. Acceptance is kept in your user settings, which this launch does not read. Launch again with user settings on.",
+			"这个会话的启动方式不读目标机的用户设置，Claude Code 不允许它以 bypass 模式启动",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			src := f.src
+			src.ClaudePath = writeScript(t, `for a in "$@"; do
+	if [ "$a" = --bg ]; then
+		echo '`+tc.output+`' >&2
+		exit 1
+	fi
+done
+`)
+			h := lifecycle.New(lifecycle.Options{Source: src, Dir: f.dir})
+			_, err := h.Create(context.Background(), protocol.SessionCreateRequest{
+				Cwd: t.TempDir(), BaseURL: "https://anyrouter.example/v1", APIKey: "test-key",
+			})
+			var pe *protocol.Error
+			if !errors.As(err, &pe) || pe.Code != protocol.CodeInternal || pe.Message != tc.want {
+				t.Fatalf("error = %v, want %s with message %q", err, protocol.CodeInternal, tc.want)
 			}
 		})
 	}

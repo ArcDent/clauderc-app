@@ -24,7 +24,7 @@ const (
 	confirmWait   = 1500 * time.Millisecond
 	redrawQuiet   = 400 * time.Millisecond
 	redrawMax     = 4 * time.Second
-	// maxModePresses bounds Shift+Tab presses: the cycle has four modes.
+	// maxModePresses bounds Shift+Tab presses: the cycle has up to five modes.
 	maxModePresses = 4
 )
 
@@ -554,11 +554,14 @@ func (h *Handler) setModel(ctx context.Context, req protocol.Envelope) protocol.
 }
 
 // switchableModes are the modes of the Shift+Tab cycle (design D7).
+// Bypass is in the cycle only when enabled at session launch. Otherwise,
+// cycling to bypass returns to the starting mode and reports an error.
 var switchableModes = map[protocol.PermissionMode]bool{
 	protocol.PermissionDefault:     true,
 	protocol.PermissionAcceptEdits: true,
 	protocol.PermissionPlan:        true,
 	protocol.PermissionAuto:        true,
+	protocol.PermissionBypass:      true,
 }
 
 // readMode redraws the screen and reads the mode from the status line.
@@ -578,12 +581,16 @@ func (h *Handler) setPermissionMode(ctx context.Context, req protocol.Envelope) 
 		return failWith(req, err)
 	}
 	if !switchableModes[body.Mode] {
-		return agent.Fail(req, protocol.CodeInvalidParams, "这个权限模式不能从手机切换")
+		return agent.Fail(req, protocol.CodeInvalidParams, "这个权限模式不能从设备切换")
 	}
 	err = h.withTerm(ctx, target, func(t *attach.Term) error {
 		if err := checkInput(t); err != nil {
 			return err
 		}
+		// start is the first mode read; moved is set once another mode shows,
+		// so a press the screen has not caught up with is not a full cycle.
+		var start protocol.PermissionMode
+		moved := false
 		for presses := 0; ; presses++ {
 			mode, ok, err := readMode(t)
 			if err != nil {
@@ -593,8 +600,18 @@ func (h *Handler) setPermissionMode(ctx context.Context, req protocol.Envelope) 
 				h.setScreenMode(target.ID, mode)
 				return nil
 			}
-			if presses == maxModePresses {
-				return &opError{protocol.CodeInternal, fmt.Sprintf("按了 %d 次切换键仍没到目标权限模式", maxModePresses)}
+			if ok && start != "" && mode != start {
+				moved = true
+			}
+			cycled := ok && moved && mode == start
+			if cycled && body.Mode == protocol.PermissionBypass {
+				return &opError{protocol.CodeInvalidParams, "这个会话启动时没开 bypass，切不过去"}
+			}
+			if cycled || presses == maxModePresses {
+				return &opError{protocol.CodeInternal, fmt.Sprintf("按了 %d 次切换键仍没到目标权限模式", presses)}
+			}
+			if ok && start == "" {
+				start = mode
 			}
 			// Shift+Tab on a permission prompt for an edit allows all
 			// edits for the session.

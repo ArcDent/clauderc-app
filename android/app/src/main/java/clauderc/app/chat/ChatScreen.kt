@@ -507,7 +507,7 @@ fun ChatScreen(
                                     modelLabel(state.model).ifEmpty { "模型" }, onClick = openModels, enabled = state.online,
                                     modifier = Modifier.weight(1f, fill = false),
                                 )
-                                BarSubButton(permissionModeLabel(state.permissionMode), onClick = { sheet = ChatSheet.Mode }, enabled = state.online)
+                                BarSubButton(permissionModeLabel(state.permissionMode), onClick = { sheet = ChatSheet.Mode }, enabled = state.online, modifier = Modifier.testTag("chatModeButton"))
                                 contextPercent(state.session?.context)?.let {
                                     Text("上下文 $it%", fontSize = Clauderc.fontSizes.caption, color = c.fg2, maxLines = 1)
                                 }
@@ -520,7 +520,7 @@ fun ChatScreen(
                                 modelLabel(state.model).ifEmpty { "模型" }, onClick = openModels, enabled = state.online,
                                 modifier = Modifier.weight(1f, fill = false),
                             )
-                            BarSubButton(permissionModeLabel(state.permissionMode), onClick = { sheet = ChatSheet.Mode }, enabled = state.online)
+                            BarSubButton(permissionModeLabel(state.permissionMode), onClick = { sheet = ChatSheet.Mode }, enabled = state.online, modifier = Modifier.testTag("chatModeButton"))
                             contextPercent(state.session?.context)?.let {
                                 Text("上下文 $it%", fontSize = Clauderc.fontSizes.caption, color = c.fg2, maxLines = 1)
                             }
@@ -808,6 +808,7 @@ fun ChatScreen(
                     permissionModeLabel(mode),
                     onClick = { sheet = null; if (mode != current) actions.onSetMode(mode) },
                     supporting = permissionModeHint(mode),
+                    danger = mode == PermissionMode.BYPASS,
                     checked = mode == current,
                 )
             }
@@ -908,6 +909,7 @@ private fun ClearChatControlDrop(
                         label = permissionModeLabel(mode),
                         selected = mode == current,
                         enabled = state.online,
+                        danger = mode == PermissionMode.BYPASS,
                         onClick = { if (mode != current) onSetMode(mode) },
                     )
                 }
@@ -992,6 +994,7 @@ private fun PlateChatControlSlip(
                         label = permissionModeLabel(mode),
                         selected = mode == current,
                         enabled = state.online,
+                        danger = mode == PermissionMode.BYPASS,
                         onClick = { if (mode != current) onSetMode(mode) },
                     )
                 }
@@ -1006,21 +1009,23 @@ private fun PlateChatControlSlip(
 }
 
 @Composable
-private fun PlateCtlChip(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun PlateCtlChip(label: String, selected: Boolean, enabled: Boolean, danger: Boolean = false, onClick: () -> Unit) {
     val c = Clauderc.colors
     val press = remember { MutableInteractionSource() }
     val sweep = if (selected) 0f else pressProgress(press, PressKind.Chip, sweep = true).value
+    val ink = if (danger) c.danger else c.fg
+    val onInk = if (danger && !c.isDark) Color.White else c.bg
     val fg = when {
-        selected -> c.bg
+        selected -> onInk
         !enabled -> c.fg3
-        else -> lerp(c.fg, c.bg, sweep)
+        else -> lerp(ink, onInk, sweep)
     }
     Box(
         Modifier
             .pressShrink(press, if (selected) PressKind.Stamp else PressKind.Chip)
-            .then(if (selected) Modifier.plateStamp(c.fg, c.bg, c.fg, press, enabled) else Modifier.background(c.bg, RectangleShape))
-            .plateSweepFill(sweep, c.fg, PlateSweep.LeftToRight)
-            .border(1.5.dp, if (enabled || selected) c.fg else c.fg3, RectangleShape)
+            .then(if (selected) Modifier.plateStamp(ink, c.bg, ink, press, enabled) else Modifier.background(c.bg, RectangleShape))
+            .plateSweepFill(sweep, ink, if (danger) PlateSweep.RightToLeft else PlateSweep.LeftToRight)
+            .border(1.5.dp, if (enabled || selected) ink else c.fg3, RectangleShape)
             .clickable(press, indication = null, enabled = enabled, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
@@ -1113,6 +1118,7 @@ private fun InkChatControlPanel(
                             label = permissionModeLabel(mode),
                             selected = mode == current,
                             enabled = state.online,
+                            danger = mode == PermissionMode.BYPASS,
                             onClick = { if (mode != current) onSetMode(mode) },
                         )
                     }
@@ -1129,16 +1135,27 @@ private fun InkChatControlPanel(
 }
 
 @Composable
-private fun InkCtlChip(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun InkCtlChip(label: String, selected: Boolean, enabled: Boolean, danger: Boolean = false, onClick: () -> Unit) {
     val c = Clauderc.colors
     val press = remember { MutableInteractionSource() }
+    val tone = when {
+        danger -> PressTone.Danger
+        selected -> PressTone.Primary
+        else -> PressTone.Normal
+    }
     Box(
         Modifier
             .pressShrink(press, PressKind.Chip)
             .clip(CircleShape)
-            .background(if (selected) c.inverse else c.surface2)
+            .background(
+                when {
+                    selected && danger -> c.danger
+                    selected -> c.inverse
+                    else -> c.surface2
+                },
+            )
             .then(if (selected) Modifier else Modifier.border(1.dp, c.edge, CircleShape))
-            .clickable(press, controlPress(PressKind.Chip, if (selected) PressTone.Primary else PressTone.Normal, corner = 100.dp), enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .clickable(press, controlPress(PressKind.Chip, tone, corner = 100.dp), enabled = enabled, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -1147,9 +1164,11 @@ private fun InkCtlChip(label: String, selected: Boolean, enabled: Boolean, onCli
             fontSize = 13.5.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             color = when {
+                selected && danger -> if (c.isDark) c.onInverse else Color.White
                 selected -> c.onInverse
-                enabled -> c.fg
-                else -> c.fg3
+                !enabled -> c.fg3
+                danger -> c.danger
+                else -> c.fg
             },
             maxLines = 1,
         )

@@ -159,7 +159,7 @@ func PrintPair(w io.Writer, code protocol.PairCodeResponse) error {
 // PrintDevices lists paired phones, one per line: id, pairing time, name.
 func PrintDevices(w io.Writer, devices []protocol.Device) error {
 	if len(devices) == 0 {
-		_, err := fmt.Fprintln(w, "还没有已配对的手机。")
+		_, err := fmt.Fprintln(w, "还没有已配对的设备。")
 		return err
 	}
 	for _, d := range devices {

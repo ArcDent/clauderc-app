@@ -44,6 +44,7 @@ fun permissionModeHint(mode: String): String? = when (mode) {
     PermissionMode.DEFAULT -> "编辑和运行命令前都先问"
     PermissionMode.ACCEPT_EDITS -> "编辑直接执行，运行命令仍会问"
     PermissionMode.PLAN -> "只读分析，先给计划"
+    PermissionMode.BYPASS -> "什么都不再问"
     else -> null
 }
 
