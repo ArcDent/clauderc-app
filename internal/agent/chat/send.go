@@ -110,7 +110,7 @@ func (h *Handler) sendOnce(ctx context.Context, body protocol.ChatSendRequest) (
 			return err
 		}
 		if err := t.Send(steps[:len(steps)-1]); err != nil {
-			return &opError{protocol.CodeInternal, "向会话输入消息失败，请重试"}
+			return inputWriteError(err)
 		}
 		// Typing takes a second or more; a permission prompt that came up
 		// meanwhile would take the Enter and allow what it has selected.
@@ -118,7 +118,7 @@ func (h *Handler) sendOnce(ctx context.Context, body protocol.ChatSendRequest) (
 			return errPopped
 		}
 		if err := t.Send(steps[len(steps)-1:]); err != nil {
-			return &opError{protocol.CodeInternal, "向会话输入消息失败，请重试"}
+			return inputWriteError(err)
 		}
 		return nil
 	})
@@ -196,13 +196,13 @@ func (h *Handler) sendPanel(ctx context.Context, req protocol.Envelope, conn *at
 			return err
 		}
 		if err := t.Send(steps[:len(steps)-1]); err != nil {
-			return &opError{protocol.CodeInternal, "向会话输入消息失败，请重试"}
+			return inputWriteError(err)
 		}
 		if !t.WaitFor(func(sc string) bool { return inInput(sc, cmd) }, panelTyped) {
 			return &opError{protocol.CodeNotDelivered, "命令没有出现在会话的输入框里，没有发出"}
 		}
 		if err := t.Send(steps[len(steps)-1:]); err != nil {
-			return &opError{protocol.CodeInternal, "向会话输入消息失败，请重试"}
+			return inputWriteError(err)
 		}
 		if !t.WaitFor(func(sc string) bool { return !inInput(sc, cmd) }, h.opts.DeliveryTimeout) {
 			return &opError{protocol.CodeNotDelivered, fmt.Sprintf("命令按下回车后 %g 秒内还留在输入框里，可能没有送达", h.opts.DeliveryTimeout.Seconds())}
@@ -302,6 +302,13 @@ func checkInput(t *attach.Term) error {
 		return errOffInput
 	}
 	return nil
+}
+
+func inputWriteError(err error) error {
+	if errors.Is(err, attach.ErrUnreliableScreen) {
+		return err
+	}
+	return &opError{protocol.CodeInternal, "向会话输入消息失败，请重试"}
 }
 
 // checkMessage validates a chat.send body and returns why it is refused.

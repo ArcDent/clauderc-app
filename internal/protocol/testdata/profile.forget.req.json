@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "kind": "req",
+  "id": "r-063",
+  "method": "profile.forget",
+  "machine": "m-7f3a",
+  "client": "c-12",
+  "body": {"profileId": "relay.example.net"}
+}

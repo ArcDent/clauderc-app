@@ -1,7 +1,9 @@
 package clauderc.app.chat
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
@@ -85,6 +87,7 @@ import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import clauderc.app.protocol.Answer
 import clauderc.app.protocol.ChatItem
@@ -190,8 +193,17 @@ class ChatScreenTest {
             }
         }
 
-        fun click(key: Any) = shown!!.data().components.filterIsInstance<TextContextMenuItem>().single { it.key == key }
+        fun items(): List<TextContextMenuItem> = shown!!.data().components.filterIsInstance<TextContextMenuItem>()
+
+        fun click(key: Any) = items().single { it.key == key }
             .onClick(object : TextContextMenuSession { override fun close() {} })
+
+        fun clickLabel(label: String): Boolean {
+            var closed = false
+            items().single { it.label == label }
+                .onClick(object : TextContextMenuSession { override fun close() { closed = true } })
+            return closed
+        }
     }
 
     /**
@@ -277,7 +289,7 @@ class ChatScreenTest {
         assertTrue("selected text shows in the selection colour: $hits pixels", hits > 50)
     }
 
-    /** 印版's code block is ringed in a 1dp line of the text colour, so its tint tells from the paper. */
+    /** 印版's code block has a 1dp line border, a 3dp ink rule on the left, and tint surface fill (demo.html round 16). */
     @Test fun platesCodeBlockHasAThinLineInTheTextColour() {
         var colors: ClaudercColors? = null
         val reply = ChatItem(1, ItemKind.ASSISTANT, text = "看这段：\n\n```go\nfunc backoff(n int) time.Duration {\n\treturn time.Second << n\n}\n```")
@@ -296,14 +308,84 @@ class ChatScreenTest {
         val top = b.top.value * d
         val right = b.right.value * d
         val middle = (b.top + b.bottom).value / 2 * d
+        val borderColor = c.line.compositeOver(c.surface)
         fun near(what: String, want: androidx.compose.ui.graphics.Color, x: Float, y: Float) {
             val p = image[x.toInt(), y.toInt()]
             assertTrue("$what: $p, want $want", (abs(p.red - want.red) + abs(p.green - want.green) + abs(p.blue - want.blue)) / 3 < 0.03f)
         }
-        near("the left line", c.fg, left + 0.5f * d, middle)
-        near("the right line", c.fg, right - 0.5f * d, middle)
-        near("the top line", c.fg, (left + right) / 2, top + 0.5f * d)
-        near("the grey inside", c.surface, left + 4 * d, middle)
+        near("the left 3dp bar", c.fg, left + 1.5f * d, middle)
+        near("the right 1dp line", borderColor, right - 0.5f * d, middle)
+        near("the top 1dp line", borderColor, (left + right) / 2, top + 0.5f * d)
+        near("the tint inside", c.surface, left + 6 * d, middle)
+    }
+
+    @Test fun repliesSpanTheContentColumnAndAlignNotesAcrossStyles() {
+        var style by mutableStateOf(UiStyle.Tile)
+        val items = listOf(
+            ChatItem(1, ItemKind.INTERRUPTED),
+            ChatItem(2, ItemKind.ASSISTANT, text = "短回复"),
+        )
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = style) {
+                ChatScreen(baseState().copy(items = items, hasMore = false), ChatActions())
+            }
+        }
+        val d = compose.density.density
+        for (ui in UiStyle.entries) {
+            style = ui
+            compose.waitForIdle()
+            val list = compose.onNodeWithTag("chatList").fetchSemanticsNode().boundsInRoot
+            val reply = compose.onNodeWithTag("reply", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals("$ui reply fills content column", list.width - 32f * d, reply.width, 1.5f)
+            val replyText = compose.onNodeWithText("短回复", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val note = compose.onNodeWithText("已中断").fetchSemanticsNode().boundsInRoot
+            assertEquals("$ui grey note aligns with reply text", replyText.left, note.left, 1.5f)
+        }
+    }
+
+    @Test fun wideFormulaFadesOnlyOnOverflowingSidesAndNotWhenNarrow() {
+        val wide = "\$\$\n\\blacksquare\\ \\blacksquare\\ \\blacksquare\\ " + "\\mathbf{M}\\ ".repeat(24) + "\\blacksquare\n\$\$"
+        val narrow = "\$\$\n\\blacksquare\\ \\mathbf{M}\n\$\$"
+        var text by mutableStateOf(wide)
+        var bg = Color.Unspecified
+        var fg = Color.Unspecified
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Clear) {
+                bg = Clauderc.colors.bg
+                fg = Clauderc.colors.fg
+                ChatScreen(baseState().copy(items = listOf(ChatItem(1, ItemKind.ASSISTANT, text = text)), hasMore = false), ChatActions())
+            }
+        }
+        compose.waitForIdle()
+        val mathNode = compose.onNodeWithTag("math", useUnmergedTree = true)
+        val range = mathNode.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
+        assertTrue("wide formula overflows: max=${range.maxValue()}", range.maxValue() > 50f)
+        // Rightmost column of the math viewport is covered by the 28dp fade to reply bg, while the left stays crisp ink.
+        fun rightEdgeInkFraction(): Float {
+            val b = mathNode.fetchSemanticsNode().boundsInRoot
+            val px = compose.onRoot().captureToImage().toPixelMap()
+            val x = (b.right - 2f).toInt().coerceIn(0, px.width - 1)
+            var minDist = 1f
+            for (y in b.top.toInt().coerceAtLeast(0) until b.bottom.toInt().coerceAtMost(px.height)) {
+                val p = px[x, y]
+                val dist = (abs(p.red - bg.red) + abs(p.green - bg.green) + abs(p.blue - bg.blue)) / 3f
+                if (dist > 0.01f) minDist = minOf(minDist, dist)
+            }
+            var maxDist = 0f
+            for (y in b.top.toInt().coerceAtLeast(0) until b.bottom.toInt().coerceAtMost(px.height)) {
+                val p = px[x, y]
+                val dist = (abs(p.red - bg.red) + abs(p.green - bg.green) + abs(p.blue - bg.blue)) / 3f
+                if (dist > maxDist) maxDist = dist
+            }
+            return maxDist
+        }
+        assertTrue("right edge fades into bg when overflowing: ${rightEdgeInkFraction()}", rightEdgeInkFraction() < 0.25f)
+        // Narrow formula does not overflow and draws no fade.
+        text = narrow
+        compose.waitForIdle()
+        val narrowRange = mathNode.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
+        assertEquals("narrow formula has no overflow", 0f, narrowRange.maxValue(), 0.5f)
+        assertTrue("fg differs from bg", abs(fg.luminance() - bg.luminance()) > 0.5f)
     }
 
     @Test fun opensAtTheBottomWithToolRowsFolded() {
@@ -372,6 +454,19 @@ class ChatScreenTest {
         assertEquals(androidx.compose.ui.graphics.Color.Gray, span.item.color)
         val drawn = styled(runs, androidx.compose.ui.graphics.Color.Black, androidx.compose.ui.graphics.Color.Gray, TextLinks(), setOf(mathId(i)))
         assertTrue(drawn.spanStyles.none { it.item.fontFamily == clauderc.app.ui.theme.MonoFamily })
+    }
+
+    @Test fun boldFormulaFallbackKeepsItsWeightWithoutStylingDrawnMath() {
+        val written = "\$A^*\$"
+        val runs = mdRuns("**$written**")
+        val fallback = styled(runs, Color.Black, Color.Gray, TextLinks(), emptySet())
+        assertEquals(written, fallback.text)
+        val span = fallback.spanStyles.single().item
+        assertEquals(androidx.compose.ui.text.font.FontWeight.SemiBold, span.fontWeight)
+        assertEquals(clauderc.app.ui.theme.MonoFamily, span.fontFamily)
+        val drawn = styled(runs, Color.Black, Color.Gray, TextLinks(), setOf(mathId(0)))
+        assertEquals(written, drawn.text)
+        assertTrue(drawn.spanStyles.isEmpty())
     }
 
     @Test fun thinkingItemsAreNotRendered() {
@@ -1358,6 +1453,26 @@ class ChatScreenTest {
         assertTrue("the unknown command shows as written, in mono", at >= 0 && text.spanStyles.any { it.start == at && it.end == at + bad.length && it.item.fontFamily == clauderc.app.ui.theme.MonoFamily })
     }
 
+    /** A block formula shown as written is set at least as large as a code block's text (12.5sp mono), not at Paint's default size. */
+    @Test fun blockFormulaFallbackTextIsAtLeastAsLargeAsCodeText() {
+        val label = "code"
+        val written = "\\[\\eqref{eq:x}\\]"
+        val block = mdBlocks(written).single() as MdBlock.Math
+        compose.setContent {
+            ClaudercTheme(darkTheme = false) {
+                Column {
+                    Text(label, fontSize = 12.5.sp, fontFamily = clauderc.app.ui.theme.MonoFamily)
+                    MathBox(block, written.length, Clauderc.colors.fg, Modifier)
+                }
+            }
+        }
+        fun height(text: String) = compose.onNodeWithText(text, useUnmergedTree = true)
+            .assertIsDisplayed().fetchSemanticsNode().size.height
+        val fallback = height(written)
+        val reference = height(label)
+        assertTrue("formula text height $fallback px, code text height $reference px", fallback >= reference)
+    }
+
     @Test fun formulasTakeTheTextsColourInEveryStyle() {
         var look by mutableStateOf(UiStyle.Clear to false)
         var fg = Color.Unspecified
@@ -1657,5 +1772,168 @@ class ChatScreenTest {
             val bottomGap = panelAfter.bottom - input.bottom
             assertTrue("$ui: expected >= 13dp safe bottom inset under UnderlineField, got $bottomGap", bottomGap >= 13.dp)
         }
+    }
+
+    @Config(shadows = [ShadowMagnifier::class])
+    @Test fun copyWholeReplyMenuCopiesRawMarkdownShowsToastAndClearsSelection() {
+        val toolbar = FakeToolbar()
+        val raw = "## 重连说明\n\n逻辑在 `redial` 里，**指数退避**。\n\n```sh\ngo vet ./...\n```\n\n没有问题，可以提交。"
+        showSelecting(
+            baseState().copy(
+                items = listOf(
+                    ChatItem(1, ItemKind.USER, text = "跑一遍 go vet 再提交"),
+                    ChatItem(2, ItemKind.ASSISTANT, text = raw),
+                ),
+                hasMore = false,
+            ),
+            toolbar,
+        )
+        compose.onNodeWithText("没有问题，可以提交。").performTouchInput { longClick() }
+        awaitToolbar("the reply's selection brings up the toolbar") { toolbar.shown != null }
+        val items = toolbar.items()
+        val copyIdx = items.indexOfFirst { it.key == TextContextMenuKeys.CopyKey }
+        val selectAllIdx = items.indexOfFirst { it.key == TextContextMenuKeys.SelectAllKey }
+        val wholeIdx = items.indexOfFirst { it.label == "复制整条" }
+        assertTrue("expected 复制整条 after Copy/SelectAll in ${items.map { it.label }}", wholeIdx > copyIdx && wholeIdx > selectAllIdx)
+
+        val closed = toolbar.clickLabel("复制整条")
+        compose.waitForIdle()
+        assertTrue("clicking 复制整条 closes the menu session", closed)
+        assertEquals("copies the raw Markdown source", raw, clipboardText())
+        compose.onNodeWithText("已复制").assertIsDisplayed()
+        assertTrue("clears selection so the toolbar is dismissed", toolbar.shown == null)
+
+        val before = toolbar.times
+        compose.onNodeWithText("跑一遍 go vet 再提交").performTouchInput { longClick() }
+        awaitToolbar("the user's message selects") { toolbar.times > before && toolbar.shown != null }
+        assertTrue("user bubble has no 复制整条: ${toolbar.items().map { it.label }}", toolbar.items().none { it.label == "复制整条" })
+    }
+
+    @Config(shadows = [ShadowMagnifier::class])
+    @Test fun copyWholeReplyOnAnyChunkOfASplitReplyCopiesTheEntireMarkdownSource() {
+        val toolbar = FakeToolbar()
+        val sections = (1..9).map { i ->
+            val tag = "%02d".format(i)
+            "## 第 $tag 节\n\n第 $tag 节正文：" + "这是用于验证超长回复拆块后仍能复制整条原文的一段说明。".repeat(38) + "【节$tag 尾】"
+        } + listOf("## 第 10 节\n\n结尾短段，开页就在底端可见。")
+        val raw = sections.joinToString("\n\n")
+        assertTrue("reply crosses split threshold", raw.length > SPLIT_REPLY_CHARS)
+        showSelecting(baseState().copy(items = listOf(ChatItem(1, ItemKind.ASSISTANT, text = raw)), hasMore = false), toolbar)
+
+        // Bottom chunk is visible on initial open.
+        compose.onNodeWithText("结尾短段，开页就在底端可见。", useUnmergedTree = true).performTouchInput { longClick() }
+        awaitToolbar("bottom chunk selection brings up toolbar") { toolbar.shown != null }
+        toolbar.clickLabel("复制整条")
+        compose.waitForIdle()
+        assertEquals("bottom chunk copies full Markdown", raw, clipboardText())
+        compose.onNodeWithText("已复制").assertIsDisplayed()
+
+        // Scroll to the top chunk and verify 复制整条 there copies the exact same full Markdown.
+        compose.onNodeWithTag("chatList").performScrollToNode(hasText("第 01 节"))
+        compose.waitForIdle()
+        val before = toolbar.times
+        compose.onNodeWithText("第 01 节", useUnmergedTree = true).performTouchInput { longClick() }
+        awaitToolbar("top chunk selection brings up toolbar") { toolbar.times > before && toolbar.shown != null }
+        toolbar.clickLabel("复制整条")
+        compose.waitForIdle()
+        assertEquals("top chunk copies full Markdown", raw, clipboardText())
+    }
+
+    @Test fun splitReplyChunksJoinSeamlesslyAcrossStyles() {
+        // Two 3_100-char paragraphs plus a short trailing paragraph put the chunk seam right inside the initial viewport.
+        val chunk0 = "第一块开头：" + "测试第一块段落文字。".repeat(310)
+        val chunk1 = "第二块开头：" + "测试中间块段落文字。".repeat(310) + "【中块尾】"
+        val chunk2 = "第三块开头：接缝下方短段，方便在不裁剪的情况下直接验证像素连续。"
+        val raw = "$chunk0\n\n$chunk1\n\n$chunk2"
+        var style by mutableStateOf(UiStyle.Tile)
+        var dark by mutableStateOf(false)
+        var colors: ClaudercColors? = null
+        compose.setContent {
+            ClaudercTheme(darkTheme = dark, style = style) {
+                colors = Clauderc.colors
+                ChatScreen(baseState().copy(items = listOf(ChatItem(1, ItemKind.ASSISTANT, text = raw)), hasMore = false), ChatActions())
+            }
+        }
+        val cases = listOf(
+            UiStyle.Tile to false,
+            UiStyle.Tile to true,
+            UiStyle.Ink to false,
+            UiStyle.Ink to true,
+            UiStyle.Plate to false,
+            UiStyle.Clear to false,
+        )
+        val d = compose.density.density
+        for ((ui, isDark) in cases) {
+            style = ui
+            dark = isDark
+            compose.waitForIdle()
+            val chunks = compose.onAllNodesWithTag("reply", useUnmergedTree = true).fetchSemanticsNodes().sortedBy { it.boundsInRoot.top }
+            assertTrue("$ui(dark=$isDark): at least 2 chunks visible around seam, got ${chunks.size}", chunks.size >= 2)
+            val upper = chunks[chunks.size - 2].boundsInRoot
+            val lower = chunks.last().boundsInRoot
+            assertTrue("$ui(dark=$isDark): seam is strictly inside viewport: upper=$upper lower=$lower", upper.height > 20f && lower.height > 20f)
+            assertEquals("$ui(dark=$isDark): zero vertical gap at seam", upper.bottom, lower.top, 0.5f)
+            val seamY = upper.bottom.toInt()
+            val c = colors!!
+            val px = compose.onRoot().captureToImage().toPixelMap()
+            // Sample inside the right inner padding margin (free of text glyphs) and at the center of the inter-block gap below the seam.
+            val marginX = (upper.right - 6f * d).toInt()
+            val midX = ((upper.left + upper.right) / 2f).toInt()
+            fun assertPixel(what: String, want: Color, x: Int, y: Int) {
+                val p = px[x, y]
+                val diff = (abs(p.red - want.red) + abs(p.green - want.green) + abs(p.blue - want.blue)) / 3f
+                assertTrue("$ui(dark=$isDark) $what at ($x,$y): got $p, want $want", diff < 0.03f)
+            }
+            when (ui) {
+                UiStyle.Tile -> {
+                    for (dy in -3..3) assertPixel("continuous surface across seam", c.surface, marginX, seamY + dy)
+                    for (dy in 0..4) assertPixel("continuous surface at seam center", c.surface, midX, seamY + dy)
+                }
+                UiStyle.Ink -> {
+                    for (dy in -3..3) assertPixel("no horizontal border inside seam", c.card, marginX, seamY + dy)
+                    for (dy in 0..4) assertPixel("no horizontal border at seam center", c.card, midX, seamY + dy)
+                    val border = c.edge.compositeOver(c.card)
+                    val leftX = (upper.left + 0.5f * d).toInt()
+                    val rightX = (upper.right - 0.5f * d).toInt()
+                    for (dy in -3..3) {
+                        assertPixel("continuous left border", border, leftX, seamY + dy)
+                        assertPixel("continuous right border", border, rightX, seamY + dy)
+                    }
+                }
+                UiStyle.Plate -> {
+                    val leftX = (upper.left + 1.0f * d).toInt()
+                    val rail = c.line.compositeOver(c.bg)
+                    for (dy in -3..3) assertPixel("continuous left rule", rail, leftX, seamY + dy)
+                }
+                UiStyle.Clear -> Unit
+            }
+        }
+    }
+
+    @Config(shadows = [ShadowMagnifier::class])
+    @Test fun copyWholeReplyIncludesStatusMarkerLines() {
+        val toolbar = FakeToolbar()
+        val raw = "测试已经全部跑完。\n\nneeds input: 要现在合并吗？"
+        showSelecting(baseState().copy(items = listOf(ChatItem(1, ItemKind.ASSISTANT, text = raw)), hasMore = false), toolbar)
+        compose.onNodeWithText("needs input: 要现在合并吗？").assertIsDisplayed()
+        compose.onNodeWithText("测试已经全部跑完。").performTouchInput { longClick() }
+        awaitToolbar("reply selection brings up toolbar") { toolbar.shown != null }
+        toolbar.clickLabel("复制整条")
+        compose.waitForIdle()
+        assertEquals("copies complete source including marker line", raw, clipboardText())
+        compose.onNodeWithText("已复制").assertIsDisplayed()
+    }
+
+    @Test fun emptyCodeBlockInSplitReplyStillRenders() {
+        val raw = "```sh\n```\n\n```go\n" + "x := 1\n".repeat(600) + "```\n\n" + "后半段说明。".repeat(520) + "\n\n```py\n```"
+        assertTrue("exceeds split threshold: ${raw.length}", raw.length > SPLIT_REPLY_CHARS)
+        show(baseState().copy(items = listOf(ChatItem(1, ItemKind.ASSISTANT, text = raw)), hasMore = false))
+        compose.waitForIdle()
+        // Trailing empty py fence stays merged in the last chunk and renders its language header.
+        compose.onNodeWithText("py", useUnmergedTree = true).assertIsDisplayed()
+        // Leading empty sh fence before the oversized go code block stays merged in chunk 0 and renders too.
+        compose.onNodeWithTag("chatList").performScrollToNode(hasText("sh"))
+        compose.waitForIdle()
+        compose.onNodeWithText("sh", useUnmergedTree = true).assertIsDisplayed()
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.unit.DpRect
@@ -61,11 +62,11 @@ class LiveReplyTest {
 
     private var state by mutableStateOf(ChatUiState(loading = false))
 
-    private fun show(initial: ChatUiState) {
+    private fun show(initial: ChatUiState, darkTheme: Boolean = false, style: UiStyle = UiStyle.Plate) {
         state = initial
         compose.mainClock.autoAdvance = false
         // 印版 stacks the input under the list, so the list's bottom is where the messages end.
-        compose.setContent { ClaudercTheme(darkTheme = false, style = UiStyle.Plate) { ChatScreen(state, ChatActions()) } }
+        compose.setContent { ClaudercTheme(darkTheme = darkTheme, style = style) { ChatScreen(state, ChatActions()) } }
         compose.mainClock.advanceTimeByFrame()
     }
 
@@ -142,6 +143,16 @@ class LiveReplyTest {
         // chat.open brings a reply written while the page was closed: it is already there, not new.
         next { it.copy(opened = true, items = items(4) + ChatItem(5, ItemKind.ASSISTANT, text = reply)) }
         assertEquals(reply, lowestReply().shown())
+    }
+
+    @Test fun aLongNewReplyReachesItsLastFourHundredCharactersWithinOneSecond() {
+        val longReply = "长".repeat(5_000)
+        show(ChatUiState(loading = false, items = items(1)))
+        next { it.copy(items = it.items + ChatItem(2, ItemKind.ASSISTANT, text = longReply)) }
+        compose.mainClock.advanceTimeBy(1_000)
+        val shown = lowestReply().shown()
+        assertTrue("one second in: ${shown.length} of ${longReply.length}", shown.length in 4_600 until 5_000)
+        assertTrue(longReply.startsWith(shown))
     }
 
     @Test fun whileItTypesTheListStaysAtTheBottom() {
@@ -230,6 +241,112 @@ class LiveReplyTest {
         assertEquals(reply, typing().shown())
     }
 
+    @Test fun aMarkdownReplyKeepsTheVisiblePrefixWhenTakingOverItsScreenPreview() {
+        val line = "检查端口和服务是否正常。".repeat(4)
+        val preview = "重连退避\n先读配置。\n- $line"
+        val written = "## 重连退避\n\n**先读**        配置。\n\n- $line\n- 最后检查日志。"
+        val complete = "重连退避先读配置。${line}最后检查日志。"
+        fun visible() = lowestReply().shown().filterNot { it.isWhitespace() || it == '#' || it == '-' }
+
+        show(ChatUiState(loading = false, state = SessionState.Working, items = items(1)))
+        next { it.copy(partial = PartialReply(preview, "partial-1", afterSeq = 1)) }
+        compose.mainClock.advanceTimeBy(500)
+        val before = visible()
+        assertTrue("partway through the list: $before", before.startsWith("重连退避先读配置。检查") && before.length < complete.length)
+
+        next {
+            it.copy(items = it.items + ChatItem(2, ItemKind.ASSISTANT, text = written), keys = mapOf(2L to "partial-1"), partial = null)
+        }
+        val after = visible()
+        assertTrue("keeps the prefix: $after after $before", after.startsWith(before))
+        assertTrue("continues from the same place: $after after $before", complete.startsWith(after) && after.length <= before.length + 2)
+        compose.mainClock.advanceTimeBy(4_000)
+        assertEquals(complete, visible())
+    }
+
+    @Test fun aWrittenReplyTypesItsNewTailAfterTheScreenPreviewHasFinished() {
+        val preview = "先读配置。"
+        val tail = "再检查服务是否启动。"
+        val written = "**先读**        配置。$tail"
+        show(ChatUiState(loading = false, state = SessionState.Working, items = items(1)))
+        next { it.copy(partial = PartialReply(preview, "partial-1", afterSeq = 1)) }
+        compose.mainClock.advanceTimeBy(500)
+        assertEquals(preview, lowestReply().shown())
+
+        next {
+            it.copy(items = it.items + ChatItem(2, ItemKind.ASSISTANT, text = written), keys = mapOf(2L to "partial-1"), partial = null)
+        }
+        val shown = lowestReply().shown().filterNot { it.isWhitespace() }
+        assertTrue("preview stays visible while the tail types: $shown", shown.startsWith(preview) && shown.length < preview.length + tail.length)
+        compose.mainClock.advanceTimeBy(1_000)
+        assertEquals(preview + tail, lowestReply().shown().filterNot { it.isWhitespace() })
+    }
+
+    private val formulaReply = """
+        你说得对，我上一轮又把一个地方看岔了。我重新仔细看你的手写。
+
+        你写的最后一条等式链是：
+
+        ${'$'}${'$'}|A_{11}|^2+|A_{21}|^2 = |A_{12}|^2+(A_{21}^*)^2 = |A_{21}|^2+|A_{21}|^2 = 0${'$'}${'$'}
+
+        你的疑问是：**${'$'}|A_{11}|^2+|A_{21}|^2${'$'} 为什么不是 0？你用矩阵乘法算出来就是 0。**
+
+        ## 你的矩阵乘法哪里出了问题
+
+        **如果是 ${'$'}A^2=0${'$'}：**
+        ${'$'}${'$'}A^2=\begin{pmatrix}A_{11}&A_{12}\\A_{21}&A_{22}\end{pmatrix}^2=\begin{pmatrix}A_{11}^2+A_{12}A_{21}&A_{11}A_{12}+A_{12}A_{22}\\A_{21}A_{11}+A_{22}A_{21}&A_{21}A_{12}+A_{22}^2\end{pmatrix}=0${'$'}${'$'}
+
+        **真正给出 ${'$'}|A_{11}|^2+|A_{21}|^2${'$'} 的式子是 ${'$'}B_{11}=1${'$'}：**
+        ${'$'}${'$'}(A^+A)_{11}=A_{11}^*A_{11}+A_{21}^*A_{21}=|A_{11}|^2+|A_{21}|^2=1${'$'}${'$'}
+
+        - ${'$'}B=A^+A=\mathrm{diag}(1,0)${'$'} **只告诉你第 1 列模长为 1**（不是 0）
+        - ${'$'}A^2=0${'$'} **才告诉你 ${'$'}A_{11}=0${'$'}**
+        - 两者结合才得到 ${'$'}|A_{21}|=1${'$'}
+
+        你手写的 B 是 ${'$'}\begin{pmatrix}1&0\\0&0\end{pmatrix}${'$'}，所以：
+        - ${'$'}B_{11}=1${'$'}，第 1 列模长平方和 = 1
+        - ${'$'}B_{22}=0${'$'}，第 2 列全零
+
+        喵呜~
+    """.trimIndent()
+
+    private val formulaPreview = formulaReply.replace("**", "").replace(Regex("(?m)^## "), "")
+
+    private fun advanceReplyFrames(millis: Long) {
+        val end = compose.mainClock.currentTime + millis
+        while (compose.mainClock.currentTime < end) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+        }
+    }
+
+    private fun assertFormulaReplyIsComplete() {
+        val expected = formulaPreview.lineSequence().joinToString("") { it.removePrefix("- ") }
+        assertEquals(expected, newestShown().replace("•", "").replace("\n", ""))
+    }
+
+    @Test fun aReplyWithFormulaLedItemsTypesOutWithoutCrashing() {
+        show(ChatUiState(loading = false, items = items(6)), darkTheme = true, style = UiStyle.Ink)
+        next { it.copy(items = it.items + ChatItem(7, ItemKind.ASSISTANT, text = formulaReply)) }
+        advanceReplyFrames(8_000)
+        assertFormulaReplyIsComplete()
+    }
+
+    @Test fun aFormulaLedReplyTakesOverItsScreenPreview() {
+        show(ChatUiState(loading = false, state = SessionState.Working, items = items(6)), darkTheme = true, style = UiStyle.Ink)
+        var preview = ""
+        for (chunk in formulaPreview.chunked(150)) {
+            preview += chunk
+            next { it.copy(partial = PartialReply(preview, "partial-1", afterSeq = 6)) }
+            advanceReplyFrames(1_000)
+        }
+        next {
+            it.copy(items = it.items + ChatItem(7, ItemKind.ASSISTANT, text = formulaReply), keys = mapOf(7L to "partial-1"), partial = null)
+        }
+        advanceReplyFrames(4_000)
+        assertFormulaReplyIsComplete()
+    }
+
     /** A code block scrolled sideways stays put as the reply grows and types out again, preview to written reply. */
     @Test fun aScrolledCodeBlockStaysPutAsTheReplyGrows() {
         val code = "看这段：\n\n```go\nx := " + "veryLongIdentifier".repeat(12) + "\n```\n"
@@ -312,5 +429,128 @@ class LiveReplyTest {
         assertEquals("laid out at its full height from the first frame", firstHeight, panel().fetchSemanticsNode().size.height)
         val range = panel().fetchSemanticsNode().config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
         assertEquals("the README panel fits without scrolling", 0f, range?.maxValue?.invoke() ?: 0f)
+    }
+
+    @Test fun aTenThousandCharReplySplitsIntoOrderedChunksAndTypesContinuously() {
+        // Each section is exactly 1000 chars so replyChunks produces 0..2, 3..5, 6..8, 9..9.
+        val sections = (1..10).map { i ->
+            val tag = "%02d".format(i)
+            "段$tag：" + "长回复分段验证文本。".repeat(99) + "【结尾$tag】"
+        }
+        val longReply = sections.joinToString("\n\n")
+        val blocks = mdBlocks(longReply)
+        val expectedChunks = replyChunks(blocks)
+        assertEquals("10k reply splits into 4 chunks", listOf(0..2, 3..5, 6..8, 9..9), expectedChunks)
+
+        show(ChatUiState(loading = false, items = items(1)))
+        next { it.copy(items = it.items + ChatItem(2, ItemKind.ASSISTANT, text = longReply)) }
+        // Before typing advances past chunk 0, unreached chunks are not drawn.
+        assertEquals("only chunk 0 is drawn at progress 0", 1, compose.onAllNodesWithTag("reply", useUnmergedTree = true).fetchSemanticsNodes().size)
+
+        // One second in, large-batch jump has exposed all chunks and the bottom chunk is typing its tail.
+        compose.mainClock.advanceTimeBy(1_000)
+        val midTail = lowestReply().shown()
+        assertTrue("bottom chunk starts with last chunk text and is still typing: ${midTail.take(20)} len=${midTail.length}", midTail.startsWith("段10：") && !midTail.endsWith("【结尾10】"))
+
+        compose.mainClock.advanceTimeBy(3_000)
+        val doneTail = lowestReply().shown()
+        assertTrue("bottom chunk finishes typing in full", doneTail.startsWith("段10：") && doneTail.endsWith("【结尾10】"))
+
+        // Verify top-to-bottom order across chunk boundaries (use unclipped bounds since 1000-char blocks exceed one viewport).
+        compose.mainClock.autoAdvance = true
+        compose.onNodeWithTag("chatList").performScrollToNode(hasText("段07：", substring = true))
+        compose.waitForIdle()
+        val p07 = compose.onNode(hasText("段07：", substring = true), useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val p09 = compose.onNode(hasText("段09：", substring = true), useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("section 07 ($p07) sits above section 09 ($p09)", p07.bottom <= p09.top)
+
+        compose.onNodeWithTag("chatList").performScrollToNode(hasText("段01：", substring = true))
+        compose.waitForIdle()
+        val p01 = compose.onNode(hasText("段01：", substring = true), useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val p02 = compose.onNode(hasText("段02：", substring = true), useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("section 01 ($p01) sits above section 02 ($p02)", p01.bottom <= p02.top)
+    }
+
+    @Test fun aGrowingPartialCrossingSixThousandCharsSplitsWithoutRetyping() {
+        // Each section is 1002 chars so 5 sections stay below 6000 and 7 sections split into 0..2, 3..5, 6..6.
+        fun sec(i: Int): String = "第%02d段：".format(i) + "这是一段持续流式输出的回复内容。".repeat(62) + "（完%02d）".format(i)
+        val part5 = (1..5).joinToString("\n\n", transform = ::sec)
+        val part7 = (1..7).joinToString("\n\n", transform = ::sec)
+        val formal7 = (1..7).joinToString("\n\n") { i -> "**第%02d段：**".format(i) + "这是一段持续流式输出的回复内容。".repeat(62) + "（完%02d）".format(i) }
+        assertTrue("part5 stays unsplit: ${part5.length}", part5.length < SPLIT_REPLY_CHARS)
+        assertTrue("part7 crosses split threshold: ${part7.length}", part7.length > SPLIT_REPLY_CHARS)
+
+        show(ChatUiState(loading = false, state = SessionState.Working, items = items(1)))
+        // Grow gradually below 6000 so it types to ~5000 without jumping.
+        var built = ""
+        for (i in 1..5) {
+            built = if (built.isEmpty()) sec(i) else "$built\n\n${sec(i)}"
+            next { it.copy(partial = PartialReply(built, "partial-1", afterSeq = 1)) }
+            compose.mainClock.advanceTimeBy(5_000)
+        }
+        assertEquals("unsplit below 6000", 1, compose.onAllNodesWithTag("reply", useUnmergedTree = true).fetchSemanticsNodes().size)
+        val beforeTail = lowestReply().shown()
+        assertTrue("part5 finished typing before split: ${beforeTail.takeLast(20)}", beforeTail.endsWith("（完05）"))
+
+        // Crossing 6000 splits into multiple chunks without re-typing what was already displayed;
+        // chunk 2 (starting at section 7, past 6000) is not drawn until typing reaches it.
+        next { it.copy(partial = PartialReply(part7, "partial-1", afterSeq = 1)) }
+        val onSplitNodes = compose.onAllNodesWithTag("reply", useUnmergedTree = true).fetchSemanticsNodes()
+        val onSplitBottom = onSplitNodes.maxBy { it.boundsInRoot.bottom }.shown()
+        assertTrue("keeps already displayed text across split: ${onSplitBottom.take(20)}", "第05段：" in onSplitBottom && onSplitBottom.endsWith("（完05）"))
+        assertFalse("unreached section 07 is not drawn yet", "第07段：" in onSplitBottom)
+
+        // Typing continues into section 06 and then opens chunk 2 for section 07.
+        compose.mainClock.advanceTimeBy(6_000)
+        val afterPartialBottom = lowestReply().shown()
+        assertTrue("typing advances into section 07: ${afterPartialBottom.take(20)}", "第07段：" in afterPartialBottom)
+
+        // Formal Markdown reply takes over the same key without resetting progress.
+        next {
+            it.copy(
+                items = it.items + ChatItem(2, ItemKind.ASSISTANT, text = formal7),
+                keys = mapOf(2L to "partial-1"),
+                partial = null,
+            )
+        }
+        val onTakeover = lowestReply().shown()
+        assertTrue("takeover keeps section 07 visible without retyping: ${onTakeover.take(20)}", "第07段：" in onTakeover)
+        compose.mainClock.advanceTimeBy(4_000)
+        assertTrue("finishes typing formal reply", lowestReply().shown().endsWith("（完07）"))
+    }
+
+    @Test fun aPreviewStartingWithALongFormulaDoesNotResetProgressAcrossAppends() {
+        // A ~140-char display formula at the start takes >3s at 40 chars/s; repeated 150ms appends must not reset progress to 0.
+        val formula = "\$\$\n\\sum_{k=1}^{n} \\frac{a_k + b_k}{c_k + d_k} = \\int_{0}^{1} \\left(x^2 + 2xy + y^2 + z^2\\right)\\,dx + \\prod_{j=1}^{m}(1+t_j)\n\$\$"
+        assertTrue("formula is long enough to span many appends: ${formula.length}", formula.length > 100)
+        show(ChatUiState(loading = false, state = SessionState.Working, items = items(1)))
+        var preview = "$formula\n\n推导完成"
+        next { it.copy(partial = PartialReply(preview, "partial-formula", afterSeq = 1)) }
+        // Append small tails 20 times (every 150ms = 3.0s total) while the leading formula is still typing out.
+        repeat(20) { i ->
+            compose.mainClock.advanceTimeBy(150)
+            preview += "，第${i}步"
+            next { it.copy(partial = PartialReply(preview, "partial-formula", afterSeq = 1)) }
+        }
+        compose.mainClock.advanceTimeBy(1_500)
+        val shown = lowestReply().shown()
+        assertTrue("leading formula finished typing without being reset: ${shown.take(60)}", "\\prod_{j=1}^{m}" in shown && "推导完成" in shown)
+    }
+
+    @Test fun unrelatedStatusUpdatesDoNotDisturbLongReplyTyping() {
+        val longReply = (1..8).joinToString("\n\n") { i ->
+            "段%02d：".format(i) + "测试状态行刷新不重建条目。".repeat(82) + "【完%02d】".format(i)
+        }
+        show(ChatUiState(loading = false, state = SessionState.Working, items = items(1), activity = "Thinking… (1s)"))
+        next { it.copy(partial = PartialReply(longReply.take(500), "partial-act", afterSeq = 1)) }
+        var lastLen = 0
+        repeat(10) { tick ->
+            compose.mainClock.advanceTimeBy(250)
+            next { it.copy(activity = "Thinking… (${tick + 2}s)") }
+            val len = lowestReply().shown().length
+            assertTrue("typing never resets on activity tick $tick: $len after $lastLen", len >= lastLen)
+            lastLen = len
+        }
+        assertTrue("made steady progress across activity ticks: $lastLen", lastLen > 200)
     }
 }

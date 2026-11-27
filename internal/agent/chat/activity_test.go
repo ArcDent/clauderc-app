@@ -60,6 +60,31 @@ func TestActivityWhileWorking(t *testing.T) {
 	}
 }
 
+func TestPartialWithoutStatusLine(t *testing.T) {
+	t.Parallel()
+	screen, err := os.ReadFile(filepath.Join("testdata", "working-partial.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFixture(t, setup{status: "busy", state: "working", screen: strings.TrimSuffix(string(screen), "\n")})
+	const prefix = "终端模拟器像一台很窄的显示器：它从伪终端收到一串字节"
+	f.appendTranscript(t, assistantLine(prefix+"。这是上一轮的答案。")+userLine("请再解释一遍"))
+	f.ok(t, "c1", protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: shortID})
+	ev := f.nextState(t, 3*time.Second, func(e protocol.ChatStateEvent) bool { return e.Partial != "" })
+	if ev.Activity != "" || !strings.HasPrefix(ev.Partial, prefix) {
+		t.Fatalf("activity = %q, partial = %q", ev.Activity, ev.Partial)
+	}
+	if e, ok := f.maybeEvent(protocol.EventChatState, 800*time.Millisecond); ok {
+		t.Fatalf("chat.state repeated for an unchanged screen: %s", e.Body)
+	}
+
+	f.appendTranscript(t, userLine("换个话题"))
+	f.nextState(t, 3*time.Second, func(e protocol.ChatStateEvent) bool { return e.Partial == "" })
+	if e, ok := f.maybeEvent(protocol.EventChatState, 800*time.Millisecond); ok {
+		t.Fatalf("chat.state repeated the old reply after a new user message: %s", e.Body)
+	}
+}
+
 // An idle session, or one without an attach, has no activity.
 func TestNoActivity(t *testing.T) {
 	t.Parallel()

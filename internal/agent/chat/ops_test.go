@@ -146,7 +146,7 @@ func TestEnterRefusedWhilePickerOpen(t *testing.T) {
 // On the recorded input screen a message is typed as usual.
 func TestEnterAllowedOnPromptScreen(t *testing.T) {
 	t.Parallel()
-	f := newFixture(t, setup{replay: "mode-default"})
+	f := newFixture(t, setup{replay: "mode-default2"})
 	// The replay does not write the transcript, so delivery is not seen.
 	res := f.call(t, "c1", protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: shortID, Text: "你好"})
 	if res.Error == nil || res.Error.Code != protocol.CodeNotDelivered {
@@ -492,7 +492,7 @@ func TestModelOpsRefusedWhilePickerOpen(t *testing.T) {
 func TestModelsLeavesWithEscWhenPickerNeverShows(t *testing.T) {
 	t.Parallel()
 	// The recorded prompt screen never reacts to keys.
-	f := newFixture(t, setup{replay: "mode-default"})
+	f := newFixture(t, setup{replay: "mode-default2"})
 	res := f.call(t, "c1", protocol.MethodChatModels, protocol.ChatModelsRequest{SessionID: shortID})
 	if res.Error == nil || res.Error.Message != "电脑上的模型选择界面没有出现，已取消" {
 		t.Errorf("error %+v", res.Error)

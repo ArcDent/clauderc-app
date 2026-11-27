@@ -56,6 +56,8 @@ func failWith(req protocol.Envelope, err error) protocol.Envelope {
 		return agent.Fail(req, protocol.CodeSessionNotFound, "找不到这个后台会话，可能已经被移除")
 	case errors.Is(err, attach.ErrClosed):
 		return agent.Fail(req, protocol.CodeInternal, "电脑上的会话接入断开了，请重试")
+	case errors.Is(err, attach.ErrUnreliableScreen):
+		return agent.Fail(req, protocol.CodeNotDelivered, "暂时无法确认电脑上的画面，操作没有完成")
 	case errors.Is(err, context.DeadlineExceeded):
 		return agent.Fail(req, protocol.CodeInternal, "操作超时，请稍后重试")
 	case errors.Is(err, context.Canceled):
@@ -408,7 +410,9 @@ func openPicker(t *attach.Term) ([]attach.PickerItem, error) {
 		return nil, err
 	}
 	fail := func(err error) ([]attach.PickerItem, error) {
-		_ = closePanel(t)
+		if cerr := closePanel(t); errors.Is(cerr, attach.ErrUnreliableScreen) {
+			return nil, cerr
+		}
 		return nil, err
 	}
 	keys := attach.OpenModelPickerKeys()
@@ -520,6 +524,9 @@ func (h *Handler) setModel(ctx context.Context, req protocol.Envelope) protocol.
 		}
 		if t.WaitFor(attach.ConfirmOpen, confirmWait) {
 			return t.Send(attach.ConfirmKeys())
+		}
+		if t.View().Unreliable {
+			return attach.ErrUnreliableScreen
 		}
 		return nil
 	})

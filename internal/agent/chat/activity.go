@@ -4,7 +4,9 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
+	"clauderc/internal/agent/attach"
 	"clauderc/internal/agent/transcript"
 	"clauderc/internal/protocol"
 )
@@ -63,71 +65,193 @@ var toolBlock = regexp.MustCompile(`^⏺ ([\w.:-]+\(|.*\(ctrl\+o to expand\))`)
 
 // screenPartial returns the reply Claude Code is drawing on screen: the
 // last block that starts with "⏺" after the last prompt line, up to the
-// status line, a run of two blank lines, or the input box. It is "" when
-// that block is a tool call or there is none.
-func screenPartial(lines []string) string {
-	end, _ := statusLine(lines)
-	if end < 0 {
-		end = inputRule(lines)
+// status line, a run of two blank lines outside code, or the input box.
+// The bool distinguishes reaching a user prompt from a missing reply.
+func screenPartial(lines []string, previous string, endFenced bool) (partial string, atPrompt, fenced bool) {
+	input := inputRule(lines)
+	end := input
+	if status, _ := statusLine(lines[:input]); status >= 0 {
+		end = status
 	}
 	start := -1
 	for i := end - 1; i >= 0; i-- {
 		if strings.HasPrefix(lines[i], "❯") {
-			return ""
+			return "", true, false
 		}
 		if strings.HasPrefix(lines[i], "⏺") {
 			start = i
 			break
 		}
 	}
-	if start < 0 || toolBlock.MatchString(lines[start]) {
-		return ""
-	}
-	// The reply's lines after the first are indented by two spaces; a
-	// line that is not, such as a custom status line, ends it, and so do
-	// two blank lines.
-	block := lines[start:end]
-	for i := 1; i < len(block); i++ {
-		if block[i] == "" && (i+1 == len(block) || block[i+1] == "") || block[i] != "" && !strings.HasPrefix(block[i], "  ") {
-			block = block[:i]
-			break
+	if start < 0 {
+		if previous != "" && end < len(lines) {
+			text, fenced := extendScreenReply(previous, lines[:end], endFenced)
+			return text, false, fenced
 		}
+		return "", false, false
 	}
-	for len(block) > 1 && block[len(block)-1] == "" {
-		block = block[:len(block)-1]
+	if toolBlock.MatchString(lines[start]) {
+		return "", false, false
 	}
-	var paras []string
-	var cur strings.Builder
+	text, fenced := formatScreenReply(lines[start:end], true, false)
+	return text, false, fenced
+}
+
+func formatScreenReply(block []string, marked, fenced bool) (string, bool) {
+	var reply strings.Builder
+	var lastLiteral, paragraphBreak bool
 	for i, l := range block {
-		if i == 0 {
+		if i == 0 && marked {
 			l = strings.TrimPrefix(strings.TrimPrefix(l, "⏺"), " ")
 		} else {
-			if strings.HasPrefix(strings.TrimSpace(l), "⎿") {
-				return ""
+			if l != "" && !strings.HasPrefix(l, "  ") && !strings.HasPrefix(l, "\t") {
+				break
+			}
+			if !fenced && l == "" && (i+1 == len(block) || block[i+1] == "") {
+				break
 			}
 			l = strings.TrimPrefix(l, "  ")
 		}
-		switch {
-		case l == "":
-			if cur.Len() > 0 {
-				paras = append(paras, cur.String())
-				cur.Reset()
+		if l == "" && !fenced {
+			paragraphBreak = true
+			continue
+		}
+		first, _ := utf8.DecodeRuneInString(l)
+		fence := strings.HasPrefix(l, "```")
+		// Code and tables have meaningful line breaks, unlike wrapped prose.
+		literal := fenced || fence || strings.HasPrefix(l, "    ") || first == '\t' || strings.ContainsRune("│|┌├└┐┤┘┬┼┴─", first)
+		if !fenced {
+			if !literal && strings.HasPrefix(strings.TrimSpace(l), "⎿") {
+				return "", false
 			}
-		case cur.Len() == 0:
-			cur.WriteString(l)
-		case listItem(l):
-			cur.WriteString("\n" + l)
-		default:
-			if prev := cur.String(); narrow(lastRune(prev)) && narrow([]rune(l)[0]) {
-				cur.WriteString(" ")
+			if text := strings.TrimLeft(l, " "); strings.HasPrefix(text, "• ") {
+				l = l[:len(l)-len(text)] + "- " + strings.TrimPrefix(text, "• ")
 			}
-			cur.WriteString(l)
+		}
+		if reply.Len() > 0 {
+			last, _ := utf8.DecodeLastRuneInString(reply.String())
+			switch {
+			case paragraphBreak:
+				reply.WriteString("\n\n")
+			case literal || lastLiteral || listItem(l):
+				reply.WriteByte('\n')
+			case narrow(last) && narrow(first):
+				reply.WriteByte(' ')
+			}
+		}
+		reply.WriteString(l)
+		paragraphBreak, lastLiteral = false, literal
+		if fence {
+			fenced = !fenced
 		}
 	}
-	if cur.Len() > 0 {
-		paras = append(paras, cur.String())
+	return reply.String(), fenced
+}
+
+const (
+	replyOverlapWindow  = attach.Rows * attach.Cols
+	replyOverlapLetters = 24
+)
+
+func extendScreenReply(previous string, block []string, endFenced bool) (string, bool) {
+	for len(block) > 0 && block[0] == "" {
+		block = block[1:]
 	}
-	return strings.Join(paras, "\n\n")
+	start := len(previous)
+	for range replyOverlapWindow {
+		if start == 0 {
+			break
+		}
+		_, size := utf8.DecodeLastRuneInString(previous[:start])
+		start -= size
+	}
+	window := previous[start:]
+	flat := withoutSpace(window)
+	for _, fenced := range []bool{false, true} {
+		visible, nextFenced := formatScreenReply(block, false, fenced)
+		text := withoutSpace(visible)
+		letters := 0
+		for i, r := range text {
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+				continue
+			}
+			letters++
+			if letters < replyOverlapLetters {
+				continue
+			}
+			// The anchor must lead into the same suffix, not just repeat
+			// elsewhere in the reply. Keep the new text's original breaks.
+			anchor := text[:i+utf8.RuneLen(r)]
+			for next := 0; next < len(flat); {
+				i := strings.Index(flat[next:], anchor)
+				if i < 0 {
+					break
+				}
+				pos := next + i
+				next = pos + 1
+				overlap := flat[pos:]
+				if !strings.HasPrefix(text, overlap) {
+					continue
+				}
+				suffix := window[afterNonSpaceBytes(window, pos):]
+				if (endFenced != (strings.Count("\n"+suffix, "\n```")%2 != 0)) == fenced {
+					if len(overlap) == len(text) {
+						return "", false
+					}
+					return strings.TrimRightFunc(previous, unicode.IsSpace) + visible[afterNonSpaceBytes(visible, len(overlap)):], nextFenced
+				}
+			}
+			break
+		}
+	}
+	return "", false
+}
+
+// screenUserCount counts matching prompts if the newest prompt matches.
+func screenUserCount(lines []string, want string) int {
+	lines = lines[:inputRule(lines)]
+	count := 0
+	newest := true
+	for i := len(lines) - 1; i >= 0; i-- {
+		if text, ok := strings.CutPrefix(lines[i], "❯"); ok {
+			var user strings.Builder
+			user.WriteString(text)
+			for _, line := range lines[i+1:] {
+				if !strings.HasPrefix(line, "  ") {
+					break
+				}
+				user.WriteString(line)
+			}
+			if withoutSpace(user.String()) == want {
+				count++
+			} else if newest {
+				return 0
+			}
+			newest = false
+		}
+	}
+	return count
+}
+
+func withoutSpace(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func afterNonSpaceBytes(s string, n int) int {
+	for i, r := range s {
+		if n == 0 {
+			return i
+		}
+		if !unicode.IsSpace(r) {
+			n -= utf8.RuneLen(r)
+		}
+	}
+	return len(s)
 }
 
 // inputRule is the index of the rule above the input box, or len(lines).
@@ -146,49 +270,47 @@ var listItemPattern = regexp.MustCompile(`^\s*([-•*]|\d+\.|#+) `)
 
 func listItem(l string) bool { return listItemPattern.MatchString(l) }
 
-func lastRune(s string) rune {
-	r := []rune(s)
-	return r[len(r)-1]
-}
-
 // narrow reports whether r is a narrow character, such as a Latin letter,
 // across whose line break the screen dropped a space.
 func narrow(r rune) bool {
 	return r < 0x1100 && !unicode.IsSpace(r)
 }
 
-// lettersOnly keeps letters and digits, so screen text compares with the
-// markdown it was drawn from.
-func lettersOnly(s string) []rune {
-	var out []rune
+const landedPrefix = 24
+
+func replyFingerprint(s string) string {
+	var out strings.Builder
+	n := 0
 	for _, r := range s {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			out = append(out, r)
+			out.WriteRune(r)
+			n++
+			if n == landedPrefix {
+				break
+			}
 		}
 	}
-	return out
+	return out.String()
 }
-
-// landedPrefix is how many letters of a partial reply must match the
-// transcript's latest reply for it to count as written there.
-const landedPrefix = 24
 
 // landed reports whether the transcript's latest reply begins like the
 // reply drawn on screen, so the screen shows nothing the phone lacks.
-func landed(f *transcript.Follower, partial string) bool {
-	if f == nil {
-		return false
-	}
-	p := lettersOnly(partial)
-	p = p[:min(len(p), landedPrefix)]
-	if len(p) == 0 {
-		return true
+func landed(f *transcript.Follower, fingerprint string) string {
+	if f == nil || fingerprint == "" {
+		return ""
 	}
 	items, _ := f.Page(0, 20)
 	for i := len(items) - 1; i >= 0; i-- {
-		if it := items[i]; it.Kind == protocol.ItemAssistant && it.Text != "" {
-			return strings.HasPrefix(string(lettersOnly(it.Text)), string(p))
+		it := items[i]
+		if it.Kind == protocol.ItemUser && !it.Queued {
+			break
+		}
+		if it.Kind == protocol.ItemAssistant && it.Text != "" {
+			if recorded := replyFingerprint(it.Text); strings.HasPrefix(recorded, fingerprint) {
+				return recorded
+			}
+			break
 		}
 	}
-	return false
+	return ""
 }

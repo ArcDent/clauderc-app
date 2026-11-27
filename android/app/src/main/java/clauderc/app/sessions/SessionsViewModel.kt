@@ -13,11 +13,13 @@ import clauderc.app.net.call
 import clauderc.app.protocol.DirBusyResponse
 import clauderc.app.protocol.DirRequest
 import clauderc.app.protocol.Empty
+import clauderc.app.protocol.ErrorCode
 import clauderc.app.protocol.GitBranchesResponse
 import clauderc.app.protocol.GitSwitchRequest
 import clauderc.app.protocol.Machine
 import clauderc.app.protocol.Method
 import clauderc.app.protocol.Profile
+import clauderc.app.protocol.ProfileForgetRequest
 import clauderc.app.protocol.ProfileKind
 import clauderc.app.protocol.Session
 import clauderc.app.protocol.SessionIdRequest
@@ -25,6 +27,7 @@ import clauderc.app.protocol.SessionList
 import clauderc.app.protocol.SessionState
 import clauderc.app.protocol.UsageResponse
 import clauderc.app.ui.baseName
+import clauderc.app.ui.needsReply
 import clauderc.app.ui.profileTitle
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -68,6 +71,7 @@ data class SessionGroup(
 
     val canCreate get() = profile.kind != ProfileKind.Other
     val canRename get() = profile.kind != ProfileKind.Other
+    val canForget get() = sessions.isEmpty() && profile.kind == ProfileKind.Endpoint
     val pending get() = sessions.count { it.state == SessionState.Pending }
 }
 
@@ -129,22 +133,56 @@ fun listedDir(s: Session): String = s.dir ?: s.cwd
  */
 fun forkTree(sessions: List<Session>, folded: Set<String> = emptySet()): List<SessionNode> {
     val byId = sessions.associateBy { it.id }
-    fun root(s: Session): Session {
-        var r = s
-        val seen = mutableSetOf(s.id)
-        while (true) {
-            val p = r.forkOf?.let(byId::get) ?: return r
-            // A loop has no first session; each of its sessions stays a row of its own.
-            if (!seen.add(p.id)) return s
-            r = p
-        }
-    }
-    val roots = sessions.associate { it.id to root(it).id }
+    val roots = sessions.associate { it.id to root(it, byId).id }
     val forks = sessions.filter { roots[it.id] != it.id }.groupBy { roots.getValue(it.id) }
     return sessions.filter { roots[it.id] == it.id }.map { s ->
         val kids = forks[s.id].orEmpty()
         SessionNode(s, kids, kids.isNotEmpty() && s.id in folded)
     }
+}
+
+/** Finds the first available ancestor; a cycle leaves the session as its own root. */
+private fun root(s: Session, byId: Map<String, Session>): Session {
+    var r = s
+    val seen = mutableSetOf(s.id)
+    while (true) {
+        val p = r.forkOf?.let(byId::get) ?: return r
+        if (!seen.add(p.id)) return s
+        r = p
+    }
+}
+
+internal fun isRecentlyActive(s: Session, nowEpochSec: Long): Boolean {
+    if (s.state == SessionState.Stopped) return false
+    val delta = nowEpochSec - s.lastActiveAt.epochSecond
+    return delta in -60L..900L
+}
+
+internal fun activeOrder(s: Session): Int = when {
+    s.state == SessionState.Pending -> 0
+    needsReply(s) -> 1
+    s.state == SessionState.Working -> 2
+    else -> 3
+}
+
+/** Keeps the root of each active family, with only active forks beneath it. */
+internal fun activeForkTree(
+    sessions: List<Session>,
+    keptStopped: Set<String> = emptySet(),
+    isActive: (Session) -> Boolean,
+): List<SessionNode> {
+    val byId = sessions.associateBy { it.id }
+    fun kept(s: Session) = s.state == SessionState.Stopped && s.id in keptStopped
+    val forkOrder = compareBy<Session>(::activeOrder)
+        .thenByDescending(::kept)
+        .thenByDescending { it.lastActiveAt }
+    return sessions.filter(isActive).groupBy { root(it, byId) }.entries
+        .sortedWith(
+            compareBy<Map.Entry<Session, List<Session>>> { it.value.minOf(::activeOrder) }
+                .thenByDescending { (_, active) -> active.all { activeOrder(it) == 3 } && active.any(::kept) }
+                .thenByDescending { (_, active) -> active.maxOf { it.lastActiveAt } },
+        )
+        .map { (root, active) -> SessionNode(root, active.filter { it.id != root.id }.sortedWith(forkOrder)) }
 }
 
 /**
@@ -211,12 +249,13 @@ data class SessionsUiState(
     val switchAsk: BranchSwitch? = null,
     /** Session id to the text typed into its composer and not sent yet. */
     val drafts: Map<String, String> = emptyMap(),
-    /** Session ids whose session.stop is still in flight; they offer no 「移出」 meanwhile. */
+    /** Session ids whose session.stop has not returned yet. */
     val stopping: Set<String> = emptySet(),
     /** Session ids whose session.remove is still in flight or waiting for the list to drop them. */
     val removing: Set<String> = emptySet(),
     /** Increments whenever a session.remove fails, so a row folded away in the UI opens back up. */
     val removeFailed: Int = 0,
+    val forgetFailed: Int = 0,
 )
 
 /** A switch of [dir] to [branch]; [sessionName] is a session working there, named in the question; [unsure] when dir.busy failed. */
@@ -246,8 +285,14 @@ class SessionsViewModel(
     /** Stops and removals already shown while the agent is still on them; null means removed. */
     private val pendingActs = MutableStateFlow<Map<String, SessionState?>>(emptyMap())
 
+    /** Tracks only the time that session.stop is in flight, not the list refresh. */
+    private val stopping = MutableStateFlow<Set<String>>(emptySet())
+
     /** Counts refused removals so the UI restores a row that folded away before session.remove failed. */
     private val removeFailed = MutableStateFlow(0)
+
+    private data class ForgetState(val ids: Set<String> = emptySet(), val failed: Int = 0)
+    private val forgetting = MutableStateFlow(ForgetState())
 
     private val usage = MutableStateFlow<UsageResponse?>(null)
 
@@ -259,8 +304,15 @@ class SessionsViewModel(
         drafts?.drafts(machineId) ?: flowOf(emptyMap()),
         ::GroupSettings,
     )
-    private data class ActivityState(val refreshing: Boolean, val acts: Map<String, SessionState?>, val usage: UsageResponse?, val removeFailed: Int)
-    private val activity = combine(refreshing, pendingActs, usage, removeFailed, ::ActivityState)
+    private data class ActivityState(
+        val refreshing: Boolean,
+        val acts: Map<String, SessionState?>,
+        val usage: UsageResponse?,
+        val removeFailed: Int,
+        val stopping: Set<String>,
+    )
+    private val activity = combine(refreshing, pendingActs, usage, removeFailed, stopping, ::ActivityState)
+        .combine(forgetting, ::Pair)
 
     /** Profile id to directory to the branch its rows are narrowed to; only in memory, so a restart shows every branch. */
     private val branchFilters = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
@@ -271,11 +323,11 @@ class SessionsViewModel(
     private val switchAsk = MutableStateFlow<BranchSwitch?>(null)
     private val git = combine(branchFilters, branches, switchAsk, ::Triple)
 
-    val state: StateFlow<SessionsUiState> = combine(fleet.machines, fleet.sessions, groupSettings, activity, git) { machines, sessions, settings, act, (filters, known, ask) ->
+    val state: StateFlow<SessionsUiState> = combine(fleet.machines, fleet.sessions, groupSettings, activity, git) { machines, sessions, settings, (act, forget), (filters, known, ask) ->
         SessionsUiState(
             machine = machines?.firstOrNull { it.id == machineId },
             groups = sessions[machineId]?.let { list ->
-                groupSessions(list.withActs(act.acts), settings.names).map {
+                groupSessions(list.withActs(act.acts), settings.names).filterNot { it.profile.id in forget.ids }.map {
                     it.copy(
                         collapsed = it.profile.id in settings.folded,
                         foldedDirs = settings.foldedDirs[it.profile.id].orEmpty(),
@@ -289,9 +341,10 @@ class SessionsViewModel(
             usage = act.usage,
             switchAsk = ask,
             drafts = settings.drafts,
-            stopping = act.acts.filterValues { it == SessionState.Stopped }.keys,
+            stopping = act.stopping,
             removing = act.acts.filterValues { it == null }.keys,
             removeFailed = act.removeFailed,
+            forgetFailed = forget.failed,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SessionsUiState())
 
@@ -454,16 +507,52 @@ class SessionsViewModel(
 
     fun remove(session: Session) = act(Method.SESSION_REMOVE, session, null, null)
 
+    /** Hides the group until the refreshed list drops it, or restores it when the request fails. */
+    fun forget(group: SessionGroup) {
+        val id = group.profile.id
+        forgetting.update { it.copy(ids = it.ids + id) }
+        viewModelScope.launch {
+            var failed = false
+            try {
+                relay.call(Method.PROFILE_FORGET, machineId, ProfileForgetRequest(id), ProfileForgetRequest.serializer(), Empty.serializer())
+                fleet.refresh(machineId)
+                withTimeoutOrNull(REMOVED_HOLD_MILLIS) {
+                    fleet.sessions.first { lists -> lists[machineId]?.profiles?.none { it.id == id } ?: true }
+                }
+            } catch (e: CancellationException) {
+                failed = true
+                throw e
+            } catch (e: Exception) {
+                failed = true
+                _messages.send(
+                    when {
+                        e is RemoteException && e.code == ErrorCode.UNKNOWN_METHOD -> "这台目标机的程序还不支持删除档位"
+                        e is RemoteException -> e.message ?: "删除档位失败"
+                        else -> "删除档位失败：${e.message}"
+                    },
+                )
+            } finally {
+                forgetting.update { it.copy(ids = it.ids - id, failed = it.failed + if (failed) 1 else 0) }
+            }
+        }
+    }
+
     /**
      * Shows the result at once ([shown] null hides the row) and takes it back if the agent refuses. A removed
      * row stays hidden until a list without it arrives, at most [REMOVED_HOLD_MILLIS]: a list read before the
      * removal may still bring it back meanwhile.
      */
     private fun act(method: String, session: Session, shown: SessionState?, done: String?) {
+        val isStop = method == Method.SESSION_STOP
+        if (isStop) stopping.update { it + session.id }
         pendingActs.update { it + (session.id to shown) }
         viewModelScope.launch {
             val ok = try {
-                relay.call(method, machineId, SessionIdRequest(session.id), SessionIdRequest.serializer(), Empty.serializer())
+                try {
+                    relay.call(method, machineId, SessionIdRequest(session.id), SessionIdRequest.serializer(), Empty.serializer())
+                } finally {
+                    if (isStop) stopping.update { it - session.id }
+                }
                 fleet.refresh(machineId)
                 done?.let { _messages.send(it) }
                 true

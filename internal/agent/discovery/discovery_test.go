@@ -1,12 +1,15 @@
 package discovery_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -480,6 +483,76 @@ func TestTemplates(t *testing.T) {
 
 	if after := tree(t, claudeDir); !reflect.DeepEqual(after, before) {
 		t.Fatal("the Claude Code data dir was modified")
+	}
+}
+
+func TestForget(t *testing.T) {
+	const id = "relay.example.net"
+	src := sourceAt(t, copySample(t, "profiles"))
+	src.ProfilesFile = filepath.Join(t.TempDir(), "profiles.json")
+	check := func(want bool) time.Time {
+		t.Helper()
+		list, err := src.List(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if listed := slices.ContainsFunc(list.Profiles, func(p protocol.Profile) bool { return p.ID == id }); listed != want {
+			t.Fatalf("%s listed = %v, want %v", id, listed, want)
+		}
+		data, err := os.ReadFile(src.ProfilesFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cache struct {
+			Profiles  map[string]json.RawMessage
+			Forgotten map[string]time.Time
+		}
+		if err := json.Unmarshal(data, &cache); err != nil {
+			t.Fatal(err)
+		}
+		_, cached := cache.Profiles[id]
+		at, forgotten := cache.Forgotten[id]
+		if cached != want || forgotten == want || forgotten && at.IsZero() {
+			t.Fatalf("%s cached = %v, forgotten = %v at %v; want cached = %v and forgotten = %v", id, cached, forgotten, at, want, !want)
+		}
+		return at
+	}
+	check(true)
+	if err := src.Forget(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	at := check(false)
+	writeFile(t, filepath.Join(src.ClaudeDir, "jobs", "hist0003", "state.json"),
+		fmt.Sprintf(`{"respawnFlags":["--settings",%q],"updatedAt":%q}`,
+			`{"env":{"ANTHROPIC_BASE_URL":"https://relay.example.net/v1"}}`, at.Add(time.Second).Format(time.RFC3339Nano)))
+	check(true)
+}
+
+func TestForgetRefused(t *testing.T) {
+	src := sourceAt(t, copySample(t, "profiles"))
+	src.ProfilesFile = filepath.Join(t.TempDir(), "profiles.json")
+	if _, err := src.List(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(src.ProfilesFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		id   string
+		want error
+	}{
+		{"default", discovery.ErrProfileFixed},
+		{"other", discovery.ErrProfileFixed},
+		{"anyrouter.top", discovery.ErrProfileInUse},
+	} {
+		if err := src.Forget(t.Context(), c.id); !errors.Is(err, c.want) {
+			t.Errorf("Forget(%q) = %v, want %v", c.id, err, c.want)
+		}
+		after, err := os.ReadFile(src.ProfilesFile)
+		if err != nil || !bytes.Equal(after, before) {
+			t.Fatalf("Forget(%q) changed profiles.json: %v", c.id, err)
+		}
 	}
 }
 

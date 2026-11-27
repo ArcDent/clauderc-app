@@ -1,8 +1,10 @@
 package clauderc.app.sessions
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import kotlinx.coroutines.cancel
@@ -19,10 +21,27 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeDown
+import androidx.lifecycle.viewModelScope
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import clauderc.app.data.Fleet
+import clauderc.app.protocol.Empty
+import clauderc.app.protocol.ErrorCode
+import clauderc.app.protocol.MachinesListResponse
+import clauderc.app.protocol.Method
+import clauderc.app.protocol.ProtocolJson
+import clauderc.app.protocol.ProfileForgetRequest
+import clauderc.app.protocol.SessionList
+import clauderc.app.protocol.SessionState
+import clauderc.app.testing.FakeRelay
 import clauderc.app.testing.branchSessions
+import clauderc.app.testing.decode
 import clauderc.app.testing.machine
+import clauderc.app.testing.profileNames
 import clauderc.app.testing.sampleSessions
+import clauderc.app.testing.session
+import clauderc.app.net.RemoteException
+import clauderc.app.ui.components.SnackState
 import clauderc.app.ui.theme.ClaudercTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -41,6 +60,13 @@ import androidx.compose.ui.test.onRoot
 import clauderc.app.data.UiStyle
 import clauderc.app.ui.theme.Clauderc
 import clauderc.app.ui.theme.ClaudercColors
+import java.time.Instant
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.serialization.json.JsonObject
+import org.junit.Assert.assertFalse
 import kotlin.math.abs
 
 /**
@@ -58,11 +84,16 @@ class SwipeRowTest {
     private val stopped = mutableListOf<String>()
     private val removed = mutableListOf<String>()
 
-    private fun show() {
+    private fun sessionsState(online: Boolean = true) = SessionsUiState(
+        machine("m-1", "工作室 Mac mini", online),
+        groupSessions(sampleSessions, emptyMap()),
+    )
+
+    private fun show(state: () -> SessionsUiState = { sessionsState() }) {
         compose.setContent {
             ClaudercTheme(darkTheme = false) {
                 SessionsScreen(
-                    state = SessionsUiState(machine("m-1", "工作室 Mac mini"), groupSessions(sampleSessions, emptyMap())),
+                    state = state(),
                     onRefresh = {},
                     onOpenChat = { opened += it.id },
                     onCreate = {},
@@ -329,6 +360,261 @@ class SwipeRowTest {
             assertEquals(0, compose.onAllNodes(hasContentDescription("移出")).fetchSemanticsNodes().size)
             stopGate.complete(Unit)
         } finally {
+            scope.cancel()
+            storeScope.cancel()
+        }
+    }
+
+    @Test fun rowComposedWhileStoppingOffersRemoveAfterStop() {
+        val work = sampleSessions.sessions.single { it.id == "s-work" }
+        val stoppedList = sampleSessions.copy(sessions = sampleSessions.sessions.map {
+            if (it.id == work.id) it.copy(state = SessionState.Stopped) else it
+        })
+        val stopGate = CompletableDeferred<Unit>()
+        val relay = FakeRelay().apply {
+            on(Method.SESSION_STOP) {
+                stopGate.await()
+                JsonObject(emptyMap())
+            }
+            on(Method.SESSIONS_SUBSCRIBE) {
+                ProtocolJson.encodeToJsonElement(SessionList.serializer(), if (stopGate.isCompleted) stoppedList else sampleSessions)
+            }
+        }
+        var visible by mutableStateOf(true)
+        withStopScreen(relay, visible = { visible }) { vm ->
+            compose.runOnIdle { vm.stop(work) }
+            compose.waitUntil(5_000) { work.id in vm.state.value.stopping && relay.sent(Method.SESSION_STOP).isNotEmpty() }
+            compose.runOnIdle { visible = false }
+            row(work.id).assertDoesNotExist()
+            compose.runOnIdle { visible = true }
+            row(work.id).assertIsDisplayed()
+
+            stopGate.complete(Unit)
+            compose.waitUntil(5_000) { vm.state.value.stopping.isEmpty() }
+            slide(work.id)
+            assertRemove(work.id)
+        }
+    }
+
+    @Test fun rowComposedOfflineOffersRemoveWhenOnline() {
+        var state by mutableStateOf(sessionsState(online = false))
+        show { state }
+        row("s-stop").assertIsDisplayed()
+
+        compose.runOnIdle { state = state.copy(machine = state.machine!!.copy(online = true)) }
+        slide("s-stop")
+        assertRemove("s-stop")
+    }
+
+    @Test fun goingOfflineClosesTheSwipeWithoutConsumingTheNextTap() {
+        var state by mutableStateOf(sessionsState())
+        show { state }
+        slide("s-stop")
+        assertRemove("s-stop")
+
+        compose.runOnIdle { state = state.copy(machine = state.machine!!.copy(online = false)) }
+        assertEquals(0, actionOf("s-stop"))
+        compose.runOnIdle { state = state.copy(machine = state.machine!!.copy(online = true)) }
+        compose.onNodeWithText("周报整理").performClick()
+        assertEquals(listOf("s-idle"), opened)
+    }
+
+    @Test fun stopReplyUnlocksRemoveBeforeTheListRefreshReturns() {
+        val work = sampleSessions.sessions.single { it.id == "s-work" }
+        val refreshStarted = CompletableDeferred<Unit>()
+        val refreshGate = CompletableDeferred<Unit>()
+        val relay = FakeRelay().apply {
+            respond(Method.SESSION_STOP, Empty.serializer(), Empty())
+            on(Method.SESSIONS_SUBSCRIBE) {
+                if (sent(Method.SESSION_STOP).isNotEmpty()) {
+                    refreshStarted.complete(Unit)
+                    refreshGate.await()
+                }
+                ProtocolJson.encodeToJsonElement(SessionList.serializer(), sampleSessions)
+            }
+        }
+        withStopScreen(relay) { vm ->
+            compose.runOnIdle { vm.stop(work) }
+            compose.waitUntil(5_000) { refreshStarted.isCompleted }
+            compose.waitForIdle()
+
+            val state = vm.state.value
+            assertFalse(work.id in state.stopping)
+            assertEquals(SessionState.Stopped, state.groups.orEmpty().flatMap { it.sessions }.single { it.id == work.id }.state)
+            slide(work.id)
+            assertRemove(work.id)
+        }
+    }
+
+    @Test fun inkActiveShowsTheIdleRootBeforeItsPendingForkWithoutAFoldButton() {
+        val root = session("root", "clauderc 协议", SessionState.Idle, "default")
+            .copy(lastActiveAt = Instant.now().minusSeconds(3_600))
+        val fork = session("fork", "补错误码测试", SessionState.Pending, "default").copy(forkOf = root.id)
+        val work = sampleSessions.sessions.single { it.id == "s-work" }
+        val groups = groupSessions(sampleSessions.copy(sessions = listOf(work, fork, root)), emptyMap())
+        compose.setContent {
+            ClaudercTheme(darkTheme = false, style = UiStyle.Ink) {
+                SessionsScreen(SessionsUiState(machine("m-1", "工作室 Mac mini"), groups), {}, {}, {}, { _, _ -> }, {}, {})
+            }
+        }
+
+        val positions = listOf("root", "fork", "s-work").map { row(it).assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top }
+        assertTrue(positions[0] < positions[1] && positions[1] < positions[2])
+        compose.onNodeWithTag("treeLine:root", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("收起 1 个 fork").assertDoesNotExist()
+    }
+
+    @Test fun inkActiveKeepsAStoppedRowUntilSwitchingTabs() = withStoppedActiveRow {
+        slide("s-work")
+        assertRemove("s-work")
+        compose.onNodeWithTag("brushTab:1").performClick()
+        compose.onNodeWithTag("brushTab:0").performClick()
+        row("s-work").assertDoesNotExist()
+    }
+
+    @Test fun pullingToRefreshClearsTheStoppedRowsFromInkActive() = withStoppedActiveRow { relay ->
+        val before = relay.sent(Method.SESSIONS_SUBSCRIBE).size
+        compose.onNodeWithTag("sessionList").performTouchInput { swipeDown() }
+        compose.waitUntil(5_000) { relay.sent(Method.SESSIONS_SUBSCRIBE).size > before }
+        row("s-work").assertDoesNotExist()
+    }
+
+    @Test fun leavingCompositionClearsTheStoppedRowsFromInkActive() {
+        var visible by mutableStateOf(true)
+        withStoppedActiveRow(visible = { visible }) {
+            compose.runOnIdle { visible = false }
+            row("s-work").assertDoesNotExist()
+            compose.runOnIdle { visible = true }
+            compose.onNodeWithTag("brushTab:0").assertIsDisplayed()
+            row("s-work").assertDoesNotExist()
+        }
+    }
+
+    @Test fun theStateLineChangesFromStoppingToStoppedWhenTheRequestReturns() {
+        val stopGate = CompletableDeferred<Unit>()
+        val relay = FakeRelay().apply {
+            on(Method.SESSION_STOP) { stopGate.await(); JsonObject(emptyMap()) }
+            on(Method.SESSIONS_SUBSCRIBE) {
+                ProtocolJson.encodeToJsonElement(SessionList.serializer(), if (stopGate.isCompleted) stoppedSessions() else sampleSessions)
+            }
+        }
+        withStopScreen(relay) { vm ->
+            stopWork()
+            compose.waitUntil(5_000) { "s-work" in vm.state.value.stopping }
+            stateLine("s-work", "正在停止").assertIsDisplayed()
+
+            stopGate.complete(Unit)
+            compose.waitUntil(5_000) { "s-work" !in vm.state.value.stopping }
+            stateLine("s-work", "已停止").assertIsDisplayed()
+            stateLine("s-work", "正在停止").assertDoesNotExist()
+        }
+    }
+
+    @Test fun onlyAnEmptyEndpointCanBeForgottenAndAnOldAgentRestoresIt() {
+        val forgetGate = CompletableDeferred<Unit>()
+        val id = "anyrouter.top"
+        val list = sampleSessions.copy(sessions = sampleSessions.sessions.filter { it.id in setOf("s-q", "s-stop") }
+            + sampleSessions.sessions.single { it.id == "s-work" }.copy(profileId = "api.anthropic.com"))
+        val relay = FakeRelay().apply {
+            respond(Method.SESSIONS_SUBSCRIBE, SessionList.serializer(), list)
+            on(Method.PROFILE_FORGET) {
+                forgetGate.await()
+                throw RemoteException(ErrorCode.UNKNOWN_METHOD, "unknownMethod")
+            }
+        }
+        withStopScreen(relay) { vm ->
+            val button = compose.onNodeWithTag("forgetProfile:$id")
+            compose.onNodeWithTag("forgetProfile:default").assertDoesNotExist()
+            compose.onNodeWithTag("forgetProfile:api.anthropic.com").assertDoesNotExist()
+            compose.onNodeWithTag("forgetProfile:other").assertDoesNotExist()
+            button.assertIsDisplayed().performClick()
+            compose.onNodeWithText("删除档位「$id」？").assertIsDisplayed()
+            compose.onNodeWithText("自动回来", substring = true).assertIsDisplayed()
+            assertTrue(relay.sent(Method.PROFILE_FORGET).isEmpty())
+            compose.onNodeWithText("删除").performClick()
+
+            compose.waitUntil(5_000) { relay.sent(Method.PROFILE_FORGET).isNotEmpty() }
+            assertEquals(ProfileForgetRequest(id), relay.sent(Method.PROFILE_FORGET).single().decode(ProfileForgetRequest.serializer()))
+            compose.onNodeWithText(id).assertDoesNotExist()
+            button.assertDoesNotExist()
+
+            forgetGate.complete(Unit)
+            compose.waitUntil(5_000) { vm.state.value.forgetFailed > 0 }
+            compose.onNodeWithText("这台目标机的程序还不支持删除档位").assertIsDisplayed()
+            compose.onNodeWithText(id).assertIsDisplayed()
+            button.assertIsDisplayed()
+        }
+    }
+
+    private fun stoppedSessions() = sampleSessions.copy(sessions = sampleSessions.sessions.map {
+        if (it.id == "s-work") it.copy(state = SessionState.Stopped) else it
+    })
+
+    private fun stopWork() {
+        slide("s-work")
+        compose.onNodeWithContentDescription("停止").performClick()
+        compose.onNodeWithText("停止").performClick()
+    }
+
+    private fun stateLine(id: String, text: String) = compose.onNode(
+        hasText(text, substring = true) and hasAnyAncestor(hasTestTag("sessionRow:$id")), useUnmergedTree = true,
+    )
+
+    private fun withStoppedActiveRow(visible: () -> Boolean = { true }, test: (FakeRelay) -> Unit) {
+        val relay = FakeRelay().apply {
+            respond(Method.SESSION_STOP, Empty.serializer(), Empty())
+            on(Method.SESSIONS_SUBSCRIBE) {
+                ProtocolJson.encodeToJsonElement(SessionList.serializer(), if (sent(Method.SESSION_STOP).isEmpty()) sampleSessions else stoppedSessions())
+            }
+        }
+        withStopScreen(relay, visible, InkListTab.Active) { vm ->
+            stopWork()
+            compose.waitUntil(5_000) {
+                // The working symbols on 浮墨's 活跃 never let Compose go idle, so run the view model's queued updates here.
+                org.robolectric.shadows.ShadowLooper.idleMainLooper()
+                vm.state.value.stopping.isEmpty() && vm.state.value.groups.orEmpty().flatMap { it.sessions }
+                    .any { it.id == "s-work" && it.state == SessionState.Stopped }
+            }
+            row("s-work").assertIsDisplayed()
+            stateLine("s-work", "已停止").assertIsDisplayed()
+            test(relay)
+        }
+    }
+
+    private fun assertRemove(id: String) {
+        assertEquals(1, actionOf(id))
+        compose.onNodeWithContentDescription("移出").assertIsDisplayed()
+    }
+
+    private fun withStopScreen(
+        relay: FakeRelay,
+        visible: () -> Boolean = { true },
+        inkTab: InkListTab = InkListTab.All,
+        test: (SessionsViewModel) -> Unit,
+    ) {
+        relay.respond(Method.MACHINES_LIST, MachinesListResponse.serializer(), MachinesListResponse(listOf(machine("m-1", "工作室 Mac mini"))))
+        val scope = CoroutineScope(Dispatchers.Unconfined + Job())
+        val storeScope = CoroutineScope(Dispatchers.IO + Job())
+        val vm = SessionsViewModel("m-1", Fleet(relay, scope), relay, profileNames(tmp.root, storeScope))
+        try {
+            compose.setContent {
+                val state by vm.state.collectAsState()
+                ClaudercTheme(darkTheme = false) {
+                    val snack = remember { SnackState() }
+                    LaunchedEffect(vm) { vm.messages.collect { snack.show(it) } }
+                    if (visible()) {
+                        SessionsScreen(
+                            state, vm::refresh, {}, {}, { _, _ -> }, vm::stop, vm::remove,
+                            initialInkTab = inkTab, onForget = vm::forget, snack = snack,
+                        )
+                    }
+                }
+            }
+            compose.waitUntil(5_000) { vm.state.value.groups != null && vm.state.value.machine?.online == true }
+            row("s-work").assertIsDisplayed()
+            test(vm)
+        } finally {
+            vm.viewModelScope.cancel()
             scope.cancel()
             storeScope.cancel()
         }

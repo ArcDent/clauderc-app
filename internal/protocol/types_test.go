@@ -126,6 +126,8 @@ var bodyCases = []bodyCase{
 	{protocol.MethodSessionStop, "session.stop", protocol.KindResponse, func() any { return &protocol.Empty{} }, `{}`},
 	{protocol.MethodSessionRemove, "session.remove", protocol.KindRequest, func() any { return &protocol.SessionRemoveRequest{} }, `{"sessionId":"a1"}`},
 	{protocol.MethodSessionRemove, "session.remove", protocol.KindResponse, func() any { return &protocol.Empty{} }, `{}`},
+	{protocol.MethodProfileForget, "profile.forget", protocol.KindRequest, func() any { return &protocol.ProfileForgetRequest{} }, `{"profileId":"relay.example.net"}`},
+	{protocol.MethodProfileForget, "profile.forget", protocol.KindResponse, func() any { return &protocol.Empty{} }, `{}`},
 	{protocol.MethodDirsRecent, "dirs.recent", protocol.KindRequest, func() any { return &protocol.Empty{} }, `{}`},
 	{protocol.MethodDirsRecent, "dirs.recent", protocol.KindResponse, func() any { return &protocol.DirsRecentResponse{} }, `{"dirs":["/p/x","/p/y"]}`},
 

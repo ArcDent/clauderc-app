@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"clauderc/internal/protocol"
 )
@@ -66,7 +67,7 @@ func TestWorkingScreen(t *testing.T) {
 	s.x.mu.Unlock()
 
 	m := s.mark()
-	msg := "请写一段约 400 字的中文短文，主题是终端模拟器怎样把字节流画成屏幕，直接输出正文，不要使用任何工具"
+	msg := "请写一篇至少 4000 字的中文长文，分 8 段，主题是终端模拟器怎样把字节流画成屏幕，直接输出正文，不要使用任何工具"
 	s.send(msg)
 	at := s.waitUser(msg, m, 15*time.Second)
 
@@ -80,14 +81,21 @@ func TestWorkingScreen(t *testing.T) {
 	// stale counts the samples in a row at which the chat still passed on a
 	// partial reply the transcript already had.
 	stale, maxStale := 0, 0
+	beforeWrite := firstEvent
 	for time.Since(start) < 3*time.Minute {
 		var res protocol.ChatOpenResponse
 		s.x.must(t, protocol.MethodChatOpen, protocol.ChatOpenRequest{SessionID: s.id}, &res)
+		s.x.mu.Lock()
+		eventCount := len(s.x.events)
+		s.x.mu.Unlock()
 		written := false
 		for _, e := range s.entries()[at:] {
 			if e["type"] == "assistant" && text(e) != "" {
 				written = true
 			}
+		}
+		if !written {
+			beforeWrite = eventCount
 		}
 		if res.Partial != "" && written {
 			stale++
@@ -143,8 +151,9 @@ func TestWorkingScreen(t *testing.T) {
 	// The open chat passed the status line, and the reply being drawn, on
 	// to the phone.
 	var activities, partials []string
+	previous, growth := 0, 0
 	s.x.mu.Lock()
-	for _, e := range s.x.events[firstEvent:] {
+	for i, e := range s.x.events[firstEvent:] {
 		var ev protocol.ChatStateEvent
 		if e.Method != protocol.EventChatState || json.Unmarshal(e.Body, &ev) != nil || ev.SessionID != s.id {
 			continue
@@ -152,11 +161,24 @@ func TestWorkingScreen(t *testing.T) {
 		if ev.Activity != "" {
 			activities = append(activities, ev.Activity)
 		}
-		if ev.Partial != "" {
-			partials = append(partials, fmt.Sprintf("%d 字", len([]rune(ev.Partial))))
+		n := utf8.RuneCountInString(ev.Partial)
+		if n != 0 {
+			partials = append(partials, fmt.Sprintf("%d 字", n))
+		}
+		if firstEvent+i < beforeWrite && ev.State == protocol.StateWorking {
+			if n*2 < previous {
+				t.Errorf("同一轮的半截回复从 %d 字回落到 %d 字，不足上次的一半", previous, n)
+			}
+			if previous > 0 && n > previous {
+				growth++
+			}
+			previous = n
 		}
 	}
 	s.x.mu.Unlock()
+	if growth < 2 {
+		t.Errorf("回复写进记录前，chat.state 里的半截回复只增长 %d 次，至少要增长两次", growth)
+	}
 	if len(activities) == 0 {
 		t.Errorf("干活期间没收到带 activity 的 chat.state")
 	}
@@ -177,4 +199,14 @@ func TestWorkingScreen(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("画面存在 %s", out)
+
+	waitFor(t, 30*time.Second, "长回复后的会话空闲", func() bool {
+		return s.state() == protocol.StateIdle
+	})
+	const followup = "只回复 OK"
+	m = s.mark()
+	if _, err := s.x.call(t, protocol.MethodChatSend, protocol.ChatSendRequest{SessionID: s.id, Text: followup}); err != nil {
+		t.Fatalf("长回复后发送短消息失败：%v", err)
+	}
+	s.waitUser(followup, m, 15*time.Second)
 }

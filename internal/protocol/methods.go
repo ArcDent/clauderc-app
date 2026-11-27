@@ -47,6 +47,7 @@ const (
 	MethodSessionCreate Method = "session.create"
 	MethodSessionStop   Method = "session.stop"
 	MethodSessionRemove Method = "session.remove"
+	MethodProfileForget Method = "profile.forget"
 	MethodDirsRecent    Method = "dirs.recent"
 )
 
